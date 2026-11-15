@@ -1,4 +1,4 @@
-"""Guest Sessions in the Topics list (ADR 0018, ADR 0079): Make a Guest, Bench, New Topic from a Guest Session and Kill.
+"""Guest Sessions in the Topics list (ADR 0018, ADR 0081): Make a Guest, Bench, New Topic from a Guest Session and Kill.
 
 A Guest Session is a No Topic Session with a Lock, the tmux option @muxify_lock. The Session card header in
 UI/SidebarView.swift gives "Make a Guest" as an accessibility action, and the card of a Guest Session gives "Bench" and
@@ -34,9 +34,9 @@ class TopicsLocksSidebar(TopicsSidebar):
 
     def test_make_a_guest_gives_a_card_under_the_in_play_places_and_sets_the_session_option(self):
         s = self.s
-        self.write_topic('guest-first', 'Guest first', self.beta, order=0)
-        self.write_topic('guest-last', 'Guest last', self.beta, order=1)
-        self.write_topic('guest-pinned', 'Guest pinned', self.beta, order=0, pinned=True)
+        self.write_topic('guest-first', 'Guest first', order=0)
+        self.write_topic('guest-last', 'Guest last', order=1)
+        self.write_topic('guest-pinned', 'Guest pinned', order=0, pinned=True)
         sid = self.new_session('guest-notes', self.beta)
         self.select_window(sid + ':')
         card = 'no-topic-session-' + sid
@@ -70,8 +70,8 @@ class TopicsLocksSidebar(TopicsSidebar):
 
     def test_a_lock_that_an_older_muxify_kept_among_the_topics_goes_to_the_guests(self):
         s = self.s
-        self.write_topic('gather-upper', 'Gather upper', self.beta, order=0)
-        self.write_topic('gather-lower', 'Gather lower', self.beta, order=2)
+        self.write_topic('gather-upper', 'Gather upper', order=0)
+        self.write_topic('gather-lower', 'Gather lower', order=2)
         sid, key = self.guest_session('gather-notes', 1)
         s.wait_rows(lambda rs: self.above('topic-gather-lower', key, rs) and self.above('topics-guests-line', key, rs),
                     'the Guest Session is not under the Guests line')
@@ -84,8 +84,8 @@ class TopicsLocksSidebar(TopicsSidebar):
 
     def test_new_topic_from_a_guest_session_takes_its_place_and_its_guest_mark_and_removes_the_option(self):
         s = self.s
-        self.write_topic('take-upper', 'Take upper', self.beta, order=0)
-        self.write_topic('take-lower', 'Take lower', self.beta, order=1)
+        self.write_topic('take-upper', 'Take upper', order=0)
+        self.write_topic('take-lower', 'Take lower', order=1)
         sid, key = self.guest_session('take-notes', 5)
         s.wait_rows(lambda rs: self.above('topic-take-lower', key, rs), 'the Guest Session is not under the two Topics')
         before = set(self.records())

@@ -19,7 +19,7 @@ class TopicsSessionOrderSidebar(TopicsSidebar):
     def two_session_topic(self, topic):
         """A Topic with a beta Session and, created a later second, an alpha Session; returns their Session IDs.
         tmux lists Sessions by name, so alpha comes first in tmux and last by creation."""
-        self.write_topic(topic, topic.capitalize(), self.beta)
+        self.write_topic(topic, topic.capitalize())
         older = self.new_session('beta/' + topic, self.beta, topic=topic)
         # #{session_created} counts whole seconds.
         time.sleep(1.1)

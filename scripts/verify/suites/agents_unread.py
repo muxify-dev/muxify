@@ -53,7 +53,7 @@ class AgentsUnread(TopicsSidebar):
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), action + ' did not close the palette')
 
     def test_navigation_keeps_unread_and_command_reads_only_its_window_in_sessions_mode(self):
-        self.write_topic('manual-topic', 'Manual topic', self.beta)
+        self.write_topic('manual-topic', 'Manual topic')
         _, first, one = self.agent_session('manual-one', topic='manual-topic', status='done', unread=True)
         _, _, two = self.agent_session('manual-two', topic='manual-topic', status='failed', unread=True)
         _, _, other = self.agent_session('manual-other', status='done', unread=True)
@@ -99,7 +99,7 @@ class AgentsUnread(TopicsSidebar):
         self.assertTrue(self.unread(one))
 
     def test_row_targets_clear_only_their_agents_and_keep_the_blocked_mark(self):
-        self.write_topic('manual-rows', 'Manual rows', self.beta)
+        self.write_topic('manual-rows', 'Manual rows')
         _, window, one = self.agent_session('manual-row-one', topic='manual-rows', status='blocked', unread=True)
         _, _, other = self.agent_session('manual-row-other', topic='manual-rows', status='done', unread=True)
         self.select_window(window)
@@ -135,7 +135,7 @@ class AgentsUnread(TopicsSidebar):
 
     def test_disabling_manual_read_reads_only_the_visited_window(self):
         self.configure(manual_read=False)
-        self.write_topic('automatic-topic', 'Automatic topic', self.beta)
+        self.write_topic('automatic-topic', 'Automatic topic')
         _, _, one = self.agent_session('automatic-one', topic='automatic-topic', status='done', unread=True)
         _, _, two = self.agent_session('automatic-two', topic='automatic-topic', status='failed', unread=True)
         self.find('topic-automatic-topic')
@@ -149,7 +149,7 @@ class AgentsUnread(TopicsSidebar):
         self.assertEqual([self.unread(pane) for pane in panes], [True] * len(panes))
 
     def test_mark_unread_command_uses_window_and_all_read_clears_environment(self):
-        self.write_topic('unread-topic', 'Unread topic', self.beta)
+        self.write_topic('unread-topic', 'Unread topic')
         _, first, one = self.agent_session('unread-one', topic='unread-topic', status='done')
         _, _, two = self.agent_session('unread-two', topic='unread-topic', status='failed')
         _, _, working = self.agent_session('unread-working', topic='unread-topic', status='working')
@@ -171,7 +171,7 @@ class AgentsUnread(TopicsSidebar):
         self.assert_read(one, two, other)
 
     def test_unread_row_targets_only_the_selected_agents(self):
-        self.write_topic('unread-rows', 'Unread rows', self.beta)
+        self.write_topic('unread-rows', 'Unread rows')
         _, window, one = self.agent_session('unread-row-one', topic='unread-rows', status='blocked')
         _, _, other = self.agent_session('unread-row-other', topic='unread-rows', status='done')
         self.mark_row('claude', 'palette-row-agent:' + one, action='Mark Unread')

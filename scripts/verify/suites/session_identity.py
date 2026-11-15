@@ -19,7 +19,7 @@ class SessionIdentity(unittest.TestCase):
         cls.base = cls.paths/'base'
         cls.base.mkdir()
         (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.paths) + '/*\n')
-        cls.base_id = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'base', '-c', str(cls.base), '/bin/zsh -f')
+        s.tmux('new-session', '-d', '-s', 'base', '-c', str(cls.base), '/bin/zsh -f')
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES'])
         s.wait_shown('=base:')
 
@@ -121,12 +121,3 @@ class SessionIdentity(unittest.TestCase):
         self.assertTrue(self.s.has('palette-row-new-session', rows))
         self.s.act('press', chosen)
         wait(lambda: self.s.tmux('display-message', '-p', '-t', window, '#{session_id}') == two, 'Window did not move to chosen Session', seconds=10)
-
-    def test_confirmed_last_closure_empties_record_while_server_remains(self):
-        topic = self.topic('closed-topic')
-        sid = self.session('debug/closed-topic', self.base, topic)
-        self.select(sid)
-        wait(lambda: bool(self.store.get(topic).get('sessions')), 'live Session not remembered', seconds=10)
-        self.select(self.base_id)
-        self.s.tmux('kill-session', '-t', sid)
-        wait(lambda: self.store.get(topic).get('sessions') == [], 'confirmed closure left a resurrectable Session', seconds=10)

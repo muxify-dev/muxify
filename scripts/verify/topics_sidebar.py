@@ -47,7 +47,7 @@ class TopicsSidebar(unittest.TestCase):
         cls.acme = s.root/'projects/acme'
         bin_dir = s.root/'bin'
         zdot_dir = s.root/'zdot'
-        for directory in [cls.alpha, cls.beta, s.root/'codex-home', bin_dir, zdot_dir]:
+        for directory in [cls.alpha, cls.beta, bin_dir, zdot_dir]:
             directory.mkdir(parents=True, exist_ok=True)
         (zdot_dir/'.zprofile').write_text('export PATH=' + str(bin_dir) + ':/usr/bin:/bin:/usr/sbin:/sbin\n')
         s.app_env['ZDOTDIR'] = str(zdot_dir)
@@ -117,7 +117,7 @@ class TopicsSidebar(unittest.TestCase):
             self.s.show(self.s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}'))
         self.s.tmux_ok('kill-session', '-t', sid)
 
-    def write_topic(self, topic_id, title, home, **fields):
+    def write_topic(self, topic_id, title, **fields):
         # As a script that changes the records: one transaction that writes only the rows it names.
         self.addCleanup(self.store.remove, topic_id)
         self.store.put(dict(id=topic_id, title=title, slug=topic_id, **fields))
@@ -315,12 +315,3 @@ class TopicsSidebar(unittest.TestCase):
         if self.expanded(key, rs):
             self.s.act('press', key)
         self.s.wait_rows(lambda rs: not self.expanded(key, rs), key + ' did not collapse')
-
-    def remove_topics(self, prefix):
-        """Deletes the Topic records with the prefix and waits until their rows are gone, so later checks find their rows in view."""
-        with self.store.held():
-            for topic_id in self.store.ids():
-                if topic_id.startswith(prefix):
-                    self.store.remove(topic_id)
-        self.s.wait_rows(lambda rs: not any(key.startswith('topic-' + prefix) for key in self.s.ids(rs)),
-                         'rows of the removed %s* Topics are still shown' % prefix)

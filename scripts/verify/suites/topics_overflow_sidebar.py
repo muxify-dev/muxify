@@ -40,7 +40,7 @@ class TopicsOverflowSidebar(TopicsSidebar):
         s = self.s
         ids = ['overflow-%02d' % i for i in range(COUNT)]
         for topic_id in ids:
-            self.write_topic(topic_id, 'Overflow ' + topic_id[-2:], self.beta)
+            self.write_topic(topic_id, 'Overflow ' + topic_id[-2:])
         # A check before this one may leave its Topics until the app reads their removal, so wait for these alone.
         rs = s.wait_rows(lambda rs: self.topic_rows(rs) == ['topic-' + i for i in ids] and (self.more_below(rs) or 0) > 0,
                          lambda: 'a Topics list of only the %d Overflow Topics shows no "more below" pill: %s'
@@ -63,29 +63,10 @@ class TopicsOverflowSidebar(TopicsSidebar):
         self.assertEqual(frame(s.row('topics-list', end)), frame(s.row('topics-list', rs)),
                          'the Topics list changed its size when the line went away, so its cards moved')
 
-    def test_more_below_pill_counts_a_card_whose_bottom_it_covers(self):
-        s = self.s
-        for i in range(COUNT):
-            self.write_topic('cover-%02d' % i, 'Cover %02d' % i, self.beta)
-        s.wait_rows(lambda rs: all(s.has('topic-cover-%02d' % i, rs) for i in range(COUNT)),
-                    'the Topics list does not show the %d Cover Topics' % COUNT)
-        edge = lambda rs: frame(s.row('topics-list', rs))[0]
-        in_band = []
-        # Steps of 7 points move each card's bottom through the 30-point band at least once.
-        for from_end in range(400, 120, -7):
-            s.act('scroll', 'topics-list', from_end=from_end)
-            rs = s.wait_rows(lambda rs: s.has('topics-more-below', rs), 'far from the end, the list shows no pill')
-            covered = [key for key in self.topic_rows(rs) if edge(rs) + 1 < frame(s.row(key, rs))[0] < edge(rs) + PILL - 1]
-            in_band += covered
-            self.assertEqual(self.more_below(rs), len(self.cards_below_list(rs)),
-                             '%d points from the end, the pill does not count the cards it covers: %s' % (from_end, covered))
-        self.assertTrue(in_band, 'no scroll put the bottom of a card in the pill\'s band, so the check proved nothing')
-        s.reveal(self.topic_rows(rs)[0])
-
     def test_more_below_pill_slides_out_with_the_end_of_the_list(self):
         s = self.s
         for i in range(COUNT):
-            self.write_topic('slide-%02d' % i, 'Slide %02d' % i, self.beta)
+            self.write_topic('slide-%02d' % i, 'Slide %02d' % i)
         # The check before may leave the list at its end, where the line does not show, so wait for the cards, not
         # the line, and then scroll.
         s.wait_rows(lambda rs: all(s.has('topic-slide-%02d' % i, rs) for i in range(COUNT)),

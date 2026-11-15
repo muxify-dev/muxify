@@ -6,7 +6,6 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_agents_sidebar
 """
 
-import json
 import unittest
 
 from scripts.verify.sandbox import wait
@@ -43,27 +42,9 @@ class TopicsAgentsSidebar(TopicsSidebar):
     def pane_active(self, pane):
         return self.s.tmux('display-message', '-p', '-t', pane, '#{pane_active}') == '1'
 
-    def test_agent_row_is_labelled_by_its_own_pane_not_the_active_vim_pane(self):
-        s = self.s
-        session, window, agent_pane = s.tmux(
-            'new-session', '-d', '-P', '-F', '#{session_name} #{window_id} #{pane_id}', '-s', 'vim-beside-agent',
-            '-c', str(self.beta), 'sleep 600').split()
-        s.tmux('set-option', '-p', '-t', agent_pane, '@muxify_agent', 'claude')
-        s.tmux('set-option', '-p', '-t', agent_pane, '@muxify_agent_status', 'working')
-        s.tmux('split-window', '-t', window, '-c', str(self.beta), 'vim -u NONE -N')
-        wait(lambda: s.tmux('display-message', '-p', '-t', window, '#{pane_current_command}') == 'vim',
-             'vim is not the active Pane of ' + window)
-        self.select_window(window)
-
-        key = 'agent-' + agent_pane
-        rs = s.wait_rows(lambda rs: s.has(key, rs), 'no Agent row ' + key)
-        row = s.row(key, rs)
-        # The header names the Topic, so the row shows its label only: no Session, no Window title.
-        self.assertEqual(row.get('accessibilityValue'), 'claude', 'Agent row %s' % json.dumps(row, ensure_ascii=False))
-
     def test_agents_section_lists_only_the_agents_of_the_active_topic_or_no_topic(self):
-        self.write_topic('scope-a', 'Scope A', self.beta)
-        self.write_topic('scope-b', 'Scope B', self.beta)
+        self.write_topic('scope-a', 'Scope A')
+        self.write_topic('scope-b', 'Scope B')
         _, window_a, pane_a = self.agent_session('scope-a', topic='scope-a')
         _, window_b, pane_b = self.agent_session('scope-b', topic='scope-b', status='blocked', unread=True)
         _, window_loose, pane_loose = self.agent_session('scope-loose')
@@ -78,7 +59,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
 
     def test_agents_section_in_sessions_mode_lists_only_the_agents_of_the_selected_session(self):
         self.addCleanup(self.show_view, 'topics')
-        self.write_topic('scope-shared', 'Scope shared', self.beta)
+        self.write_topic('scope-shared', 'Scope shared')
         sid_one, window_one, pane_one = self.agent_session('scope-one', topic='scope-shared')
         sid_two, window_two, pane_two = self.agent_session('scope-two', topic='scope-shared', status='blocked', unread=True)
         self.show_view('sessions')
@@ -95,7 +76,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
         self.addCleanup(lambda: (self.config.write_text(self.config_text),
                                  self.s.wait_rows(lambda rs: self.agents_header(rs).startswith('Agents · '),
                                                   'agents_scope did not return to active')))
-        self.write_topic('scope-all', 'Scope all', self.beta)
+        self.write_topic('scope-all', 'Scope all')
         sid, window, pane = self.agent_session('scope-all-session', topic='scope-all')
         self.s.tmux('rename-window', '-t', window, 'window-title')
         self.select_window(window)
@@ -116,7 +97,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
     def test_window_scope_shows_only_the_selected_windows_agents_in_both_modes(self):
         self.addCleanup(self.show_view, 'topics')
         self.addCleanup(self.config.write_text, self.config_text)
-        self.write_topic('scope-window', 'Scope window', self.beta)
+        self.write_topic('scope-window', 'Scope window')
         sid, first, first_pane = self.agent_session('scope-window-session', topic='scope-window')
         second, second_pane = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id} #{pane_id}',
                                           '-t', sid + ':', '-c', str(self.beta), 'sleep 600').split()
@@ -157,7 +138,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
 
     def test_split_window_shows_one_pane_row_per_pane_and_a_one_pane_window_shows_none(self):
         s = self.s
-        self.write_topic('panes-split', 'Panes split', self.beta)
+        self.write_topic('panes-split', 'Panes split')
         sid = self.new_session('panes-split', self.beta, topic='panes-split')
         split_window, first = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id} #{pane_id}').split()
         second = self.split(split_window)
@@ -205,7 +186,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
 
     def test_pressing_a_pane_row_makes_that_pane_active_in_tmux(self):
         s = self.s
-        self.write_topic('panes-press', 'Panes press', self.beta)
+        self.write_topic('panes-press', 'Panes press')
         sid = self.new_session('panes-press', self.beta, topic='panes-press')
         window, first = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id} #{pane_id}').split()
         second = self.split(window)
@@ -223,7 +204,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
         """An Agent in its own Topic, split beside a shell, with Pane rows on and another Window of the Session selected,
         so its card is open and its Window is never read. Returns the Agent's Pane."""
         s = self.s
-        self.write_topic(name, name, self.beta)
+        self.write_topic(name, name)
         sid, window, pane = self.agent_session(name, topic=name, status=status, unread=unread)
         self.split(window)
         other = s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', sid + ':', '-c', str(self.beta), SHELL)

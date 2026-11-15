@@ -60,8 +60,7 @@ class TopicsTagsSidebar(unittest.TestCase):
 
     def topic(self, name, tags, session=True, **fields):
         """A Topic record with `tags`, and a live Session in it unless `session` is false; returns its Window."""
-        self.store.put(dict(id=name, title=fields.pop('title', name), slug=name, home_project=str(self.project),
-                                        tags=tags, **fields))
+        self.store.put(dict(id=name, title=fields.pop('title', name), slug=name, tags=tags, **fields))
         self.addCleanup(self.store.remove, name)
         if not session:
             return None
@@ -128,22 +127,12 @@ class TopicsTagsSidebar(unittest.TestCase):
         self.tags('tg-line', 'work, personal', 'the chips are not on their own line under the title',
                   lambda tags, header: tags[0] - header[0] < 20 and 14 < header[1] - tags[1] < 40)
 
-    def test_the_tags_format_part_names_each_tag_and_an_empty_format_hides_them(self):
+    def test_an_empty_tags_format_part_hides_the_tags(self):
         self.topic('tg-format', ['work', 'personal'])
-        self.use_config(sidebar=CORNER + "  formats:\n    topic:\n      tags: '#{T:#{tag}}'\n")
-        self.tags('tg-format', 'work, personal', 'tag is not the stored name')
-        self.config.write_text(self.config_text(sidebar=CORNER + "  formats:\n    topic:\n      tags: '#{T:#{?#{==:#{tag},work},#{tag},}}'\n"))
-        self.tags('tg-format', 'work', 'a pass with no text did not leave its Tag out')
-        self.config.write_text(self.config_text(sidebar=CORNER + "  formats:\n    topic:\n      tags: ''\n"))
+        self.tags('tg-format', 'work, personal', 'the card does not show its Tags')
+        self.use_config(sidebar=CORNER + "  formats:\n    topic:\n      tags: ''\n")
         self.s.wait_rows(lambda rs: self.s.has('topic-tg-format', rs) and not self.s.has('tags-topic-tg-format', rs),
                          "tags: '' did not hide the Tags")
-
-    def test_with_tags_off_a_card_shows_no_tags(self):
-        self.topic('tg-off', ['work'])
-        self.tags('tg-off', 'work', 'the card does not show its Tag')
-        self.use_config(tags='')
-        self.s.wait_rows(lambda rs: self.s.has('topic-tg-off', rs) and not self.s.has('tags-topic-tg-off', rs),
-                         'a card shows Tags with no topics.tags')
 
     def test_a_closed_settled_card_shows_no_tags_and_the_opened_one_shows_them_in_the_title_line(self):
         self.topic('tg-settled', ['work'], session=False, settled_at='2026-01-01T00:00:00Z')

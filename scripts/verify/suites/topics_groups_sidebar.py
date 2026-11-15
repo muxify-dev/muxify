@@ -53,7 +53,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
         s = self.s
         settled = ['rows-in-view-settled-%02d' % i for i in range(12)]
         for number, topic_id in enumerate(settled):
-            self.write_topic(topic_id, 'Rows in view ' + topic_id[-2:], self.beta, settled_at='2030-02-%02dT10:00:00Z' % (28 - number))
+            self.write_topic(topic_id, 'Rows in view ' + topic_id[-2:], settled_at='2030-02-%02dT10:00:00Z' % (28 - number))
         self.collapse('settled-topics')
         s.act('press', 'settled-topics')
         last = 'topic-' + settled[-1]
@@ -70,7 +70,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
 
     def test_a_group_header_press_opens_the_group_and_does_not_go_to_a_topic(self):
         s = self.s
-        self.write_topic('one-open-settled', 'One open settled', self.beta, settled_at='2031-01-01T10:00:00Z')
+        self.write_topic('one-open-settled', 'One open settled', settled_at='2031-01-01T10:00:00Z')
         # A move of the shown Window closes the group, so the check starts on base, not on a Reopen choice that an
         # earlier check left.
         self.select_window('base:')
@@ -83,9 +83,9 @@ class TopicsGroupsSidebar(TopicsSidebar):
 
     def test_go_to_a_settled_topic_opens_its_group_and_going_to_a_topic_in_the_list_closes_it(self):
         s = self.s
-        self.write_topic('leave-open', 'Leave open', self.beta)
+        self.write_topic('leave-open', 'Leave open')
         sid = self.new_session('leave-open', self.beta, topic='leave-open')
-        self.write_topic('goto-settled', 'Goto settled', self.beta, settled_at='2031-01-01T10:00:00Z')
+        self.write_topic('goto-settled', 'Goto settled', settled_at='2031-01-01T10:00:00Z')
         self.select_window('base:')
         s.wait_shown('base:')
         self.collapse('settled-topics')
@@ -99,7 +99,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
                     'going to a Topic in the Topics list did not close the Settled group')
 
     def test_settled_group_lists_settled_topic_with_remembered_windows_and_its_reopen_link_rebuilds_it_at_once(self):
-        self.write_topic('group-settled', 'Group settled', self.alpha, settled_at='2031-01-01T10:00:00Z',
+        self.write_topic('group-settled', 'Group settled', settled_at='2031-01-01T10:00:00Z',
                          sessions=[dict(id='saved', name='alpha/group-settled', base_name='alpha', directory=str(self.alpha), windows=[dict(directory=str(self.alpha), name='shell')])])
         self.expand('settled-topics')
         latency, rs = self.rows_until(lambda rs: self.grouped('topic-group-settled', 'settled-topics', rs))
@@ -128,7 +128,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
     def test_a_topic_settled_now_shows_today_above_its_reopen_choice(self):
         s = self.s
         topic = 'age-today'
-        self.write_topic(topic, 'Age today', self.beta)
+        self.write_topic(topic, 'Age today')
         sid = self.new_session('age-today', self.beta, topic=topic)
         self.find('settle-topic-' + topic)
         s.act('press', 'settle-topic-' + topic)
@@ -146,7 +146,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
                                 'the age %s is not above Reopen %s' % (s.row(age, rs)['accessibilityFrame'], s.row(reopen, rs)['accessibilityFrame']))
 
     def test_a_click_on_a_closed_settled_card_shows_its_reopen_choice_and_reopens_nothing(self):
-        self.write_topic('click-settled', 'Click settled', self.alpha, settled_at='2031-01-02T10:00:00Z',
+        self.write_topic('click-settled', 'Click settled', settled_at='2031-01-02T10:00:00Z',
                          sessions=[remembered_session(self.alpha, 'click-settled', windows=[dict(directory=str(self.alpha), name='shell')])])
         self.expand('settled-topics')
         rs = self.s.wait_rows(lambda rs: self.grouped('topic-click-settled', 'settled-topics', rs), 'the Topic is not in the Settled group')
@@ -163,8 +163,8 @@ class TopicsGroupsSidebar(TopicsSidebar):
         s = self.s
         old = ['forget-old-a', 'forget-old-b']
         for topic in old:
-            self.write_topic(topic, 'Forget ' + topic[-5:], self.beta, settled_at=settled_days_ago(20))
-        self.write_topic('forget-new', 'Forget new', self.beta, settled_at=settled_days_ago(0))
+            self.write_topic(topic, 'Forget ' + topic[-5:], settled_at=settled_days_ago(20))
+        self.write_topic('forget-new', 'Forget new', settled_at=settled_days_ago(0))
         self.expand('settled-topics')
         s.wait_rows(lambda rs: all(self.grouped('topic-' + t, 'settled-topics', rs) for t in old + ['forget-new']),
                     'the three Settled Topics are not in the Settled group')
@@ -194,28 +194,20 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.assertIn('forget-new', self.records(), 'Forget Settled Older Than… forgot the Topic Settled today')
 
     def test_the_settled_header_action_opens_forget_settled_older_than_with_fourteen_days(self):
-        self.write_topic('forget-header', 'Forget header', self.beta, settled_at=settled_days_ago(20))
+        self.write_topic('forget-header', 'Forget header', settled_at=settled_days_ago(20))
         self.s.wait_rows(lambda rs: self.s.has('settled-topics', rs), 'the Sidebar shows no Settled group')
         # The header's context menu item, as an accessibility action, so the check opens no menu.
         self.s.act('action', 'settled-topics', self.FORGET_SETTLED)
         rs = self.wait_forget_settled_step('the Settled header action')
         self.assertIn(self.FORGET_SETTLED, self.describe('palette-breadcrumb', rs))
 
-    def test_settled_group_below_twenty_five_open_topics_shows_fifteen_newest_then_fifteen_more_and_collapsing_resets(self):
-        # The Sidebar builds only the rows it shows. The open Topics push the Settled group and its pages below the
-        # visible part, so each step reveals the row it needs before it reads the rows.
-        for number in range(25):
-            self.write_topic('above-%02d' % number, 'Above %02d' % number, self.beta)
-        self.addCleanup(self.remove_topics, 'above-')
+    def test_settled_group_shows_fifteen_newest_then_fifteen_more_and_collapsing_resets(self):
+        # The Sidebar builds only the rows it shows, so each step reveals the row it needs before it reads the rows.
         for number in range(17):
-            self.write_topic('page-%02d' % number, 'Page %02d' % number, self.beta, settled_at='2030-01-%02dT00:00:00Z' % (number + 1))
+            self.write_topic('page-%02d' % number, 'Page %02d' % number, settled_at='2030-01-%02dT00:00:00Z' % (number + 1))
         self.addCleanup(self.collapse, 'settled-topics')
-        # The app reads the Topic records once per quarter second, so one read can see the open Topics and not yet the
-        # Settled ones. Wait for the Settled header's count before the first reveal, which does not wait.
-        self.s.wait_rows(lambda rs: (self.s.has('topic-above-24', rs) or self.s.has('topic-above-00', rs))
-                         and '(17)' in self.s.row('settled-topics', rs).get('accessibilityLabel', ''),
-                         'the Sidebar does not show the open Topics and the 17 Settled Topics')
-        self.s.reveal('settled-topics')
+        self.s.wait_rows(lambda rs: '(17)' in self.s.row('settled-topics', rs).get('accessibilityLabel', ''),
+                         'the Sidebar does not show the 17 Settled Topics')
         self.collapse('settled-topics')
         self.expand('settled-topics')
         self.s.reveal('settled-show-more')

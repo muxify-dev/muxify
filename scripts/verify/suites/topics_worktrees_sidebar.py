@@ -46,7 +46,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
             for path in [tree, dirty]:
                 subprocess.run(['/usr/bin/git', '-C', str(self.alpha), 'worktree', 'add', '-q', str(path), '-b', path.name], check=True)
             (dirty/'draft').write_text('untracked work')
-            self.write_topic(topic, topic, self.alpha, sessions=[
+            self.write_topic(topic, topic, sessions=[
                 remembered_session(path, topic, base='alpha' if path == tree else 'dirty',
                                    repository_path=str(self.alpha), worktree_path=str(path), branch=path.name, worktree_created=True)
                 for path in [tree, dirty]
@@ -143,7 +143,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
 
     def test_worktree_of_another_open_topic_says_also_in_it_and_can_be_picked(self):
         s = self.s
-        self.write_topic('shared-owner', 'Shared owner', self.gamma, created_at='2026-10-07T00:00:00Z', order=0)
+        self.write_topic('shared-owner', 'Shared owner', created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('gamma/shared-owner', self.gamma/'main', topic='shared-owner')
         s.wait_rows(lambda rs: s.has('topic-shared-owner', rs), 'no row for Topic shared-owner')
         record = self.create_topic('Shared picker')
@@ -229,7 +229,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
 
     def test_live_session_of_an_older_topic_in_the_project_folder_shows_on_the_main_checkout(self):
         s = self.s
-        self.write_topic('legacy-owner', 'Legacy owner', self.delta, created_at='2026-10-07T00:00:00Z', order=0)
+        self.write_topic('legacy-owner', 'Legacy owner', created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('delta/legacy-owner', self.delta, topic='legacy-owner')
         s.wait_rows(lambda rs: s.has('topic-legacy-owner', rs), 'no row for Topic legacy-owner')
         self.create_topic('Legacy picker')
@@ -240,7 +240,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
 
     def test_add_session_with_new_worktree_opens_the_session_in_a_worktree_from_the_picked_base(self):
         s = self.s
-        self.write_topic('add-worktree', 'Add worktree proof', self.beta, created_at='2026-10-07T00:00:00Z', order=0)
+        self.write_topic('add-worktree', 'Add worktree proof', created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('beta/add-worktree', self.beta, topic='add-worktree')
         s.wait_rows(lambda rs: s.has('topic-add-worktree', rs), 'no row for Topic add-worktree')
         self.addCleanup(lambda: s.has('palette-accept') and s.act('press', 'palette-cancel'))
@@ -270,7 +270,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
 
     def test_add_session_opens_with_new_worktree_off_after_a_project_added_with_it(self):
         s = self.s
-        self.write_topic('add-reset', 'Add reset proof', self.beta, created_at='2026-10-07T00:00:00Z', order=0)
+        self.write_topic('add-reset', 'Add reset proof', created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('beta/add-reset', self.beta, topic='add-reset')
         s.wait_rows(lambda rs: s.has('topic-add-reset', rs), 'no row for Topic add-reset')
         self.addCleanup(lambda: s.has('palette-accept') and s.act('press', 'palette-cancel'))
@@ -294,7 +294,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
 
     def test_existing_branch_allocates_a_new_worktree_name_without_changing_the_topic_slug(self):
         s = self.s
-        self.write_topic('add-clash', 'Add clash proof', self.beta, created_at='2026-10-07T00:00:00Z', order=0)
+        self.write_topic('add-clash', 'Add clash proof', created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('beta/add-clash', self.beta, topic='add-clash')
         s.wait_rows(lambda rs: s.has('topic-add-clash', rs), 'no row for Topic add-clash')
         subprocess.run(['/usr/bin/git', '-C', str(self.acme), 'branch', 'add-clash', 'main'], check=True)

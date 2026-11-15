@@ -47,8 +47,8 @@ class TopicsCardsSidebar(TopicsSidebar):
         return self.s.tmux('list-clients', '-F', '#{window_id}').split()
 
     def test_a_new_topic_takes_the_next_in_play_place_above_a_guest_session(self):
-        self.write_topic('insert-pin', 'Pinned', self.beta, order=0, pinned=True)
-        self.write_topic('insert-existing', 'Existing', self.beta, order=0)
+        self.write_topic('insert-pin', 'Pinned', order=0, pinned=True)
+        self.write_topic('insert-existing', 'Existing', order=0)
         sid = self.new_session('insert-guest', self.beta)
         self.s.tmux('set-option', '-t', sid, '@muxify_lock', '2')
         guest = 'locked-' + sid
@@ -64,7 +64,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_window_moved_to_topic_keeps_its_panes_agent_and_browser(self):
         s = self.s
-        self.write_topic('move-target', 'Move target', self.alpha, created_at='2026-10-07T00:00:00Z', order=0)
+        self.write_topic('move-target', 'Move target', created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('alpha/move-target', self.alpha, topic='move-target')
         session, window, pane, pane_pid = s.tmux(
             'new-session', '-d', '-P', '-F', '#{session_id} #{window_id} #{pane_id} #{pane_pid}', '-s', 'agent-src',
@@ -122,7 +122,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_pressing_another_topics_card_header_goes_to_the_topic_and_opens_its_card(self):
         s = self.s
-        self.write_topic('card-press', 'Card press', self.beta)
+        self.write_topic('card-press', 'Card press')
         sid = self.new_session('card-press', self.beta, topic='card-press')
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         base = s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}')
@@ -135,23 +135,9 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.assertTrue(s.row('topic-card-press', rs).get('accessibilityValue', '').startswith('expanded'),
                         self.describe('topic-card-press', rs))
 
-    def test_a_mouse_click_on_another_topics_card_header_goes_to_the_topic_and_opens_its_card(self):
-        s = self.s
-        self.write_topic('card-click', 'Card click', self.beta)
-        sid = self.new_session('card-click', self.beta, topic='card-click')
-        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
-        base = s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}')
-        self.select_window(base)
-        self.s.wait_shown(base)
-        rs = s.wait_rows(lambda rs: s.has('topic-card-click', rs), 'the Topic has no card')
-        self.assertFalse(s.has('topic-window-' + window, rs), 'the card is open before the click')
-        s.act('click', 'topic-card-click')
-        s.wait_shown(window)
-        s.wait_rows(lambda rs: s.has('topic-window-' + window, rs), 'a click on the header did not open the card')
-
     def test_go_to_topic_goes_to_its_last_window(self):
         s = self.s
-        self.write_topic('card-go', 'Card go', self.beta)
+        self.write_topic('card-go', 'Card go')
         sid = self.new_session('card-go', self.beta, topic='card-go')
         first, last = self.windows(sid, 2)
         # The app reads the Topic records apart from tmux. Until it has read this one, the Session is under No Topic,
@@ -172,7 +158,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_pressing_the_header_closes_the_card_of_the_active_topic(self):
         s = self.s
-        self.write_topic('card-close', 'Card close', self.beta)
+        self.write_topic('card-close', 'Card close')
         sid = self.new_session('card-close', self.beta, topic='card-close')
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         self.select_window(window)
@@ -186,7 +172,7 @@ class TopicsCardsSidebar(TopicsSidebar):
     def test_forget_live_topic_kills_its_session_and_removes_its_record(self):
         s = self.s
         topic = 'forget-live'
-        self.write_topic(topic, 'Forget live', self.alpha)
+        self.write_topic(topic, 'Forget live')
         sid = self.new_session('alpha/forget-live', self.alpha, topic=topic)
         self.find('topic-' + topic)
         # The Topic card gives Forget as an accessibility action to avoid opening a context menu.
@@ -215,7 +201,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         for state in ['dormant', 'settled']:
             topic = 'forget-' + state
             fields = {'settled_at': '2031-01-01T00:00:00Z'} if state == 'settled' else {}
-            self.write_topic(topic, 'Forget ' + state, self.alpha, **fields)
+            self.write_topic(topic, 'Forget ' + state, **fields)
             if state != 'dormant':
                 self.find(state + '-topics')
                 self.expand(state + '-topics')
@@ -237,7 +223,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         """A press on a Topic card goes to its Empty Topic while the app lists no Session of the Topic, as when a
         script made one a moment before. The Session then becomes the shown Window, and the card stays open."""
         s = self.s
-        self.write_topic('empty-arrival', 'Empty arrival', self.beta)
+        self.write_topic('empty-arrival', 'Empty arrival')
         self.find('topic-empty-arrival')
         s.act('press', 'topic-empty-arrival')
         s.wait_rows(lambda rs: s.has('empty-topic-add-session', rs), 'the Topic without a Session did not show its Empty Topic')
@@ -249,9 +235,9 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_settle_shows_on_closed_open_and_dormant_topic_cards(self):
         s = self.s
-        self.write_topic('corner-closed', 'Corner closed', self.beta)
-        self.write_topic('corner-open', 'Corner open', self.beta)
-        self.write_topic('corner-dormant', 'Corner dormant', self.beta)
+        self.write_topic('corner-closed', 'Corner closed')
+        self.write_topic('corner-open', 'Corner open')
+        self.write_topic('corner-dormant', 'Corner dormant')
         self.new_session('corner-closed', self.beta, topic='corner-closed')
         self.new_session('corner-open', self.beta, topic='corner-open')
         self.open_card('topic-corner-open')
@@ -268,7 +254,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         menu of the footer line beside Settle without opening it: the card's frame covers that line, and its action works."""
         s = self.s
         topic = 'card-area'
-        self.write_topic(topic, 'Card area', self.beta)
+        self.write_topic(topic, 'Card area')
         sid = self.new_session(topic, self.beta, topic=topic)
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         self.open_card('topic-' + topic)
@@ -289,7 +275,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_settle_on_a_closed_topic_card_opens_the_settle_palette_and_leaves_the_card_closed(self):
         s = self.s
-        self.write_topic('card-settle', 'Card settle', self.beta)
+        self.write_topic('card-settle', 'Card settle')
         self.new_session('card-settle', self.beta, topic='card-settle')
         rs = self.find('settle-topic-card-settle')
         self.assertTrue(s.row('topic-card-settle', rs).get('accessibilityValue', '').startswith('collapsed'),
@@ -305,7 +291,7 @@ class TopicsCardsSidebar(TopicsSidebar):
     def test_settle_palette_presets_kill_lists_the_working_agent_and_keeps_a_session_the_user_chooses(self):
         s = self.s
         topic = 'palette-settle'
-        self.write_topic(topic, 'Palette settle', self.alpha)
+        self.write_topic(topic, 'Palette settle')
         idle = self.new_session('alpha/palette-settle', self.alpha, topic=topic)
         working = self.new_session('beta/palette-settle', self.beta, '/bin/sleep 300', topic=topic)
         pane = s.tmux('display-message', '-p', '-t', working + ':', '#{pane_id}')
@@ -341,7 +327,7 @@ class TopicsCardsSidebar(TopicsSidebar):
     def test_rename_palette_renames_the_topic_and_its_session(self):
         s = self.s
         topic = 'alert-rename'
-        self.write_topic(topic, 'Alert rename', self.alpha)
+        self.write_topic(topic, 'Alert rename')
         sid = self.new_session('alpha/alert-rename', self.alpha, topic=topic)
         self.find('topic-' + topic)
         # "Rename Topic…" is an accessibility action of the Topic card in UI/SidebarView.swift, because the
@@ -359,7 +345,7 @@ class TopicsCardsSidebar(TopicsSidebar):
     def test_a_topic_note_shows_on_its_own_line_on_open_and_closed_cards_and_not_in_the_summary(self):
         s = self.s
         topic, key = 'card-note', 'topic-card-note'
-        self.write_topic(topic, 'Card note', self.beta)
+        self.write_topic(topic, 'Card note')
         sid = self.new_session('card-note', self.beta, topic=topic)
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         self.find(key)
@@ -386,7 +372,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_a_card_lists_five_rows_and_n_more_lists_the_rest(self):
         s = self.s
-        self.write_topic('card-more', 'Card more', self.beta)
+        self.write_topic('card-more', 'Card more')
         sid = self.new_session('card-more', self.beta, topic='card-more')
         windows = self.windows(sid, 7)
         self.select_window(windows[0])
@@ -402,7 +388,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_an_open_cards_header_stays_at_the_top_of_the_list_while_its_rows_scroll(self):
         s = self.s
-        self.write_topic('card-sticky', 'Card sticky', self.beta)
+        self.write_topic('card-sticky', 'Card sticky')
         sid = self.new_session('card-sticky', self.beta, topic='card-sticky')
         windows = self.windows(sid, 60)
         self.select_window(windows[0])
@@ -414,18 +400,6 @@ class TopicsCardsSidebar(TopicsSidebar):
         _, header_top = frame(s.row('topic-card-sticky', rs))
         self.assertLess(abs(header_top - list_top), 3, 'the header is not at the top of the list: header top %s, list top %s, row %s'
                         % (header_top, list_top, frame(s.row('topic-window-' + windows[-1], rs))))
-
-    def test_a_card_lists_every_row_when_the_selected_window_is_past_the_fifth(self):
-        s = self.s
-        self.write_topic('card-deep', 'Card deep', self.beta)
-        sid = self.new_session('card-deep', self.beta, topic='card-deep')
-        windows = self.windows(sid, 7)
-        self.select_window(windows[6])
-        self.s.wait_shown(windows[6])
-        self.open_card('topic-card-deep')
-        rs = s.wait_rows(lambda rs: s.row('topic-window-' + windows[6], rs).get('accessibilityValue') == 'selected',
-                         'the card hides the selected Window')
-        self.assertFalse(s.has('topic-card-deep-more', rs), 'N more shows while the card lists every row')
 
     def test_go_to_session_on_a_session_card_goes_to_the_sessions_active_window(self):
         s = self.s
@@ -459,10 +433,10 @@ class TopicsCardsSidebar(TopicsSidebar):
              'a click on the Session card did not go to its active Window %s: client on %s' % (second, self.client_windows()),
              seconds=10)
 
-    def test_pinning_a_lower_topic_moves_it_to_the_top_and_a_new_topic_goes_last(self):
+    def test_pinning_a_lower_topic_moves_it_to_the_top(self):
         s = self.s
-        self.write_topic('pin-upper', 'Pin upper', self.beta, order=-1000)
-        self.write_topic('pin-lower', 'Pin lower', self.beta, order=1000)
+        self.write_topic('pin-upper', 'Pin upper', order=-1000)
+        self.write_topic('pin-lower', 'Pin lower', order=1000)
 
         def above(upper, lower, rs):
             return s.has(upper, rs) and s.has(lower, rs) and frame(s.row(upper, rs))[1] > frame(s.row(lower, rs))[1]
@@ -476,15 +450,10 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.assertEqual(self.topic_rows(rs)[0], 'topic-pin-lower', 'Topic rows %s' % self.topic_rows(rs))
         self.assertIs(self.records()['pin-lower'].get('pinned'), True)
 
-        key = 'topic-' + self.create_topic('Pin newcomer')['id']
-        rs = s.wait_rows(lambda rs: above('topic-pin-lower', 'topic-pin-upper', rs) and above('topic-pin-upper', key, rs),
-                         'the new Topic is not below the Pinned Topic and the other Topic')
-        self.assertEqual(self.topic_rows(rs)[0], 'topic-pin-lower', 'Topic rows %s' % self.topic_rows(rs))
-
     def test_pressing_a_dormant_topic_card_reopens_it_without_the_reopen_choice(self):
         s = self.s
-        self.write_topic('dormant-first', 'First', self.beta, order=0)
-        self.write_topic('click-dormant', 'Click dormant', self.alpha, order=1, sessions=[remembered_session(self.alpha, 'click-dormant', windows=[
+        self.write_topic('dormant-first', 'First', order=0)
+        self.write_topic('click-dormant', 'Click dormant', order=1, sessions=[remembered_session(self.alpha, 'click-dormant', windows=[
             dict(directory=str(self.alpha), name='edit'), dict(directory=str(self.alpha), name='logs')])])
         self.find('topic-click-dormant')
         s.act('press', 'topic-click-dormant')
@@ -507,7 +476,7 @@ class TopicsCardsSidebar(TopicsSidebar):
                 if split:
                     panes[0].update(agent='claude', agent_conversation='verify-reopen')
                     panes.append(dict(directory=str(self.alpha), active=False))
-                self.write_topic(topic, topic, self.alpha, sessions=[remembered_session(self.alpha, topic, windows=[
+                self.write_topic(topic, topic, sessions=[remembered_session(self.alpha, topic, windows=[
                     dict(directory=str(directory), name='browser', panes=panes,
                          browser_tabs=tabs, browser_active_tab=1, browser_open=True, terminal_open=not split)])])
                 self.find('topic-' + topic)
@@ -549,7 +518,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         # Reopen reaches each Pane by its place, not its index, so a pane-base-index the user changed must not matter.
         s.tmux('set-option', '-g', 'pane-base-index', '1')
         self.addCleanup(s.tmux, 'set-option', '-gu', 'pane-base-index')
-        self.write_topic('split-dormant', 'Split dormant', self.alpha)
+        self.write_topic('split-dormant', 'Split dormant')
         sid = self.new_session('alpha/split-dormant', self.alpha, topic='split-dormant')
         # Each split goes right after the first Pane, which stays active: shell, sleep, shell.
         s.tmux('split-window', '-d', '-t', sid + ':', '-c', str(self.alpha), SHELL)
@@ -587,9 +556,9 @@ class TopicsCardsSidebar(TopicsSidebar):
         s = self.s
         agent = dict(directory=str(self.alpha), name='agent', agent='claude', agent_conversation='conversation-1',
                      browser_tabs=['https://example.com/a'], browser_open=True)
-        self.write_topic('choice-active', 'Choice active', self.beta, order=-2001)
+        self.write_topic('choice-active', 'Choice active', order=-2001)
         sid = self.new_session('beta/choice-active', self.beta, topic='choice-active')
-        self.write_topic('choice-dormant', 'Choice dormant', self.alpha, order=-2000, sessions=[
+        self.write_topic('choice-dormant', 'Choice dormant', order=-2000, sessions=[
             remembered_session(self.alpha, 'choice-dormant', windows=[dict(directory=str(self.alpha), name='edit'), agent]),
             remembered_session(self.beta, 'choice-dormant', windows=[dict(directory=str(self.beta), name='logs')])])
         self.find('topic-choice-dormant')

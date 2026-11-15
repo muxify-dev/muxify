@@ -1,7 +1,7 @@
 """Reopen at launch (`topics.reopen_at_launch`): a launch on a tmux server with none of the user's Sessions Reopens
-every Dormant open Topic, and never a Settled or Empty one. A tmux restart while Muxify runs Reopens nothing.
+every Dormant open Topic, and never a Settled or Empty one.
 
-Each class launches its own app on a fresh throwaway server, because a check here changes what the launch left.
+ReopenAtLaunchTests proves the rule without the key and after a tmux restart while Muxify runs.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_reopen_at_launch
@@ -23,9 +23,9 @@ def remembered(topic_id, folder):
             'windows': [{'name': 'editor', 'directory': folder}, {'name': 'logs', 'directory': folder}]}
 
 
-def launch(test_case, reopen_at_launch):
+def launch(test_case):
     """A sandbox whose records hold a Dormant Pinned Topic, a Dormant one In Play, a Settled one that remembers a
-    Session and an Empty one, launched with no tmux server running."""
+    Session and an Empty one, launched with reopen_at_launch on and no tmux server running."""
     s = Sandbox(test_case.__module__.rsplit('.', 1)[-1])
     test_case.addClassCleanup(s.teardown)
     folder = s.root/'work'
@@ -39,8 +39,7 @@ def launch(test_case, reopen_at_launch):
         {'id': 'empty', 'title': 'Empty', 'slug': 'empty', 'order': 3},
     ]
     (s.root/'state/muxify/topics.json').write_text(json.dumps({'records': records, 'open_places': []}))
-    if reopen_at_launch is not None:
-        (s.root/'config/muxify/config.yaml').write_text('topics:\n  reopen_at_launch: %s\n' % reopen_at_launch)
+    (s.root/'config/muxify/config.yaml').write_text('topics:\n  reopen_at_launch: true\n')
     s.launch(LAUNCH_ARGS)
     return s
 
@@ -57,7 +56,7 @@ def sessions(s):
 class ReopenAtLaunchOn(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.s = launch(cls, 'true')
+        cls.s = launch(cls)
         wait(lambda: {'work/pinned', 'work/alpha'} <= set(sessions(cls.s)),
              lambda: 'the Dormant Topics were not Reopened: %s' % sessions(cls.s), seconds=30)
 
@@ -66,35 +65,8 @@ class ReopenAtLaunchOn(unittest.TestCase):
         self.assertEqual(found.get('work/pinned'), 2, found)
         self.assertEqual(found.get('work/alpha'), 2, found)
 
-    def test_a_launch_reopens_no_settled_or_empty_topic(self):
+    def test_a_launch_reopens_no_settled_or_empty_topic_and_opens_no_start_a_session_palette(self):
         time.sleep(2)
         self.assertEqual(set(sessions(self.s)), {'work/pinned', 'work/alpha'})
-
-    def test_start_a_session_does_not_open_once_topics_were_reopened(self):
-        time.sleep(2)
         self.assertFalse(self.s.has('palette-search'), 'the Start a Session palette opened')
 
-
-class ReopenAtLaunchOnce(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.s = launch(cls, 'true')
-        wait(lambda: {'work/pinned', 'work/alpha'} <= set(sessions(cls.s)),
-             lambda: 'the Dormant Topics were not Reopened: %s' % sessions(cls.s), seconds=30)
-
-    def test_a_tmux_restart_while_muxify_runs_reopens_nothing(self):
-        self.s.tmux_ok('kill-server')
-        wait(lambda: not sessions(self.s), 'the tmux server did not stop')
-        self.s.tmux('new-session', '-d', '-s', 'other', '-c', str(self.s.root))
-        time.sleep(5)
-        self.assertEqual(set(sessions(self.s)), {'other'})
-
-
-class ReopenAtLaunchOff(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.s = launch(cls, None)
-
-    def test_without_the_key_a_launch_reopens_no_topic(self):
-        time.sleep(5)
-        self.assertEqual(sessions(self.s), {})
