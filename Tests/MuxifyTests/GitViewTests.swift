@@ -3067,6 +3067,30 @@ final class GitViewWatchingTests: XCTestCase {
         XCTAssertEqual(changes, seen, "a stopped watcher reported a change")
     }
 
+    /// The Git View read the repository before it subscribed, so a file written while the subscription's first probe
+    /// runs, which the first event's state already holds, must still come as a change after it.
+    func testTheLocalSubscriptionReportsAFileWrittenWhileItsProbeRuns() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-watch-" + UUID().uuidString)
+            .resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let git = Process()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.arguments = ["init", "-q", folder.path]
+        try git.run()
+        git.waitUntilExit()
+        XCTAssertEqual(git.terminationStatus, 0)
+        var events: [RepositoryEvent] = []
+        let watch = LocalRepositoryWatch(path: folder.path) { events.append($0) }
+        watch.start()
+        defer { watch.stop() }
+        // On the main thread before the probe's result can come back to it.
+        try "new\n".write(to: folder.appendingPathComponent("a.txt"), atomically: false, encoding: .utf8)
+        spin { events.contains(where: \.changed) }
+        XCTAssertEqual(events.first?.changed, false, "the first event is not the whole state: \(events)")
+        XCTAssertTrue(events.dropFirst().contains(where: \.changed), "the file written during the probe came as no change: \(events)")
+    }
+
     func testASuspendedOrClosedGitViewWatchesNothingAndIgnoresChanges() {
         let gitView = watchingGitView()
         let report = try? XCTUnwrap(watcher.report)

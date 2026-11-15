@@ -56,6 +56,8 @@ exec /bin/sh -c "$command"
         sandbox.app_env['MUXIFY_TEST_SSH'] = str(fake)
         # The install chain would update the old muxify from here; nothing answers, so no server mode comes.
         sandbox.app_env['MUXIFY_CLI_BASE_URL'] = 'http://127.0.0.1:9/'
+        # The Host's muxify on the PATH serves, or has no server mode: never the Debug app's own build/host-cli upload.
+        sandbox.debug_host_cli = False
         sandbox.tmux('new-session', '-d', '-s', 'attachments', '/bin/sh')
         sandbox.launch(args=('-selectedEnvironment', 'Fixture', '-sidebarVisible', 'YES'))
         cls.tty = wait(lambda: next((line.split('|')[1] for line in sandbox.tmux(

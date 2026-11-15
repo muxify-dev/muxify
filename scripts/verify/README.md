@@ -111,6 +111,8 @@ So allow the helper once: in System Settings > Privacy & Security > Accessibilit
 
 A `Sandbox` gives each run its own root, tmux server, Config, state and app copy. `Sandbox.tmux` always names the sandbox socket with `-S`, so it cannot reach the default tmux server. The app copy has a bundle id for that run only. The Debug-only `TestDriver` (`Sources/Muxify/App/TestDriver.swift`) refuses to start if `TMUX` is set or if `TMUX_TMPDIR` is outside the sandbox. Under the `TestDriver` the app starts its tmux server with `-f /dev/null`, so the user's tmux config and its hooks do not act on the sandbox server. `teardown` stops only the processes that the sandbox started, by PID: the app, its tmux clients, the tmux server and each process whose command line or environment names the sandbox directory.
 
+A Debug app serves a remote Host from its checkout's `build/host-cli/` whenever that build's `version` matches the app's sha (`DebugHostCLI`), so a fixture's own Host `muxify` would never run after `make host-cli`. A suite whose Host `muxify` must serve, or must fail to, sets `sandbox.debug_host_cli = False` before `launch`: the app copy then has no `MuxifySourceRoot`, as a Release app has none. Example: `remote_host_topics.py`.
+
 ## Clean-up of dead runs
 
 Each root has the file `owner.json`. It holds the PID and the start time of the process that owns the `Sandbox`. Before a new `Sandbox` makes its root, it sweeps `/tmp/muxify-verify/*/<run-id>/`:

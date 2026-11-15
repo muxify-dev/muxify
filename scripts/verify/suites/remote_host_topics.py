@@ -98,6 +98,8 @@ exec /bin/sh -c "$command"
         s.app_env['MUXIFY_TEST_SSH'] = str(fake)
         # The install chain finds a CLI on the PATH; an old one would be updated from here, which serves nothing.
         s.app_env['MUXIFY_CLI_BASE_URL'] = 'http://127.0.0.1:9/'
+        # The Host's muxify on the PATH serves, or has no server mode: never the Debug app's own build/host-cli upload.
+        s.debug_host_cli = False
         cls.mode = None
         # A repository on the Host, which the Host's Session Paths find, for New Worktree to start from.
         cls.repository = cls.projects/'tree-repo'

@@ -129,11 +129,19 @@ final class RepositoryWatcher: GitWatcher {
 /// then ADR 0072's FSEvents watcher on them, and one HEAD read once it watches. Each change it hears is an event at once, with HEAD as it was; HEAD is read
 /// again at most once a second, and an event follows when it moved. A folder in no repository is not watched: the
 /// header reads it again when its Window's folder changes.
+///
+/// The folder itself is watched from the start, while the probe runs: the subscriber read the repository before it
+/// subscribed, so a change during the probe, which the first event's state already holds, is still an event after it.
 @MainActor
 final class LocalRepositoryWatch {
     let path: String
     private let onEvent: (RepositoryEvent) -> Void
     private let files = GitFileWatcher()
+    /// The folder's own watcher while the probe runs, stopped a second after `files` watches the repository's folders:
+    /// FSEvents may deliver a change from before the probe after the probe ends.
+    private let early = GitFileWatcher()
+    private var hasStarted = false
+    private var changedEarly = false
     private var head: GitHeadRead = .unknown
     private var stopped = false
     private var readingHead = false
@@ -147,6 +155,9 @@ final class LocalRepositoryWatch {
 
     func start() {
         let path = path
+        early.start(GitWatchedRepository(root: path, commonDirectory: "")) { [weak self] in
+            MainActor.assumeIsolated { self?.changedWhileStarting() }
+        }
         Task { [weak self] in
             let probe = await Task.detached(priority: .userInitiated) { GitReader().probe(path) }.value
             self?.started(probe)
@@ -155,19 +166,34 @@ final class LocalRepositoryWatch {
 
     func stop() {
         stopped = true
+        early.stop()
         files.stop()
     }
 
     private func started(_ probe: RepositoryProbe) {
-        guard !stopped, probe.head.isRepository != nil else { return }
+        guard !stopped else { return }
+        hasStarted = true
+        guard probe.head.isRepository != nil else { return early.stop() }
         head = probe.head
         onEvent(RepositoryEvent(probe.head, changed: false))
-        guard let root = probe.root else { return }
+        guard let root = probe.root else { return early.stop() }
         files.start(GitWatchedRepository(root: root, commonDirectory: probe.commonDirectory ?? "")) { [weak self] in
             MainActor.assumeIsolated { self?.filesChanged() }
         }
+        if changedEarly {
+            changedEarly = false
+            onEvent(RepositoryEvent(head, changed: true))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            MainActor.assumeIsolated { self?.early.stop() }
+        }
         // HEAD may have moved between the probe and the watcher's start, which FSEvents never reports.
         readHead()
+    }
+
+    /// A change `early` heard: held for after the first event while the probe runs, else reported as `files`' are.
+    private func changedWhileStarting() {
+        if hasStarted { filesChanged() } else { changedEarly = true }
     }
 
     private func filesChanged() {
