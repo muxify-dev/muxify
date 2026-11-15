@@ -277,7 +277,9 @@ class Sandbox:
 
     # app
 
-    def launch(self, args=(), app_source=DEBUG_APP, timeout=30):
+    def launch(self, args=(), app_source=DEBUG_APP, timeout=30, fresh=True):
+        """Starts the app copy. `fresh` drops the windows that macOS saved for it, as `open -F` does; without it,
+        macOS restores them when its defaults keep windows."""
         if self.app.exists():
             shutil.rmtree(self.app)
         shutil.copytree(app_source, self.app, symlinks=True)
@@ -293,7 +295,7 @@ class Sandbox:
         # and does not take keyboard focus. open passes only the --env variables;
         # the app gets the rest of its environment from launchd, not from this shell.
         environment = [arg for item in self.app_env.items() for arg in ('--env', '%s=%s' % item)]
-        subprocess.run(['open', '-g', '-n', '-F', *environment, '--stdout', log, '--stderr', log,
+        subprocess.run(['open', '-g', '-n', *(['-F'] if fresh else []), *environment, '--stdout', log, '--stderr', log,
                         str(self.app), '--args', *args], env=self.env, check=True, capture_output=True)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -329,6 +331,17 @@ class Sandbox:
         assert app is not None, 'no app to restart'
         self._terminate([app])
         return self.launch(args)
+
+    def quit(self, timeout=20):
+        """Quits the app as ⌘Q does, with a quit Apple event to its bundle id, and waits until it has exited. The
+        event does not bring the app to the front. AppKit saves the windows that the defaults keep only on such a quit:
+        the SIGTERM of `restart_app` leaves none, so `launch(fresh=False)` after it restores nothing."""
+        app = self._app_pid()
+        # A tell to an app that does not run starts it first.
+        assert app is not None, 'no app to quit'
+        subprocess.run(['osascript', '-e', 'tell application id "%s" to quit' % self.bundle_id],
+                       check=True, capture_output=True, timeout=timeout)
+        wait(lambda: not alive(app), 'the app did not exit after the quit Apple event', timeout)
 
     def _app_running(self):
         return bool(subprocess.run(['pgrep', '-f', '^(/private)?' + re.escape(str(self.binary))], capture_output=True).stdout)
@@ -387,10 +400,15 @@ class Sandbox:
     def show(self, window):
         """Asks this run's app copy to show the Window, as `muxify window open` does, and waits until it does. A
         switch-client to the Window that the Client is already on does not move it, so the app keeps an Empty Topic
-        page that it shows over that Window. -a sends the URL to this copy by its path, and -g keeps it behind."""
+        page that it shows over that Window."""
+        self.select(window)
+        self.wait_shown(window)
+
+    def select(self, window):
+        """Sends this run's app copy the `muxify://select` link of the Window, and does not wait for it. -a sends the
+        URL to this copy by its path, and -g keeps it behind."""
         url = 'muxify://select?window=' + urllib.parse.quote(window, safe='')
         subprocess.run(['open', '-g', '-a', str(self.app), url], check=True, capture_output=True)
-        self.wait_shown(window)
 
     def wait_shown(self, target, seconds=10):
         """Waits until the app shows the tmux Window: the App Window's title names its Session, and its Sidebar row,

@@ -138,6 +138,11 @@ final class AppWindows {
         }
         nativeWindows[id] = window
         window.tabbingMode = .disallowed
+        // The verify checks find the traffic lights by these. Accessibility sees each button's cell, not the button.
+        for (button, identifier) in [(NSWindow.ButtonType.closeButton, "traffic-light-close"),
+                                     (.miniaturizeButton, "traffic-light-minimize"), (.zoomButton, "traffic-light-zoom")] {
+            window.standardWindowButton(button)?.cell?.setAccessibilityIdentifier(identifier)
+        }
         let center = NotificationCenter.default
         observers[id] = [
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
