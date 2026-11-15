@@ -25,6 +25,12 @@ While it runs, `make verify` wakes the display and holds it awake with `caffeina
 
 The runner stops a suite after 120 seconds without a check starting or ending. Import, discovery, and class fixtures have the same limit. Output does not extend it. A suite can take longer than 120 seconds while its checks make progress. After a timeout, the suite has 60 seconds to clean up before the runner kills its process group. The last completed checks and the active timeout remain in the results even if cleanup cannot finish. Previous suite times set the run order, not the timeout.
 
+The runner's own tests are in `test_run.py`, beside `run.py` and not in `suites/`, because they never launch the app: they run probe suites through `run.py` and check its timeouts, reruns and FLAKY and alone verdicts. `make test` runs them, and `make verify` does not. Run them alone, from the repo root:
+
+```sh
+python3 -m unittest -v scripts.verify.test_run
+```
+
 Run one check. Build the app first, because this command does not build it:
 
 ```sh
