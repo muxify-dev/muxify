@@ -326,15 +326,19 @@ public enum HostSubscription: Codable, Equatable, Sendable {
     /// A folder's repository, as `RepositoryEvent`s keyed `repository`: the first is the whole state, each later one a
     /// change of HEAD, the index or the working tree.
     case repository(RepositorySubscription)
+    /// One Topic's detail, as `TopicDetailItem`s keyed `topic <id>`: the first is the current state, each later one
+    /// the detail after a change of the Topic's record or of its Sessions, Windows or Panes. Needs `topic-detail`.
+    case topic(TopicSubscription)
 
     /// The capability that this subscription needs; nil for protocol 1's base.
     public var capability: HostCapability? {
         switch self {
         case .environment, .config, .repository: return nil
+        case .topic: return .topicDetail
         }
     }
 
-    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config, repository }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config, repository, topic }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: ProtocolKey.self)
@@ -346,6 +350,7 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         case .environment: self = .environment
         case .config: self = .config
         case .repository: self = .repository(try values.decode(RepositorySubscription.self, forKey: ProtocolKey(known.rawValue)))
+        case .topic: self = .topic(try values.decode(TopicSubscription.self, forKey: ProtocolKey(known.rawValue)))
         }
     }
 
@@ -355,9 +360,21 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         case .environment: try values.encode(ProtocolEmpty(), forKey: .environment)
         case .config: try values.encode(ProtocolEmpty(), forKey: .config)
         case .repository(let repository): try values.encode(repository, forKey: .repository)
+        case .topic(let topic): try values.encode(topic, forKey: .topic)
         }
     }
 }
+
+/// What the `topic` subscription subscribes to: one Topic, by its id.
+public struct TopicSubscription: Codable, Equatable, Sendable {
+    public var id: String
+
+    public init(id: String) { self.id = id }
+}
+
+/// An item of the `topic` subscription: the Topic's detail exactly as `environment { show }` answers it, which is the
+/// JSON of `muxify topic show --json`, or nil, sent as `null`, when the Topic is gone: forgotten, Settled or never there.
+public typealias TopicDetailItem = EnvironmentResponse?
 
 /// `mark_read`: Unread on visit. The server clears the Topic Unread of `topics` and the Agent Unread of `panes`,
 /// then reads the server again, which writes the Topics' remembered Sessions and sends the events of all of it.

@@ -22,7 +22,22 @@ final class ProtocolWireTests: XCTestCase {
             ProtocolLine.error(id: 3, failed(RequestRefusal.clash(id, verb: "environment create").failure)),
             ProtocolLine.error(id: 4, failed(RequestRefusal.inDoubt(id, phrase: EnvironmentCommand.moveCard(.up).actionName).failure)),
             ProtocolLine.error(id: 5, failed(HostEnvironment.requestOnRead(.list))),
+            try ProtocolLine.request(id: 6, HostRequest.subscribe(.topic(TopicSubscription(id: "t")))),
+            try ProtocolLine.item(id: 6, try Self.topicItem()),
+            try ProtocolLine.item(id: 6, TopicDetailItem.none),
         ]
+    }
+
+    /// A `topic` item: a Topic with one Session, one Window and a Pane where a Claude Agent waits, Unread.
+    private static func topicItem() throws -> TopicDetailItem {
+        let pane = try JSONDecoder().decode(PaneSummary.self, from: Data(#"""
+            {"active":true,"agent":{"conversation":null,"kind":"claude","status":"blocked","unread":true},"command":"claude","id":"%3",\#
+            "index":0,"label":"claude","path":"/work/game","window_id":"@2"}
+            """#.utf8))
+        let window = TopicDetail.Window(id: "@2", index: 1, name: "claude", active: true, mark: nil, panes: [pane])
+        let session = TopicDetail.Session(id: "$1", name: "game/ship", baseName: "game", directory: "/work/game", worktree: nil, windows: [window])
+        return .topic(TopicDetail(id: "t", label: "Ship", title: "Ship", slug: "ship", createdAt: "2026-11-16T10:00:00Z", state: .live,
+                                  tags: [], sessions: [session]))
     }
 
     /// The first server's messages, pinned in `1-first-server`.
@@ -259,6 +274,35 @@ final class ProtocolWireTests: XCTestCase {
                        "a set of Panes is in one order")
     }
 
+    func testTheTopicSubscriptionIsPinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        let request = HostRequest.subscribe(.topic(TopicSubscription(id: "t")))
+        let line = text(try ProtocolLine.request(id: 6, request))
+        XCTAssertEqual(line, #"{"id":6,"kind":"request","request":{"subscribe":{"topic":{"id":"t"}}}}"# + "\n")
+        XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(line.dropLast().utf8))).payload(HostRequest.self), request)
+        XCTAssertEqual(request.capability, .topicDetail)
+
+        let item = try Self.topicItem()
+        let itemLine = text(try ProtocolLine.item(id: 6, item))
+        XCTAssertEqual(itemLine, #"{"id":6,"item":{"topic":{"created_at":"2026-11-16T10:00:00Z","id":"t","label":"Ship","note":null,"#
+            + #""sessions":[{"base_name":"game","directory":"/work/game","id":"$1","name":"game/ship","windows":[{"active":true,"id":"@2","#
+            + #""index":1,"mark":null,"name":"claude","panes":[{"active":true,"agent":{"conversation":null,"kind":"claude","status":"blocked","#
+            + #""unread":true},"command":"claude","id":"%3","index":0,"label":"claude","path":"/work/game","window_id":"@2"}]}],"worktree":null}],"#
+            + #""slug":"ship","state":"live","tags":[],"title":"Ship"}},"kind":"item"}"# + "\n")
+        XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(itemLine.dropLast().utf8))).payload(TopicDetailItem.self), item)
+
+        let gone = text(try ProtocolLine.item(id: 6, TopicDetailItem.none))
+        XCTAssertEqual(gone, #"{"id":6,"item":null,"kind":"item"}"# + "\n")
+        XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(gone.dropLast().utf8))).payload(TopicDetailItem.self), .none)
+    }
+
+    /// Whether an `item` decodes as one of the protocol's items: a chunk, or a `topic` subscription's detail or null.
+    private static func decodesAsAnItem(_ frame: ProtocolFrame) -> Bool {
+        // `try?` would flatten a null item into a failure.
+        do { _ = try frame.payload(ProtocolChunk.self); return true } catch {}
+        do { _ = try frame.payload(TopicDetailItem.self); return true } catch { return false }
+    }
+
     func testAnUnknownRequestCaseThrowsUnsupported() {
         XCTAssertThrowsError(try JSONDecoder().decode(HostRequest.self, from: Data(#"{"frob":{}}"#.utf8))) { error in
             XCTAssertEqual((error as? ProtocolError)?.code, .unsupported)
@@ -281,7 +325,7 @@ final class ProtocolWireTests: XCTestCase {
                 switch frame.kind {
                 case .hello: XCTAssertNoThrow(try frame.payload(ProtocolHello.self))
                 case .request: XCTAssertNoThrow(try frame.payload(HostRequest.self))
-                case .item: XCTAssertNoThrow(try frame.payload(ProtocolChunk.self))
+                case .item: XCTAssertTrue(Self.decodesAsAnItem(frame), String(decoding: line, as: UTF8.self))
                 case .end:
                     if case .failure(let error) = frame.outcome(ProtocolEmpty.self) { XCTAssertNotEqual(error.message, "", "\(error)") }
                 case .cancel: XCTAssertGreaterThan(frame.id, 0)

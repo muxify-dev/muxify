@@ -1345,15 +1345,48 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
     }
 
     /// A running `muxify server` with a protocol client on its stdout and stdin, and its stderr.
-    private func startServer(environment: [String: String] = [:]) throws -> (process: Process, client: ProtocolClient, stderr: () -> String) {
+    private func startServer(environment: [String: String] = [:], capabilities: [String] = []) throws
+        -> (process: Process, client: ProtocolClient, stderr: () -> String) {
         let output = Pipe()
         let errors = Pipe()
         let input = Pipe()
         let process = makeProcess(cli, arguments: ["server"], output: output, errors: errors, environment: environment)
         process.standardInput = input
         try process.run()
-        let client = ProtocolClient(input: output.fileHandleForReading, output: input.fileHandleForWriting, build: "muxify test")
+        let client = ProtocolClient(input: output.fileHandleForReading, output: input.fileHandleForWriting, build: "muxify test",
+                                    capabilities: capabilities)
         return (process, client, { String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self) })
+    }
+
+    /// The `topic` subscription's item is the JSON that `muxify topic show --json` prints for the same Topic and state.
+    func testServerTopicItemIsTheJSONOfTopicShow() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        _ = try sandbox.fakeAgent(in: "game/ship", status: "blocked", unread: true)
+        let server = try startServer(environment: sandbox.cliEnvironment(pane: nil), capabilities: ["topic-detail"])
+        defer { stopIfRunning(server.process) }
+        try await server.client.connect()
+        let latest = LatestTopicItem()
+        let events = server.client.subscribe(HostRequest.subscribe(.topic(TopicSubscription(id: id))), as: TopicDetailItem.self)
+        let consumer = Task {
+            do { for try await item in events { latest.set(item) } } catch {}
+        }
+        defer { consumer.cancel() }
+
+        // The server writes the Topic's remembered Sessions after its first read, so the two agree once it settled.
+        var item: Any?, shown: Any?
+        for _ in 0..<50 {
+            let result = try await run(cli, arguments: ["topic", "show", "--topic", id, "--json"], environment: sandbox.cliEnvironment(pane: nil))
+            XCTAssertEqual(result.status, 0, result.output)
+            shown = try jsonLine(result.stdout)
+            item = try latest.json()
+            if let item = item as? NSDictionary, let shown = shown as? NSDictionary, item == shown { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let sessions = (shown as? [String: Any])?["topic"].flatMap { ($0 as? [String: Any])?["sessions"] as? [Any] }
+        XCTAssertEqual(sessions?.count, 1, "\(String(describing: shown))")
+        XCTAssertEqual(item as? NSDictionary, shown as? NSDictionary)
     }
 
     func testTopicShowListsEveryLiveSessionOfTheTopicAndTheStatusOfItsAgent() async throws {
@@ -2257,6 +2290,22 @@ private final class TopicSandbox {
         }
         if (try? ownsServer()) == true { _ = try? tmux(["kill-server"]) }
         try? FileManager.default.removeItem(at: root)
+    }
+}
+
+/// The latest item of a `topic` subscription, as the JSON object that it encodes to.
+private final class LatestTopicItem: @unchecked Sendable {
+    private let lock = NSLock()
+    private var item: TopicDetailItem??
+
+    func set(_ item: TopicDetailItem) { lock.lock(); self.item = item; lock.unlock() }
+
+    func json() throws -> Any? {
+        lock.lock()
+        let item = self.item
+        lock.unlock()
+        guard let item else { return nil }
+        return try JSONSerialization.jsonObject(with: try JSONEncoder().encode(item), options: .fragmentsAllowed)
     }
 }
 

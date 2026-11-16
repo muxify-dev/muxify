@@ -231,6 +231,90 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(try windows(of: "work").count, before.count + 1)
     }
 
+    // MARK: - The topic subscription
+
+    func testATopicSubscriptionPushesTheDetailFirstThenAfterASplitAndARenameAsShowAnswersIt() async throws {
+        try TopicStore(paths: paths).write { try $0.create(TopicRecord(id: "t", title: "Topic")) }
+        try tmux.run(["set-option", "-t", "=work:", "@muxify_topic", "t"])
+        let client = try await connect(capabilities: ["topic-detail"])
+        let recorder = subscribe(client, topic: "t")
+
+        try await wait("no first item") { !recorder.items.isEmpty }
+        let first = try XCTUnwrap(recorder.detail)
+        XCTAssertEqual(first.label, "Topic")
+        XCTAssertEqual(first.sessions.map(\.name), ["work"])
+        XCTAssertEqual(first.sessions.first?.windows.first?.panes.count, 1)
+        try await settle(recorder)
+        let show = HostRequest.environment(EnvironmentRequest(.show, target: .topic(.id("t"))))
+        let shown = try await client.call(show, as: EnvironmentResponse.self)
+        XCTAssertEqual(recorder.latest, .some(shown), "the item is not what show answers")
+
+        try tmux.run(["split-window", "-d", "-t", "=work:"])
+        try await wait("a split of the Topic's Session did not push its detail") { recorder.detail?.sessions.first?.windows.first?.panes.count == 2 }
+        try await settle(recorder)
+
+        _ = try await client.call(HostRequest.environment(EnvironmentRequest(.rename(title: "Renamed"), target: .topic(.id("t")))),
+                                  as: EnvironmentResponse.self)
+        // The server reads again before it answers, so the new detail came before the `end`.
+        try await wait("the rename's detail did not come before the answer", seconds: 0.15) { recorder.detail?.label == "Renamed" }
+        XCTAssertEqual(recorder.items.count, 1, "one change pushed more than one item")
+        let renamed = try await client.call(show, as: EnvironmentResponse.self)
+        XCTAssertEqual(recorder.latest, .some(renamed), "the item is not what show answers")
+    }
+
+    func testForgettingTheTopicPushesANullItem() async throws {
+        let client = try await connect(capabilities: ["topic-detail"])
+        let created = try await client.call(HostRequest.environment(EnvironmentRequest(.create(title: "Gone"))), as: EnvironmentResponse.self)
+        guard case .changed(let change) = created, let id = change.topicID else { return XCTFail("unexpected \(created)") }
+        let recorder = subscribe(client, topic: id)
+        try await wait("no first item") { recorder.detail?.label == "Gone" }
+
+        _ = try await client.call(HostRequest.environment(EnvironmentRequest(.forget(choices: [], worktrees: []), target: .topic(.id(id)))),
+                                  as: EnvironmentResponse.self)
+
+        try await wait("forgetting the Topic did not push null") { recorder.items.count == 2 }
+        XCTAssertEqual(recorder.items.last, .some(nil))
+    }
+
+    func testTwoTopicSubscriptionsOnOneChannelPushApartAndCancellingOneLeavesTheOther() async throws {
+        try TopicStore(paths: paths).write { transaction in
+            try transaction.create(TopicRecord(id: "a", title: "A"))
+            try transaction.create(TopicRecord(id: "b", title: "B"))
+        }
+        let client = try await connect(capabilities: ["topic-detail"])
+        let a = subscribe(client, topic: "a")
+        let b = subscribe(client, topic: "b")
+        try await wait("no first items") { a.detail?.label == "A" && b.detail?.label == "B" }
+        try await settle(a)
+        try await settle(b)
+
+        try await rename("a", to: "A2", on: client)
+        try await wait("the rename of a did not push a") { a.detail?.label == "A2" }
+        XCTAssertTrue(b.items.isEmpty, "the rename of a pushed b")
+
+        a.cancel()
+        try await wait("the cancel did not end the subscription") { a.ended }
+        try await rename("b", to: "B2", on: client)
+        try await wait("cancelling a ended b") { b.detail?.label == "B2" }
+    }
+
+    func testAClientThatDidNotDeclareTopicDetailGetsUnsupportedForATopicSubscription() async throws {
+        let client = try await connect()
+        let events = client.subscribe(HostRequest.subscribe(.topic(TopicSubscription(id: "t"))), as: TopicDetailItem.self)
+        do {
+            for try await item in events { XCTFail("an item came: \(String(describing: item))") }
+            XCTFail("the subscription ended ok")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .unsupported)
+            XCTAssertTrue(error.message.contains("topic-detail"), error.message)
+        }
+    }
+
+    private func rename(_ topic: String, to title: String, on client: ProtocolClient) async throws {
+        _ = try await client.call(HostRequest.environment(EnvironmentRequest(.rename(title: title), target: .topic(.id(topic)))),
+                                  as: EnvironmentResponse.self)
+    }
+
     /// The `TopicFailure` that a request ends with; nil, with a failure of the test, when it ends otherwise.
     private func failure(of request: EnvironmentRequest, from client: ProtocolClient) async throws -> TopicFailure? {
         do {
@@ -498,6 +582,28 @@ final class HostServerTests: XCTestCase {
         func clear() { lock.lock(); log = []; lock.unlock() }
     }
 
+    private final class TopicRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [TopicDetailItem] = []
+        private var last: TopicDetailItem??
+        private var done = false
+        var task: Task<Void, Never>?
+
+        func add(_ item: TopicDetailItem) { lock.lock(); log.append(item); last = item; lock.unlock() }
+        func end() { lock.lock(); done = true; lock.unlock() }
+        var items: [TopicDetailItem] { lock.lock(); defer { lock.unlock() }; return log }
+        var ended: Bool { lock.lock(); defer { lock.unlock() }; return done }
+        /// The latest item, also after `clear`.
+        var latest: TopicDetailItem? { lock.lock(); defer { lock.unlock() }; return last ?? nil }
+        /// The detail of the latest item, nil before the first and when it is null.
+        var detail: TopicDetail? {
+            guard case .topic(let detail)?? = latest else { return nil }
+            return detail
+        }
+        func clear() { lock.lock(); log = []; lock.unlock() }
+        func cancel() { task?.cancel() }
+    }
+
     private final class ConfigRecorder: @unchecked Sendable {
         private let lock = NSLock()
         private var log: [HostConfig] = []
@@ -528,6 +634,33 @@ final class HostServerTests: XCTestCase {
             } catch {}
         })
         return recorder
+    }
+
+    private func subscribe(_ client: ProtocolClient, topic: String) -> TopicRecorder {
+        let recorder = TopicRecorder()
+        let events = client.subscribe(HostRequest.subscribe(.topic(TopicSubscription(id: topic))), as: TopicDetailItem.self)
+        let task = Task {
+            do {
+                for try await item in events { recorder.add(item) }
+            } catch {}
+            recorder.end()
+        }
+        recorder.task = task
+        consumers.append(task)
+        return recorder
+    }
+
+    /// Waits until no item has come for a moment, and forgets what came before.
+    private func settle(_ recorder: TopicRecorder) async throws {
+        var seen = -1
+        try await wait("the subscription did not settle", seconds: 10) {
+            let now = recorder.items.count
+            defer { seen = now }
+            if now == seen { return true }
+            try await Task.sleep(nanoseconds: 1_200_000_000)
+            return false
+        }
+        recorder.clear()
     }
 
     /// Waits until no item has come for a moment, and forgets what came before.

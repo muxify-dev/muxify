@@ -54,7 +54,7 @@ public struct HostServerContext: @unchecked Sendable {
 }
 
 /// `muxify server`: the Host Server's requests (ADR 0087). It serves `ping` and `shutdown`, the `environment`,
-/// `config` and `repository` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and
+/// `config`, `repository` and `topic` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and
 /// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads, writes and network
 /// commands, `session_paths` and `upload`. Programs on the Host reach its Mac through its own socket, whose requests it
 /// sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask` goes to the network command that runs it, which
@@ -158,6 +158,8 @@ public enum HostServer {
                 config.subscribe(request)
             case .subscribe(.repository(let repository)):
                 host.watch(repository, for: request)
+            case .subscribe(.topic(let topic)):
+                host.subscribe(topic, for: request, nonce: nonce)
             case .environment(let environmentRequest):
                 host.run(environmentRequest, for: request, nonce: nonce)
             case .markRead(let mark):
@@ -285,6 +287,8 @@ final class HostEnvironment: @unchecked Sendable {
     /// The `repository` subscriptions by request; `lock` guards it.
     private var watches: [Int: RepositoryWatch] = [:]
     let uploads: HostUploads
+    /// The `topic` subscriptions, which read again on each change of the publisher.
+    private let details: HostTopicDetails
 
     init(context: HostServerContext, socket: HostServerSocket, asks: GitAskpassRoutes, log: @escaping (String) -> Void) {
         self.context = context
@@ -292,6 +296,7 @@ final class HostEnvironment: @unchecked Sendable {
         self.asks = asks
         self.log = log
         uploads = HostUploads(directory: context.temporaryDirectory)
+        details = HostTopicDetails { [context] topics in await Self.details(of: topics, context: context, log: log) }
     }
 
     func stop() {
@@ -304,6 +309,7 @@ final class HostEnvironment: @unchecked Sendable {
         publisher?.stop()
         watches.forEach { $0.stop() }
         uploads.stop()
+        details.stop()
     }
 
     // MARK: - The Git View
@@ -407,6 +413,41 @@ final class HostEnvironment: @unchecked Sendable {
         }
     }
 
+    /// The `topic` subscription of one Topic: its detail now, then again after each change of the publisher that
+    /// changes it.
+    func subscribe(_ topic: TopicSubscription, for request: ProtocolIncomingRequest, nonce: String?) {
+        details.subscribe(request, topic: topic.id)
+        Task {
+            await self.publisher(nonce: nonce).start { changes in self.receive(changes) }
+        }
+    }
+
+    /// What `environment { show }` answers for each Topic, read with the Host's Config. A Topic that is not open is
+    /// gone; one that cannot be read now has no entry.
+    private static func details(of topics: Set<String>, context: HostServerContext, log: @escaping (String) -> Void) async
+        -> [String: HostTopicDetails.Read] {
+        let config: Config
+        do { config = try await context.config() } catch {
+            log("muxify server: topic: \(message(error))")
+            return [:]
+        }
+        return await background {
+            let service = EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths,
+                                             topics: config.topics, notifications: config.notifications,
+                                             worktreesRoot: config.worktreesRoot)
+            var found: [String: HostTopicDetails.Read] = [:]
+            for topic in topics.sorted() {
+                let response = service.handle(EnvironmentRequest(.show, target: .topic(.id(topic))))
+                switch response {
+                case .failed(let failure) where failure.kind == .topicUnavailable: found[topic] = .gone
+                case .failed(let failure): log("muxify server: topic \(topic): \(failure.message)")
+                default: found[topic] = .shown(response)
+                }
+            }
+            return found
+        }
+    }
+
     /// On `delivery`: the first item of the publisher holds every key, and goes whole to each subscriber; each later
     /// change goes as an event of its own key, which replaces an unsent one.
     private func receive(_ changes: [EnvironmentChange]) {
@@ -420,6 +461,7 @@ final class HostEnvironment: @unchecked Sendable {
         for id in subscribers.keys.sorted() {
             if first { send(state.all, to: id, first: true) } else { send(changes, to: id, first: false) }
         }
+        details.changed()
     }
 
     private func send(_ changes: [EnvironmentChange], to id: Int, first: Bool) {
@@ -467,7 +509,7 @@ final class HostEnvironment: @unchecked Sendable {
             } else {
                 response = await handle()
             }
-            if !reads { await publisher.read() }
+            if !reads { await readAgain(publisher) }
             if case .failed(let failure) = response {
                 request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
             } else {
@@ -590,7 +632,7 @@ final class HostEnvironment: @unchecked Sendable {
                         try ViewCommandExecutor(server: tmux).run(.setAgentUnread(mark.panes.map { PaneUnread(pane: $0, unread: false) }))
                     }
                 }
-                await publisher.read()
+                await readAgain(publisher)
                 request.finish()
             } catch {
                 request.fail(ProtocolError(.failed, Self.message(error)))
@@ -614,7 +656,7 @@ final class HostEnvironment: @unchecked Sendable {
             guard !changes || request.startMutation() else { return }
             do {
                 let output = try await Self.background { [own] in try ViewCommandExecutor(server: tmux, ownClient: own).run(command) }
-                if changes, let publisher = runningPublisher { await publisher.read() }
+                if changes, let publisher = runningPublisher { await readAgain(publisher) }
                 request.finish(ViewOutput(output: output))
             } catch {
                 request.fail(ProtocolError(.failed, Self.message(error)))
@@ -623,6 +665,13 @@ final class HostEnvironment: @unchecked Sendable {
     }
 
     // MARK: - Helpers
+
+    /// Reads everything again after a write, and returns once the events and the Topic details of what it changed
+    /// went out, so they come before the write's answer.
+    private func readAgain(_ publisher: EnvironmentPublisher) async {
+        await publisher.read()
+        await details.caughtUp()
+    }
 
     /// The publisher, made once, with the Client marker of the first request's `hello` and the Config's Session order.
     private func publisher(nonce: String?) async -> EnvironmentPublisher {
