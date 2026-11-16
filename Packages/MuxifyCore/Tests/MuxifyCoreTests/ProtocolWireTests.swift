@@ -25,6 +25,14 @@ final class ProtocolWireTests: XCTestCase {
             try ProtocolLine.request(id: 6, HostRequest.subscribe(.topic(TopicSubscription(id: "t")))),
             try ProtocolLine.item(id: 6, try Self.topicItem()),
             try ProtocolLine.item(id: 6, TopicDetailItem.none),
+            try ProtocolLine.request(id: 7, HostRequest.sessionPaths(SessionPathsRequest(.ranked(query: "gam")))),
+            try ProtocolLine.request(id: 8, HostRequest.sessionPaths(SessionPathsRequest(.topic(id.rawValue)))),
+            try ProtocolLine.request(id: 9, HostRequest.visitSessionPath(VisitSessionPath(folder: "/work/game/src"))),
+            try ProtocolLine.ok(id: 7, RankedSessionPathsAnswer(SessionPathRanking.rank(Self.sessionPathRows, query: "gam", visits: Self.visits,
+                                                                                         tiebreak: PaletteTiebreak.standard, home: "/home/me"))),
+            try ProtocolLine.ok(id: 8, TopicSessionPathsAnswer(TopicSessionPathChoices(topic: Self.topic, records: [Self.topic], windows: [],
+                                                                                       sessionPaths: Self.sessionPaths), visits: Self.visits)),
+            try ProtocolLine.ok(id: 9, ProtocolEmpty()),
         ]
     }
 
@@ -39,6 +47,11 @@ final class ProtocolWireTests: XCTestCase {
         return .topic(TopicDetail(id: "t", label: "Ship", title: "Ship", slug: "ship", createdAt: "2026-11-16T10:00:00Z", state: .live,
                                   tags: [], sessions: [session]))
     }
+
+    private static let sessionPaths = [SessionPath(path: "/work/app", name: "app", alias: "App"), SessionPath(path: "/work/game", name: "game")]
+    private static var sessionPathRows: [SessionPathRow] { SessionPathRows.build(sessionPaths: sessionPaths, windows: [], records: []) }
+    private static let visits: [VisitKey: Date] = [.directory("/work/game"): Date(timeIntervalSince1970: 1_700_000_000)]
+    private static var topic: TopicRecord { TopicRecord(id: requestID.rawValue, title: "Ship") }
 
     /// The first server's messages, pinned in `1-first-server`.
     private func firstServersFrames() throws -> [Data] {

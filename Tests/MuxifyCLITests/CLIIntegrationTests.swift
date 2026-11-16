@@ -2000,6 +2000,84 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(later, ["game", "late", "tools"])
     }
 
+    /// `muxify server` through pipes, as the phone reaches it, against the CLI on the same Config, cache and visits.
+    func testTheHostServerAnswersSessionPathsAsTheCLIPrintsThemAndAVisitOfEitherRanksForBoth() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let source = sandbox.tools.appendingPathComponent("src")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let up = Pipe(), down = Pipe(), errors = Pipe()
+        let server = makeProcess(cli, arguments: ["server"], output: down, errors: errors, environment: environment)
+        server.standardInput = up
+        try server.run()
+        defer { stopIfRunning(server) }
+        let client = ProtocolClient(input: down.fileHandleForReading, output: up.fileHandleForWriting, build: "phone",
+                                    capabilities: [HostCapability.rankedSessionPaths.rawValue], helloTimeout: 10)
+        defer { client.close() }
+        try await client.connect()
+
+        func object(_ value: some Encodable) throws -> NSDictionary {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            return try XCTUnwrap(try JSONSerialization.jsonObject(with: try encoder.encode(value)) as? NSDictionary)
+        }
+        func printed(_ arguments: [String]) async throws -> NSDictionary {
+            let listed = try await run(cli, arguments: arguments + ["--json"], environment: environment)
+            XCTAssertEqual(listed.status, 0, listed.output)
+            return try jsonLine(listed.stdout) as NSDictionary
+        }
+        func answered(_ ask: SessionPathsRequest.Ask) async throws -> NSDictionary {
+            if case .topic = ask {
+                return try object(try await client.call(HostRequest.sessionPaths(SessionPathsRequest(ask)), as: TopicSessionPathsAnswer.self))
+            }
+            return try object(try await client.call(HostRequest.sessionPaths(SessionPathsRequest(ask)), as: RankedSessionPathsAnswer.self))
+        }
+        func names(_ answer: NSDictionary) -> [String] { (answer["rows"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String } }
+
+        let unvisited = try await answered(.ranked(query: ""))
+        XCTAssertEqual(names(unvisited), ["game", "tools"])
+        let printedUnvisited = try await printed(["session-paths"])
+        XCTAssertEqual(unvisited, printedUnvisited)
+        let empty = try await client.call(HostRequest.sessionPaths(try JSONDecoder().decode(SessionPathsRequest.self, from: Data("{}".utf8))),
+                                          as: RankedSessionPathsAnswer.self)
+        XCTAssertEqual(try object(empty), unvisited, "session_paths {} is the ranking for an empty query")
+
+        _ = try await client.call(HostRequest.visitSessionPath(VisitSessionPath(folder: source.path)), as: ProtocolEmpty.self)
+        let afterServerVisit = try await printed(["session-paths"])
+        XCTAssertEqual(names(afterServerVisit), ["tools", "game"], "the server's visit ranks the Session Path first for the CLI")
+        let answeredAfterServerVisit = try await answered(.ranked(query: ""))
+        XCTAssertEqual(answeredAfterServerVisit, afterServerVisit)
+
+        let visited = try await run(cli, arguments: ["session-paths", "visit", sandbox.game.path], environment: environment)
+        XCTAssertEqual(visited.status, 0, visited.output)
+        let afterCLIVisit = try await answered(.ranked(query: ""))
+        XCTAssertEqual(names(afterCLIVisit), ["game", "tools"], "the CLI's visit ranks the Session Path first for the server")
+        let printedAfterCLIVisit = try await printed(["session-paths"])
+        XCTAssertEqual(afterCLIVisit, printedAfterCLIVisit)
+
+        for query in ["gam", "work", "zzz"] {
+            let answer = try await answered(.ranked(query: query))
+            let line = try await printed(["session-paths", "--query", query])
+            XCTAssertEqual(answer, line, query)
+        }
+
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let topic = try await answered(.topic(id))
+        let printedTopic = try await printed(["topic", "session-paths", "--topic", id])
+        XCTAssertEqual(topic, printedTopic)
+        XCTAssertEqual((topic["rows"] as? [[String: Any]])?.map { $0["in_this_topic"] as? Bool }, [true, false])
+
+        do {
+            _ = try await client.call(HostRequest.visitSessionPath(VisitSessionPath(folder: sandbox.root.appendingPathComponent("missing").path)),
+                                      as: ProtocolEmpty.self)
+            XCTFail("a visit to a missing folder must fail")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+            XCTAssertTrue(error.message.contains("no directory"), error.message)
+        }
+    }
+
     func testEnvironmentShowJSONSaysWhichSidebarListsTheConfigShows() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }

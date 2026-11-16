@@ -497,6 +497,70 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(deep, ["alpha", "beta", "beta/inner"].map { projects.appendingPathComponent($0).path })
     }
 
+    func testRankedSessionPathsATopicsRowsAndAVisitNeedTheCapabilityAndRootsAnswerWithoutIt() async throws {
+        let projects = directory.appendingPathComponent("projects")
+        try FileManager.default.createDirectory(at: projects.appendingPathComponent("alpha"), withIntermediateDirectories: true)
+        let client = try await connect()
+        let refused: [HostRequest] = [
+            .sessionPaths(SessionPathsRequest(.ranked(query: "alp"))),
+            .sessionPaths(SessionPathsRequest(.ranked(query: ""))),
+            .sessionPaths(try JSONDecoder().decode(SessionPathsRequest.self, from: Data("{}".utf8))),
+            .sessionPaths(SessionPathsRequest(.topic("t"))),
+            .visitSessionPath(VisitSessionPath(folder: projects.path)),
+        ]
+        for request in refused {
+            do {
+                _ = try await client.call(request, as: ProtocolEmpty.self)
+                XCTFail("\(request) ran for a client that did not declare ranked-session-paths")
+            } catch let error as ProtocolError {
+                XCTAssertEqual(error.code, .unsupported, "\(request)")
+                XCTAssertTrue(error.message.contains("ranked-session-paths"), error.message)
+            }
+        }
+        XCTAssertEqual(try VisitStore(paths: paths).times(), [:], "the refused visit was recorded")
+        let roots = [SessionPathRoot(path: projects.path, depth: 1)]
+        let answer = try await client.call(HostRequest.sessionPaths(SessionPathsRequest(roots: roots)), as: SessionPathsOutput.self)
+        XCTAssertEqual(SessionPathDiscovery.sessionPaths(in: try XCTUnwrap(answer.output), roots: roots, aliases: [:]).map(\.folder.path),
+                       [projects.appendingPathComponent("alpha").path])
+    }
+
+    func testSessionPathsRankByTheLastVisitAndTheQueryAndATopicGetsItsAddASessionRows() async throws {
+        let projects = directory.appendingPathComponent("projects")
+        for folder in ["alpha", "beta/src"] {
+            try FileManager.default.createDirectory(at: projects.appendingPathComponent(folder), withIntermediateDirectories: true)
+        }
+        let config = directory.appendingPathComponent("config.yml")
+        try "sessions:\n  paths:\n    - path: \(projects.path)/*\n".write(to: config, atomically: true, encoding: .utf8)
+        let hostPaths = MuxifyPaths(environment: ["XDG_STATE_HOME": directory.appendingPathComponent("state").path, "MUXIFY_CONFIG": config.path],
+                                    home: "/nonexistent")
+        let client = try await connect(context: HostServerContext(paths: hostPaths, tmux: tmux, temporaryDirectory: uploads.path),
+                                       capabilities: ["ranked-session-paths"])
+        func names(_ ask: SessionPathsRequest.Ask) async throws -> [String] {
+            try await client.call(HostRequest.sessionPaths(SessionPathsRequest(ask)), as: RankedSessionPathsAnswer.self).rows.map(\.name)
+        }
+
+        let unvisited = try await names(.ranked(query: ""))
+        XCTAssertEqual(unvisited, ["alpha", "beta"], "with no visit, the order of the Config")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: hostPaths.sessionPathCache(remote: nil).path), "the first answer saves the discovery")
+
+        _ = try await client.call(HostRequest.visitSessionPath(VisitSessionPath(folder: projects.appendingPathComponent("beta/src").path)),
+                                  as: ProtocolEmpty.self)
+        let beta = Folder.local(projects.appendingPathComponent("beta").path)
+        XCTAssertNotNil(try VisitStore(paths: hostPaths).times()[.directory(beta.real)], "the visit is to the Session Path that holds the folder")
+        let visited = try await names(.ranked(query: ""))
+        XCTAssertEqual(visited, ["beta", "alpha"], "the last visited first")
+        let matched = try await names(.ranked(query: "alp"))
+        XCTAssertEqual(matched, ["alpha"])
+
+        let created = try await client.call(HostRequest.environment(EnvironmentRequest(.create(title: "Ship"))), as: EnvironmentResponse.self)
+        guard case .changed(let change) = created, let id = change.topicID else { return XCTFail("unexpected \(created)") }
+        let topic = try await client.call(HostRequest.sessionPaths(SessionPathsRequest(.topic(id))), as: TopicSessionPathsAnswer.self)
+        XCTAssertEqual(topic.topic.id, id)
+        XCTAssertEqual(topic.rows.map(\.name), ["alpha", "beta"])
+        XCTAssertEqual(topic.rows.map(\.inThisTopic), [false, false])
+        XCTAssertEqual(topic.rows.map { $0.lastVisit != nil }, [false, true])
+    }
+
     // MARK: - Upload
 
     func testA200KiBUploadArrivesIntactInChunksOfAtMost64KiB() async throws {

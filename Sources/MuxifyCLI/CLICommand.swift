@@ -153,10 +153,10 @@ enum CLICommand: Equatable {
         case .agentConversation(let invocation): try invocation.run(using: runner)
         case .diagnosticsSummary(let invocation): try invocation.run()
         case .server(let silence, let paths):
-            // The Host's Config, with its SessionPaths found as `topic session-paths` finds them, read for each request.
-            // This executable is the askpass helper of the Git View's network commands.
+            // The Host's Config, with its SessionPaths from the discovery cache as `session-paths` reads them, read for each
+            // request. This executable is the askpass helper of the Git View's network commands.
             let context = HostServerContext(paths: paths, config: {
-                try await ConfigSessions.load(paths.configFile, cache: SessionPathCache(file: paths.sessionPathCache(remote: nil)))
+                try ConfigSessions.loadCached(paths.configFile, cache: SessionPathCache(file: paths.sessionPathCache(remote: nil))).config
             }, gitNetwork: GitNetworkRunner(helper: executableURL.path, scratch: paths.state))
             return await HostServer.run(build: BuildStamp.versionLine, silence: silence, context: context).exitCode
         }

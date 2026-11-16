@@ -662,11 +662,7 @@ extension RequestInvocation {
 
     /// The directory `path` names. Its real path is where `cd -P` would reach it.
     static func directory(_ path: String) throws -> Folder {
-        var isDirectory: ObjCBool = false
-        let folder = Folder.local(path)
-        guard FileManager.default.fileExists(atPath: folder.real, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw CLIError("no directory '\(path)'", exitCode: 2)
-        }
+        guard let folder = Folder.existingDirectory(path) else { throw CLIError("no directory '\(path)'", exitCode: 2) }
         return folder
     }
 }

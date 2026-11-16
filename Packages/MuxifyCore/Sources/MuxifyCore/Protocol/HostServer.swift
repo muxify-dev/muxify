@@ -56,7 +56,7 @@ public struct HostServerContext: @unchecked Sendable {
 /// `muxify server`: the Host Server's requests (ADR 0087). It serves `ping` and `shutdown`, the `environment`,
 /// `config`, `repository` and `topic` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and
 /// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads, writes and network
-/// commands, `session_paths` and `upload`. Programs on the Host reach its Mac through its own socket, whose requests it
+/// commands, `session_paths`, `visit_session_path` and `upload`. Programs on the Host reach its Mac through its own socket, whose requests it
 /// sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask` goes to the network command that runs it, which
 /// asks the Mac.
 public enum HostServer {
@@ -186,6 +186,8 @@ public enum HostServer {
                 host.gitNetwork(network, for: request, server: server)
             case .sessionPaths(let sessionPaths):
                 host.sessionPaths(sessionPaths, for: request)
+            case .visitSessionPath(let visit):
+                host.visit(visit, for: request)
             case .upload(let chunk):
                 host.uploads.receive(chunk, for: request)
             }
@@ -602,12 +604,78 @@ final class HostEnvironment: @unchecked Sendable {
         }
     }
 
-    /// Session Path discovery on the Host's folders, `~` being the Host's home. It changes nothing.
+    /// Session Path discovery on the Host's folders, `~` being the Host's home; or the Host's ranked rows, or a Topic's
+    /// Add a Session rows, read with the Host's Config, as `muxify session-paths` and `muxify topic session-paths`
+    /// answer them. It changes nothing.
     func sessionPaths(_ sessionPaths: SessionPathsRequest, for request: ProtocolIncomingRequest) {
         Task {
-            let roots = sessionPaths.sessionPathRoots
-            let output = await Self.background { SessionPathDiscovery.output(for: roots) }
-            request.finish(SessionPathsOutput(output: output))
+            if case .discovery(let roots) = sessionPaths.ask {
+                let output = await Self.background { SessionPathDiscovery.output(for: roots) }
+                return request.finish(SessionPathsOutput(output: output))
+            }
+            let config: Config, fromCache: Bool
+            do { (config, fromCache) = try await sessionPathConfig() } catch {
+                return request.fail(ProtocolError(.failed, Self.message(error)))
+            }
+            let context = context
+            switch sessionPaths.ask {
+            case .discovery: return
+            case .ranked(let query):
+                let result = await Self.background {
+                    EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths, topics: config.topics)
+                        .rankedSessionPaths(query: query, tiebreak: config.goToPalette.rules.tiebreak, home: context.home)
+                }
+                switch result {
+                case .success(let ranked): request.finish(RankedSessionPathsAnswer(ranked))
+                case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+                }
+                // As `muxify session-paths` does after an answer from the cache, so the next answer is up to date.
+                let cache = SessionPathCache(file: context.paths.sessionPathCache(remote: nil))
+                if fromCache { await Self.background { cache.refresh(config) } }
+            case .topic(let topic):
+                let result = await Self.background {
+                    EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths, topics: config.topics)
+                        .sessionPathChoices(for: .topic(.named(topic)))
+                        .map { TopicSessionPathsAnswer($0, visits: (try? VisitStore(paths: context.paths).times()) ?? [:]) }
+                }
+                switch result {
+                case .success(let answer): request.finish(answer)
+                case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+                }
+            }
+        }
+    }
+
+    /// The Host's Config with the SessionPaths of the discovery cache, as `muxify session-paths` reads them, and
+    /// whether the cache had them. Without them it finds the SessionPaths and saves them.
+    private func sessionPathConfig() async throws -> (config: Config, fromCache: Bool) {
+        var config = try await context.config()
+        let cache = SessionPathCache(file: context.paths.sessionPathCache(remote: nil))
+        let found = await Self.background { [config] in cache.sessionPaths(of: config) }
+        config.sessionPaths = found.sessionPaths
+        return (config, found.fromCache)
+    }
+
+    /// Records a visit to a folder on the Host, as `muxify session-paths visit` does, so the Host's next ranking,
+    /// the CLI's and the server's alike, puts its Session Path first.
+    func visit(_ visit: VisitSessionPath, for request: ProtocolIncomingRequest) {
+        Task {
+            let config: Config
+            do { config = try await sessionPathConfig().config } catch {
+                return request.fail(ProtocolError(.failed, Self.message(error)))
+            }
+            guard let directory = Folder.existingDirectory(visit.folder) else {
+                return request.fail(ProtocolError(.failed, "no directory '\(visit.folder)'"))
+            }
+            guard request.startMutation() else { return }
+            let context = context
+            let result = await Self.background {
+                EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths).recordVisit(opening: directory, at: Date())
+            }
+            switch result {
+            case .success: request.finish()
+            case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+            }
         }
     }
 
