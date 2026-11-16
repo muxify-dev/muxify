@@ -200,6 +200,10 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// One chunk of an Attachment's upload, answered with the file's path on the Host as `UploadPath`. A failed chunk
     /// ends `failed` and the server deletes the partial file.
     case upload(UploadChunk)
+    /// A Window's stored Browser Tabs (ADR 0084), answered as the JSON array that `muxify browser tabs --window <id>
+    /// --json` prints when no Mac serves the Window. The server never asks a client for them. A target that names no
+    /// Window ends `failed` with the CLI's message. Needs `browser-tabs`.
+    case browserTabs(BrowserTabsRequest)
 
     /// The capability that the client must have declared for the server to serve this request; nil for protocol 1's
     /// base. A new case does not compile until it chooses.
@@ -209,6 +213,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .sessionPaths(let request): return request.ask.capability
         case .visitSessionPath: return .rankedSessionPaths
         case .subscribe(let subscription): return subscription.capability
+        case .browserTabs: return .browserTabs
         case .ping, .shutdown, .markRead, .view, .topicChoices, .worktreeStarts, .adoptWorktrees, .claimOpen, .releaseOpen, .git, .gitWrite,
              .gitNetwork, .upload:
             return nil
@@ -230,6 +235,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case sessionPaths = "session_paths"
         case visitSessionPath = "visit_session_path"
         case upload
+        case browserTabs = "browser_tabs"
     }
 
     public init(from decoder: Decoder) throws {
@@ -257,6 +263,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .sessionPaths: self = .sessionPaths(try values.decode(SessionPathsRequest.self, forKey: key))
         case .visitSessionPath: self = .visitSessionPath(try values.decode(VisitSessionPath.self, forKey: key))
         case .upload: self = .upload(try values.decode(UploadChunk.self, forKey: key))
+        case .browserTabs: self = .browserTabs(try values.decode(BrowserTabsRequest.self, forKey: key))
         }
     }
 
@@ -280,6 +287,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .sessionPaths(let request): try values.encode(request, forKey: .sessionPaths)
         case .visitSessionPath(let visit): try values.encode(visit, forKey: .visitSessionPath)
         case .upload(let chunk): try values.encode(chunk, forKey: .upload)
+        case .browserTabs(let request): try values.encode(request, forKey: .browserTabs)
         }
     }
 }
@@ -558,6 +566,14 @@ public struct SessionPathsOutput: Codable, Equatable, Sendable {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(output, forKey: .output)
     }
+}
+
+/// `browser_tabs`: the Window whose stored Browser Tabs the client reads. A Window id, such as `@12`; a Pane id names
+/// its Window, as `--window` of the CLI takes one.
+public struct BrowserTabsRequest: Codable, Equatable, Sendable {
+    public var window: String
+
+    public init(window: String) { self.window = window }
 }
 
 /// `upload`: one chunk of an Attachment. An upload is a pipelined run of these, of at most

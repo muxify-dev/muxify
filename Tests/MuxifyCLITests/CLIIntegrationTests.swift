@@ -1708,6 +1708,38 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
                        "example.com https://GitHub.com#readme https://example.com/", "a read leaves the queue for the app")
     }
 
+    /// The phone reads a Window's Tabs from its Host Server: `browser_tabs` answers the JSON that `muxify browser tabs
+    /// --window <id> --json` prints with no Mac, and an unknown Window fails with the CLI's words.
+    func testTheHostServersBrowserTabsAnswerTheJSONThatTheCLIPrintsWithNoMac() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let window = try sandbox.tmux(["display-message", "-p", "-t", try sandbox.pane(of: "main").rawValue, "#{window_id}"])
+        _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_tabs", "https://github.com/ about:blank https://example.com/a"])
+        _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_active_tab", "2"])
+        _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_open", "https://GitHub.com#readme"])
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let server = try startServer(environment: environment, capabilities: [HostCapability.browserTabs.rawValue])
+        defer { stopIfRunning(server.process) }
+        try await server.client.connect()
+
+        let printed = try await run(cli, arguments: ["browser", "tabs", "--window", window, "--json"], environment: environment)
+        XCTAssertEqual(printed.status, 0, printed.output)
+        let answer = try await server.client.call(HostRequest.browserTabs(BrowserTabsRequest(window: window)), as: JSONValue.self)
+        XCTAssertEqual(answer, try JSONDecoder().decode(JSONValue.self, from: Data(printed.stdout.utf8)), printed.stdout)
+        XCTAssertEqual(try JSONDecoder().decode([BrowserAgentTab].self, from: Data(printed.stdout.utf8)).map(\.active), [true, false, false],
+                       "the queued page that the first Tab has selects it")
+
+        let unknown = try await run(cli, arguments: ["browser", "tabs", "--window", "@999", "--json"], environment: environment)
+        XCTAssertEqual(unknown.status, 1, unknown.output)
+        do {
+            _ = try await server.client.call(HostRequest.browserTabs(BrowserTabsRequest(window: "@999")), as: JSONValue.self)
+            XCTFail("an unknown Window must not end ok")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+            XCTAssertEqual("muxify: \(error.message)\n", unknown.stderr)
+        }
+    }
+
     // MARK: - Requests
 
     func testTopicNewTwiceWithOneRequestMakesOneTopicAndPrintsTheSameJSON() async throws {

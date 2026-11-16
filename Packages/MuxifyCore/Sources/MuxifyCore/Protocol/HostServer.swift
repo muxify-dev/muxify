@@ -190,6 +190,8 @@ public enum HostServer {
                 host.visit(visit, for: request)
             case .upload(let chunk):
                 host.uploads.receive(chunk, for: request)
+            case .browserTabs(let tabs):
+                host.browserTabs(tabs, for: request)
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -676,6 +678,19 @@ final class HostEnvironment: @unchecked Sendable {
             case .success: request.finish()
             case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
             }
+        }
+    }
+
+    /// A Window's stored Browser Tabs, read as `muxify browser tabs --window <id> --json` reads them with no Mac
+    /// (ADR 0084), so both answer the same JSON. It changes nothing; the queued opens stay for the app.
+    func browserTabs(_ tabs: BrowserTabsRequest, for request: ProtocolIncomingRequest) {
+        let tmux = context.tmux
+        Task {
+            let read = await Self.background { () -> [BrowserAgentTab]? in
+                (try? tmux.run(StoredBrowser.storedTabsArguments(target: tabs.window))).flatMap(StoredBrowser.agentTabs(listedPanes:))
+            }
+            guard let read else { return request.fail(ProtocolError(.failed, StoredBrowser.noWindow(tabs.window))) }
+            request.finish(read)
         }
     }
 

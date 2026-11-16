@@ -33,6 +33,9 @@ final class ProtocolWireTests: XCTestCase {
             try ProtocolLine.ok(id: 8, TopicSessionPathsAnswer(TopicSessionPathChoices(topic: Self.topic, records: [Self.topic], windows: [],
                                                                                        sessionPaths: Self.sessionPaths), visits: Self.visits)),
             try ProtocolLine.ok(id: 9, ProtocolEmpty()),
+            try ProtocolLine.request(id: 10, HostRequest.browserTabs(BrowserTabsRequest(window: "@12"))),
+            try ProtocolLine.ok(id: 10, StoredBrowser(tabURLs: ["https://github.com/", "about:blank"], activeTab: 1).agentTabs(opening: ["example.com"])),
+            ProtocolLine.error(id: 11, ProtocolError(.failed, StoredBrowser.noWindow("@99"))),
         ]
     }
 

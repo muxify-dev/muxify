@@ -561,6 +561,41 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(topic.rows.map { $0.lastVisit != nil }, [false, true])
     }
 
+    // MARK: - Browser Tabs
+
+    /// `browser_tabs` answers the Window's stored Tabs, then its queued opens, as the app will show them; an unknown
+    /// Window fails with the CLI's words, and a client that did not declare `browser-tabs` gets `unsupported`.
+    func testBrowserTabsAnswersTheWindowsStoredTabsOnlyToAClientThatDeclaredIt() async throws {
+        let window = try tmuxOutput(["display-message", "-p", "-t", "=work:", "#{window_id}"])
+        try tmux.run(["set-option", "-w", "-t", window, Tmux.tabsOption, "https://github.com/ about:blank"])
+        try tmux.run(["set-option", "-w", "-t", window, Tmux.activeTabOption, "1"])
+        try tmux.run(["set-option", "-w", "-t", window, Tmux.openOption, "example.com"])
+        let request = HostRequest.browserTabs(BrowserTabsRequest(window: window))
+
+        let plain = try await connect()
+        do {
+            _ = try await plain.call(request, as: [BrowserAgentTab].self)
+            XCTFail("browser_tabs from a client that did not declare browser-tabs must not be answered")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .unsupported)
+            XCTAssertTrue(error.message.contains("browser-tabs"), error.message)
+        }
+
+        let client = try await connect(capabilities: [HostCapability.browserTabs.rawValue])
+        let tabs = try await client.call(request, as: [BrowserAgentTab].self)
+        XCTAssertEqual(tabs.map(\.url), ["https://github.com/", "https://example.com"], "the blank active Tab loads the queued page")
+        XCTAssertEqual(tabs.map(\.active), [false, true])
+        XCTAssertEqual(try tmuxOutput(["show-options", "-wqv", "-t", window, Tmux.openOption]), "example.com", "a read leaves the queue for the app")
+
+        do {
+            _ = try await client.call(HostRequest.browserTabs(BrowserTabsRequest(window: "@999")), as: [BrowserAgentTab].self)
+            XCTFail("an unknown Window must not end ok")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+            XCTAssertEqual(error.message, "no tmux Window or Pane '@999'")
+        }
+    }
+
     // MARK: - Upload
 
     func testA200KiBUploadArrivesIntactInChunksOfAtMost64KiB() async throws {
