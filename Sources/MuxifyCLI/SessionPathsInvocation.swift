@@ -69,6 +69,14 @@ struct SessionPathsInvocation: Equatable {
         }
     }
 
+    #if canImport(Darwin)
+    private static let newSession = Int16(POSIX_SPAWN_SETSID)
+    #else
+    /// glibc declares POSIX_SPAWN_SETSID only under _GNU_SOURCE, which Swift's Glibc module does not set. glibc and
+    /// musl both give it this value.
+    private static let newSession: Int16 = 0x80
+    #endif
+
     /// Runs `muxify session-paths refresh` in a session of its own, with no terminal and with `/dev/null` for its
     /// input and output. It holds no pipe of this command, so `ssh host muxify session-paths` ends when the answer
     /// is out, and the end of the connection does not stop the refresh. A refresh that does not start costs only an
@@ -88,7 +96,7 @@ struct SessionPathsInvocation: Equatable {
         }
         posix_spawnattr_init(&attributes)
         defer { posix_spawnattr_destroy(&attributes) }
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
+        posix_spawnattr_setflags(&attributes, Self.newSession)
         let arguments = [executable.path] + CLIVerbPath.sessionPathsRefresh.words
         var argv = arguments.map { strdup($0) } + [nil]
         var envp = environment.map { strdup($0.key + "=" + $0.value) } + [nil]
