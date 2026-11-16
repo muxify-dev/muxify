@@ -28,8 +28,12 @@ final class WorkspaceStore {
     private var pendingReadNavigations: Set<UUID> = []
 
     private(set) var newTopicFailure: String?
-    /// When each Topic, Session and SessionPath was last looked at; the lists rank by it.
+    /// When each Topic, Session and SessionPath of this App Window's Environment was last looked at; the lists rank
+    /// by it. The state database keeps it, and for this Mac the Host CLI writes there too.
     private(set) var visits: VisitLog
+    @ObservationIgnored private let visitStore: VisitStore
+    /// Saves the visits in order, off the main thread: a write can wait for another process's transaction.
+    @ObservationIgnored private let visitWrites = DispatchQueue(label: "muxify.visits", qos: .utility)
     /// The SessionPaths on this App Window's Environment, as `refreshSessionPaths` found them last.
     private(set) var sessionPaths: [SessionPath] = []
     private(set) var sessionPathWarnings: [String] = []
@@ -953,9 +957,26 @@ final class WorkspaceStore {
         } ?? .noTopic
         // A mutating call on `visits` notifies its readers even when it records nothing, and this runs on each refresh.
         var log = visits
-        guard log.record(window, group: group, sessionPaths: sessionPaths, folders: folders, at: Date()) else { return }
+        let now = Date()
+        let stamped = log.record(window, group: group, sessionPaths: sessionPaths, folders: folders, at: now)
+        guard !stamped.isEmpty else { return }
         visits = log
-        visits.save(to: defaults)
+        visitWrites.async { [visitStore, environment = activeEnvironment?.name] in
+            try? visitStore.add(Dictionary(uniqueKeysWithValues: stamped.map { ($0, now) }), environment: environment)
+        }
+    }
+
+    /// Takes the visits that the Host CLI saved since the last read, such as a Session the phone opened, so a list
+    /// that opens now ranks by them.
+    func reloadVisits() {
+        var log = visits
+        log.merge(storedVisits(of: activeEnvironment))
+        if log != visits { visits = log }
+    }
+
+    /// A Remote Environment's visits are the ones its App Windows on this Mac recorded, kept under its name.
+    private func storedVisits(of environment: RemoteEnvironment?) -> [VisitKey: Date] {
+        (try? visitStore.times(environment: environment?.name)) ?? [:]
     }
 
     /// The Topic records and the Open Places, as the link's last `topics` event left them.
@@ -1291,18 +1312,20 @@ final class WorkspaceStore {
     /// Browser History of this Mac, for the Browsers of this App Window.
     let browserHistory: BrowserHistory
     /// Where this store keeps the view state it remembers across launches: the Sidebar mode, the open Session
-    /// cards, what the Sidebar shows and the visit times. The app passes `.standard`; a test, a suite of its own.
+    /// cards and what the Sidebar shows. The app passes `.standard`; a test, a suite of its own.
     @ObservationIgnored private let defaults: UserDefaults
 
     /// `link` makes the link to an Active Environment; a store test passes a fake.
     init(configStore: ConfigStore, environment: RemoteEnvironment? = nil, browserHistory: BrowserHistory = .shared,
-         defaults: UserDefaults = .standard, link makeLink: @escaping (RemoteEnvironment?) -> EnvironmentLink = EnvironmentLinks.make) {
+         defaults: UserDefaults = .standard, visitStore: VisitStore, link makeLink: @escaping (RemoteEnvironment?) -> EnvironmentLink = EnvironmentLinks.make) {
         self.configStore = configStore
         self.makeLink = makeLink
         link = makeLink(environment)
         self.browserHistory = browserHistory
         self.defaults = defaults
-        visits = VisitLog(defaults: defaults)
+        self.visitStore = visitStore
+        LegacyVisits.move(from: defaults, to: visitStore)
+        visits = VisitLog(times: (try? visitStore.times(environment: environment?.name)) ?? [:])
         sidebarMode = SidebarMode(rawValue: defaults.string(forKey: "sidebarWorkView") ?? "") ?? .topics
         openSessionCards = Set(defaults.stringArray(forKey: "expandedSessions") ?? [])
         sidebarVisible = defaults.object(forKey: "sidebarVisible") as? Bool ?? true
@@ -1391,6 +1414,7 @@ final class WorkspaceStore {
             remoteConfig = nil
             remoteConfigPath = nil
             sessionPaths = []
+            visits = VisitLog(times: storedVisits(of: next))
         }
         findsSessionPathsOnConfig = false
         activeEnvironment = next

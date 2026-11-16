@@ -11,6 +11,8 @@ final class AppWindows {
     /// Where the App Windows and their stores remember view state across launches. The app passes `.standard`;
     /// a test, a suite of its own.
     @ObservationIgnored private let defaults: UserDefaults
+    /// The visit times of every App Window, in the state database. A test passes one in a state folder of its own.
+    @ObservationIgnored private let visitStore: VisitStore
     @ObservationIgnored private let initialEnvironmentName: String?
     private(set) var focusedID: UUID?
     /// Opens the App Window of a request in a window controller of its own. A test replaces it to see what would open.
@@ -34,9 +36,10 @@ final class AppWindows {
         return (first.map { [$0] } ?? []) + stores.values.filter { $0 !== first && $0.activeEnvironment == nil }
     }
 
-    init(configStore: ConfigStore, defaults: UserDefaults = .standard) {
+    init(configStore: ConfigStore, defaults: UserDefaults = .standard, visitStore: VisitStore) {
         self.configStore = configStore
         self.defaults = defaults
+        self.visitStore = visitStore
         settings = SettingsModel(configStore: configStore)
         let remembered = defaults.string(forKey: "selectedEnvironment")
         let name = configStore.config.remoteEnvironments.first { $0.name == remembered }?.name
@@ -92,7 +95,7 @@ final class AppWindows {
     func store(for request: AppWindowRequest) -> WorkspaceStore {
         if let store = stores[request.id] { return store }
         let environment = configStore.config.remoteEnvironments.first { $0.name == request.environmentName }
-        let store = WorkspaceStore(configStore: configStore, environment: environment, defaults: defaults)
+        let store = WorkspaceStore(configStore: configStore, environment: environment, defaults: defaults, visitStore: visitStore)
         stores[request.id] = store
         catalog.register(request)
         catalog.updateEnvironment(request.id, name: environment?.name)

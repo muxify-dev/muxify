@@ -35,7 +35,7 @@ final class EnvironmentLinkStoreTests: XCTestCase {
 
     func testAnActionWhoseFeatureTheLinkLacksIsHiddenFromTheCommandPalette() {
         let link = FakeEnvironmentLink(features: .all)
-        let store = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults()) { _ in link }
+        let store = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }
         XCTAssertTrue(store.palette.commands.contains(.newTopic))
         XCTAssertTrue(store.palette.commands.contains(.installExtensions))
 
@@ -44,7 +44,7 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         XCTAssertTrue(store.palette.commands.contains(.installExtensions), "Install Extensions asks only whether it is this Mac")
 
         let remote = FakeEnvironmentLink(isOnThisMac: false, features: .all)
-        let remoteStore = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults()) { _ in remote }
+        let remoteStore = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in remote }
         XCTAssertTrue(remoteStore.palette.commands.contains(.newTopic), "an Environment that serves Topics offers them")
         XCTAssertFalse(remoteStore.palette.commands.contains(.installExtensions))
     }
@@ -53,7 +53,7 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         var links: [FakeEnvironmentLink] = []
         let box = RemoteEnvironment(name: "box", host: "box", username: "user")
         // The Config names no Remote Environment, so reconciling moves the App Window to Local.
-        let store = WorkspaceStore(configStore: configStore(), environment: box, defaults: isolatedDefaults()) { environment in
+        let store = WorkspaceStore(configStore: configStore(), environment: box, defaults: isolatedDefaults(), visitStore: isolatedVisits()) { environment in
             let link = FakeEnvironmentLink(isOnThisMac: environment == nil, features: environment == nil ? .all : [.git])
             links.append(link)
             return link
@@ -85,7 +85,7 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         let first = [TopicRecord(id: "a", title: "A"), TopicRecord(id: "b", title: "B")]
         let places = [OpenPlace(id: "p", order: 1)]
         link.initial = [.topics(TopicContents(records: first, openPlaces: places))]
-        let store = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults()) { _ in link }
+        let store = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }
         XCTAssertEqual(store.records, [], "nothing shows before the store subscribes")
 
         store.startLinkForTesting()
@@ -112,7 +112,7 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         let host = FakeEnvironmentLink(isOnThisMac: false, features: [.topics, .git])
         let sessionsOnly = FakeEnvironmentLink(isOnThisMac: false, features: [])
         host.fallback = sessionsOnly
-        let store = WorkspaceStore(configStore: configStore(), environment: box, defaults: isolatedDefaults()) { _ in host }
+        let store = WorkspaceStore(configStore: configStore(), environment: box, defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in host }
         store.startLinkForTesting()
         host.send(.topics(TopicContents(records: [TopicRecord(id: "a", title: "A")])))
         return (store, host, sessionsOnly)
@@ -238,7 +238,7 @@ final class EnvironmentLinkStoreTests: XCTestCase {
 
     /// A store on a Remote Environment's link, connected by the link's first read.
     private func connectedRemoteStore(_ link: FakeEnvironmentLink, local: String = "") throws -> WorkspaceStore {
-        let store = WorkspaceStore(configStore: try configStore(text: local), environment: box, defaults: isolatedDefaults()) { _ in link }
+        let store = WorkspaceStore(configStore: try configStore(text: local), environment: box, defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }
         store.startLinkForTesting()
         link.send(.snapshot(snapshot([window("@1")])))
         return store
@@ -275,7 +275,7 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         XCTAssertEqual(link.configReloads, 2, "Reload Config reads the Config again")
 
         let local = FakeEnvironmentLink()
-        let localStore = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults()) { _ in local }
+        let localStore = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in local }
         localStore.startLinkForTesting()
         localStore.reloadConfig()
         XCTAssertEqual(local.configReloads, 0, "this Mac's Config is the ConfigStore's, which reloads itself")

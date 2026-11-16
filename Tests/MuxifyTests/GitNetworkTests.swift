@@ -31,7 +31,7 @@ final class GitCredentialPromptTests: XCTestCase {
     }
 
     private func gitView(_ link: FakeEnvironmentLink) -> (WorkspaceStore, GitView) {
-        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"), defaults: isolatedDefaults()) { _ in link }
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }
         store.startLinkForTesting()
         let gitView = store.gitView(for: "@1")
         gitView.apply(GitSnapshot(root: "/repo", repositoryName: "repo", head: "master"))

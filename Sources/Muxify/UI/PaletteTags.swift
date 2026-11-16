@@ -65,6 +65,12 @@ struct TagText {
 
     /// New Topic: the words that are not Tags.
     var title: String { words.filter { !isTagWord($0) }.joined(separator: " ") }
+
+    /// Whether ↩ may go on: no word is refused, and New Topic has a title, as `muxify topic new` needs one.
+    var canAccept: Bool {
+        if case .newTopic = field.mode, title.isEmpty { return false }
+        return refusedWords.isEmpty
+    }
 }
 
 extension PaletteFlow {
@@ -123,9 +129,9 @@ extension CommandPalette {
         let tags = text.tags
         switch field.mode {
         case .newTopic:
+            if text.title.isEmpty { return "Give the Topic a title." }
             guard !tags.isEmpty else { return nil }
-            let title = text.title.isEmpty ? "Untitled" : text.title
-            return "Title: \(title) · Tags: \(list(tags)) · ↩ makes the Topic. Its first Session comes next."
+            return "Title: \(text.title) · Tags: \(list(tags)) · ↩ makes the Topic. Its first Session comes next."
         case .editTags(let topic):
             let changes = [("Removes", topic.tags.sorted().filter { !tags.contains($0) }), ("Adds", tags.filter { !topic.tags.contains($0) })]
                 .filter { !$0.1.isEmpty }.map { "\($0.0): \(list($0.1))" }

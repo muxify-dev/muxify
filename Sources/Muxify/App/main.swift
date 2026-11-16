@@ -15,7 +15,7 @@ let appDelegate = MainActor.assumeIsolated {
     // The imports of the old Topic records, Muxify Worktree record and Browser History files name each entry they
     // could not move in the Diagnostics log.
     StateDatabase.reportProblem = { Diagnostics.report("state: \($0)") }
-    let windows = AppWindows(configStore: configStore)
+    let windows = AppWindows(configStore: configStore, visitStore: VisitStore(paths: MuxifyPaths()))
     // Nil in a build without a feed, such as Debug or `make install` (UpdateFeed).
     let updater = SparkleUpdater.startIfConfigured(update: configStore.config.update)
     GhosttyRuntime.shared.delegate = windows

@@ -1,61 +1,66 @@
 import Foundation
 
-struct FuzzyQuery: Equatable {
-    let words: [String]
+public struct FuzzyQuery: Equatable {
+    public let words: [String]
     /// Per word, the lowest score that counts as a match: 55% of what the word scores against itself. A word spread
     /// thinly over a long path, such as "claude" over "~/.local/state/…", scored at most 46%; initials and parts of a
     /// word at least 64%. A one-character word has no minimum, so the letter inside a word still matches.
-    let minimumScores: [Int]
+    public let minimumScores: [Int]
 
-    init(_ text: String) {
+    public init(_ text: String) {
         words = text.split(whereSeparator: \.isWhitespace).map(String.init)
         minimumScores = words.map { $0.count < 2 ? 0 : (FuzzyMatcher.match($0, in: $0, scheme: .history)?.score ?? 0) * 11 / 20 }
     }
 
-    var isEmpty: Bool { words.isEmpty }
+    public var isEmpty: Bool { words.isEmpty }
 }
 
-struct FuzzyMatch: Equatable {
-    let score: Int
+public struct FuzzyMatch: Equatable {
+    public let score: Int
     /// Character offsets into the text, ascending.
-    let positions: [Int]
+    public let positions: [Int]
+
+    public init(score: Int, positions: [Int]) {
+        self.score = score
+        self.positions = positions
+    }
 }
 
 /// fzf's `--scheme`: the bonus for a word that starts after a space, and after a delimiter such as `/`.
-struct FuzzyScheme {
-    let boundaryWhite: Int
-    let boundaryDelimiter: Int
+public struct FuzzyScheme {
+    public let boundaryWhite: Int
+    public let boundaryDelimiter: Int
 
     /// A space beats `/`, which beats `-`.
-    static let `default` = FuzzyScheme(boundaryWhite: FuzzyMatcher.bonusBoundaryWhite, boundaryDelimiter: FuzzyMatcher.bonusBoundaryDelimiter)
+    public static let `default` = FuzzyScheme(boundaryWhite: FuzzyMatcher.bonusBoundaryWhite, boundaryDelimiter: FuzzyMatcher.bonusBoundaryDelimiter)
     /// Every separator earns the same, so "Fix game", "fix/game" and "fix-game" score alike. The palettes use it: Topic
     /// titles separate words with spaces and Session names with `/` and `-`, and neither should win for that.
-    static let history = FuzzyScheme(boundaryWhite: FuzzyMatcher.bonusBoundary, boundaryDelimiter: FuzzyMatcher.bonusBoundary)
+    public static let history = FuzzyScheme(boundaryWhite: FuzzyMatcher.bonusBoundary, boundaryDelimiter: FuzzyMatcher.bonusBoundary)
 }
 
 /// A port of fzf's FuzzyMatchV2 (src/algo/algo.go at v0.74.4, no normalization), with its default and history
 /// schemes, without its single- and two-character fast paths, which only speed up the same result.
 /// Smart case: a word with an uppercase letter matches case-sensitively, as in fzf.
-enum FuzzyMatcher {
-    static let scoreMatch = 16
-    static let scoreGapStart = -3
-    static let scoreGapExtension = -1
-    static let bonusBoundary = scoreMatch / 2
-    static let bonusNonWord = scoreMatch / 2
-    static let bonusCamel123 = bonusBoundary + scoreGapExtension
-    static let bonusConsecutive = -(scoreGapStart + scoreGapExtension)
-    static let bonusFirstCharMultiplier = 2
-    static let bonusBoundaryWhite = bonusBoundary + 2
-    static let bonusBoundaryDelimiter = bonusBoundary + 1
+public enum FuzzyMatcher {
+    public static let scoreMatch = 16
+    public static let scoreGapStart = -3
+    public static let scoreGapExtension = -1
+    public static let bonusBoundary = scoreMatch / 2
+    public static let bonusNonWord = scoreMatch / 2
+    public static let bonusCamel123 = bonusBoundary + scoreGapExtension
+    public static let bonusConsecutive = -(scoreGapStart + scoreGapExtension)
+    public static let bonusFirstCharMultiplier = 2
+    public static let bonusBoundaryWhite = bonusBoundary + 2
+    public static let bonusBoundaryDelimiter = bonusBoundary + 1
 
-    enum CharClass: Int {
+    public enum CharClass: Int {
         case white, nonWord, delimiter, lower, upper, letter, number
     }
 
     private static let delimiters: Set<Character> = ["/", ",", ":", ";", "|"]
 
     /// Nil when `word` is not a subsequence of `text`.
-    static func match(_ word: String, in text: String, scheme: FuzzyScheme = .default) -> FuzzyMatch? {
+    public static func match(_ word: String, in text: String, scheme: FuzzyScheme = .default) -> FuzzyMatch? {
         let pattern = Array(word)
         let M = pattern.count
         guard M > 0 else { return FuzzyMatch(score: 0, positions: []) }
@@ -193,7 +198,7 @@ enum FuzzyMatcher {
         return FuzzyMatch(score: maxScore, positions: positions.reversed())
     }
 
-    static func charClass(_ character: Character) -> CharClass {
+    public static func charClass(_ character: Character) -> CharClass {
         if character.isASCII {
             switch character {
             case "a"..."z": return .lower
@@ -211,7 +216,7 @@ enum FuzzyMatcher {
         return delimiters.contains(character) ? .delimiter : .nonWord
     }
 
-    static func bonus(_ previous: CharClass, _ current: CharClass, scheme: FuzzyScheme = .default) -> Int {
+    public static func bonus(_ previous: CharClass, _ current: CharClass, scheme: FuzzyScheme = .default) -> Int {
         if current.rawValue >= CharClass.nonWord.rawValue {
             switch previous {
             case .white: return scheme.boundaryWhite

@@ -1,5 +1,5 @@
 import XCTest
-import MuxifyCore
+@testable import MuxifyCore
 
 final class PickListTests: XCTestCase {
     private func candidate(_ id: String, _ title: String, kind: RowKind = .topic, note: String? = nil, visit: TimeInterval? = nil,

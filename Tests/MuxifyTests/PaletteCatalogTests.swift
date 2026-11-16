@@ -362,11 +362,11 @@ final class PaletteCatalogTests: XCTestCase {
         try ("pick_lists:\n" + ActionList.allCases.map { list in
             "  \(list.rawValue):\n    show: [\(RowKind.allCases.filter(list.kinds.contains).map(\.rawValue).joined(separator: ", "))]\n"
         }.joined()).write(toFile: path, atomically: true, encoding: .utf8)
-        let narrowed = WorkspaceStore(configStore: ConfigStore(path: path), defaults: isolatedDefaults())
+        let narrowed = WorkspaceStore(configStore: ConfigStore(path: path), defaults: isolatedDefaults(), visitStore: isolatedVisits())
         XCTAssertEqual(narrowed.config.problems, [])
         XCTAssertEqual(Set(narrowed.config.pickLists.keys), Set(ActionList.allCases))
         let standard = WorkspaceStore(configStore: ConfigStore(path: directory.appendingPathComponent("none.yaml").path),
-                                      defaults: isolatedDefaults())
+                                      defaults: isolatedDefaults(), visitStore: isolatedVisits())
         let defined = ConfigTags([TagDefinition(tag: Tag(name: "backend")!), TagDefinition(tag: Tag(name: "ops")!)])
         let draft = WorktreeStartDraft(topic: TopicRecord(id: "t", title: "T"), choice: SessionChoice(sessionPath: game, worktree: nil))
         draft.starts = .ready([WorktreeStartChoice(branch: "main", checkedOutAt: "/work/game/main"),

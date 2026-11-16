@@ -111,6 +111,21 @@ open Topic. The service removes spaces at the two ends, joins lines with one
 space, and clears the Note for text with no words. Settle clears the Note, so
 a Reopened Topic starts without a Note.
 
+## The visits
+
+`visits` holds the Last visit of each Topic, Session and Session Path, for the
+ranking of Go to… and of `muxify session-paths`. It is not part of a Topic
+record.
+
+| Column | Type | Holds |
+| --- | --- | --- |
+| `environment` | text or NULL | NULL for this machine. On the Mac, the name of the Remote Environment whose App Window recorded the visit. |
+| `place` | text | `topic:<id>`, `topic:-` for No Topic, `session:<name>` or `path:<real path>`. |
+| `visited_at` | real | The time of the visit, in seconds since 1970. |
+
+A write changes a row only when its time is newer, and each machine keeps its
+2000 newest rows.
+
 ## Writes
 
 The app and `muxify` both write the tables. A write is one SQLite transaction.

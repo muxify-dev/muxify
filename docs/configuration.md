@@ -391,6 +391,10 @@ writes nothing. New Topic and Edit Tags suggest the Tags in Config order, also
 a Tag that no Topic has. A `#word` that no Tag matches cannot become a chip,
 and ↩ does nothing while it is in the field.
 
+New Topic needs a title, as `muxify topic new` does. ↩ does nothing while the title has only
+spaces or Tags, and the note under the field says "Give the Topic a title." Rename Topic
+still takes a blank title, which makes an Untitled Topic.
+
 A Topic record can hold a Tag that the Config does not define, such as a Tag
 that you removed or renamed here. Muxify does not change the record. The card
 shows that Tag dimmed and with no color. Edit Tags can remove it, but nothing
@@ -1283,6 +1287,12 @@ rule that differs decides:
   Commands and Tags skip it and keep their Config order.
 
 A rule that is not listed does not count, and the Source order decides last.
+The time of each visit is in the `visits` table of `muxify.db` on the machine
+that has the Session. The Host CLI reads and writes the same table: `muxify
+session-paths [--query <text>]` lists that machine's Session Paths and Worktrees
+with the `tiebreak` of the palette named `Go to…`, and `muxify session-paths
+visit <dir>` records a visit for a Session that the phone opened
+([ADR 0092](adr/0092-the-visit-log-lives-in-the-state-database-and-the-host-cli-ranks-session-paths-as-go-to-does.md)).
 The default is `[open, length, running, visit, activity]`. To rank everything in
 one list and prefer the row you used last:
 
@@ -1690,6 +1700,8 @@ See [Hints and shortcut positions](keybindings.md#hints) for key remaps and hold
 ## Sidebar
 
 `sidebar.topics` and `sidebar.sessions` enable the two Sidebar modes. Both default to `true`.
+`muxify environment show --json` reports both as `"sidebar":{"topics":true,"sessions":true}`, next to `tags`,
+with the defaults when a key is absent. Muxify Mobile reads it to show the same tabs as the Mac.
 `sidebar.panes` shows or hides Pane rows. Leave it out to use **View > Show Panes**.
 `sidebar.agents` shows or hides the Agents section. Leave it out to use **View > Show Agents**.
 A configured value disables the corresponding View menu choice.

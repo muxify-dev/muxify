@@ -1,4 +1,5 @@
 import XCTest
+@testable import MuxifyCore
 
 /// The expected scores are fzf's own, from src/algo/algo_test.go at v0.74.4 (TestFuzzyMatch, forward).
 /// fzf lowercases a case-insensitive pattern before matching; here the word is given lowercase, and smart case does the rest.
