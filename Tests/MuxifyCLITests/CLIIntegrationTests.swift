@@ -1344,6 +1344,66 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertTrue(server.stderr().contains("muxify server: exits, no frame came in time"))
     }
 
+    /// The `snapshot` subscription of `muxify server` is the JSON of `environment show --json` without `capabilities`
+    /// for the same state, and `topic new` on the same muxify.db pushes the next item.
+    func testAServersSnapshotItemIsEnvironmentShowWithoutCapabilities() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        _ = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let server = try startServer(environment: environment, capabilities: ["snapshot"])
+        defer { stopIfRunning(server.process) }
+        try await server.client.connect()
+        let items = JSONItems()
+        let stream = server.client.subscribe(HostRequest.subscribe(.snapshot), as: JSONValue.self)
+        let consumer = Task {
+            do {
+                for try await item in stream { items.add(item) }
+            } catch {}
+        }
+        defer { consumer.cancel() }
+
+        func shown() async throws -> JSONValue {
+            let result = try await run(self.cli, arguments: ["environment", "show", "--json"], environment: environment)
+            XCTAssertEqual(result.status, 0, result.output)
+            guard case .object(var keys) = try JSONDecoder().decode(JSONValue.self, from: Data(result.stdout.utf8)) else {
+                throw CLIError("environment show printed no object: \(result.stdout)")
+            }
+            XCTAssertNotNil(keys.removeValue(forKey: "capabilities"), "the CLI lists its capabilities")
+            return .object(keys)
+        }
+        // A Pane's shell may still draw its prompt or name its Window, which the next item shows: the last item and
+        // what the CLI prints agree once tmux settled.
+        func assertAgree(_ message: String) async throws {
+            var printed = try await shown()
+            let deadline = Date().addingTimeInterval(10)
+            while items.last != printed, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(200))
+                printed = try await shown()
+            }
+            XCTAssertEqual(items.last, printed, message)
+        }
+        try await assertAgree("the snapshot item is environment show --json without capabilities")
+        guard case .object(let keys)? = items.last else { return XCTFail("no snapshot item") }
+        XCTAssertEqual(keys["sidebar"], .object(["topics": .bool(true), "sessions": .bool(true)]))
+
+        let made = try await run(cli, arguments: ["topic", "new", "Other"], environment: environment)
+        XCTAssertEqual(made.status, 0, made.output)
+        let id = made.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        func text(_ item: JSONValue?) -> String { item.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? "" }
+        try await wait("topic new pushed no snapshot item with its Topic") { text(items.last).contains("\"\(id)\"") }
+        try await assertAgree("the item after topic new is environment show --json without capabilities")
+    }
+
+    /// The JSON items of a subscription, as they came.
+    private final class JSONItems: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [JSONValue] = []
+
+        func add(_ item: JSONValue) { lock.lock(); log.append(item); lock.unlock() }
+        var last: JSONValue? { lock.lock(); defer { lock.unlock() }; return log.last }
+    }
+
     /// A running `muxify server` with a protocol client on its stdout and stdin, and its stderr.
     private func startServer(environment: [String: String] = [:], capabilities: [String] = []) throws
         -> (process: Process, client: ProtocolClient, stderr: () -> String) {

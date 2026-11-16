@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// The JSON of every frame of the Host Server protocol is a contract (ADR 0086's change rule): these strings are
 /// pinned, and every release's fixtures folder must still decode.
@@ -36,6 +37,9 @@ final class ProtocolWireTests: XCTestCase {
             try ProtocolLine.request(id: 10, HostRequest.browserTabs(BrowserTabsRequest(window: "@12"))),
             try ProtocolLine.ok(id: 10, StoredBrowser(tabURLs: ["https://github.com/", "about:blank"], activeTab: 1).agentTabs(opening: ["example.com"])),
             ProtocolLine.error(id: 11, ProtocolError(.failed, StoredBrowser.noWindow("@99"))),
+            try ProtocolLine.request(id: 12, HostRequest.subscribe(.snapshot)),
+            try ProtocolLine.item(id: 12, Self.snapshotItems.first),
+            try ProtocolLine.item(id: 12, Self.snapshotItems.later),
         ]
     }
 
@@ -55,6 +59,19 @@ final class ProtocolWireTests: XCTestCase {
     private static var sessionPathRows: [SessionPathRow] { SessionPathRows.build(sessionPaths: sessionPaths, windows: [], records: []) }
     private static let visits: [VisitKey: Date] = [.directory("/work/game"): Date(timeIntervalSince1970: 1_700_000_000)]
     private static var topic: TopicRecord { TopicRecord(id: requestID.rawValue, title: "Ship") }
+
+    /// The first `snapshot` item of a Host with one Session and no Topic, and the one after a Topic took that Session.
+    private static var snapshotItems: (first: EnvironmentShown, later: EnvironmentShown) {
+        let window = TmuxWindow.fixture(id: "@1", sessionID: "$1", sessionName: "work", sessionActivity: 1763100000)
+        let tmux = TmuxSnapshot(windows: [window], clients: [], panes: [], serverRunning: true)
+        var record = TopicRecord(id: "t1", title: "Ship")
+        record.order = 1
+        var taken = window
+        taken.topicID = "t1"
+        let later = TmuxSnapshot(windows: [taken], clients: [], panes: [], serverRunning: true)
+        return (EnvironmentShown(contents: TopicContents(records: [], openPlaces: []), tmux: tmux, config: Config()),
+                EnvironmentShown(contents: TopicContents(records: [record], openPlaces: []), tmux: later, config: Config()))
+    }
 
     /// The first server's messages, pinned in `1-first-server`.
     private func firstServersFrames() throws -> [Data] {
@@ -312,11 +329,31 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(gone.dropLast().utf8))).payload(TopicDetailItem.self), .none)
     }
 
-    /// Whether an `item` decodes as one of the protocol's items: a chunk, or a `topic` subscription's detail or null.
+    /// Whether an `item` decodes as one of the protocol's items: a chunk, a `topic` subscription's detail or null, or a
+    /// `snapshot` item.
     private static func decodesAsAnItem(_ frame: ProtocolFrame) -> Bool {
         // `try?` would flatten a null item into a failure.
         do { _ = try frame.payload(ProtocolChunk.self); return true } catch {}
-        do { _ = try frame.payload(TopicDetailItem.self); return true } catch { return false }
+        do { _ = try frame.payload(TopicDetailItem.self); return true } catch {}
+        do { _ = try frame.payload(EnvironmentShown.self); return true } catch { return false }
+    }
+
+    func testTheSnapshotSubscriptionIsPinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        XCTAssertEqual(text(try ProtocolLine.request(id: 6, HostRequest.subscribe(.snapshot))),
+                       #"{"id":6,"kind":"request","request":{"subscribe":{"snapshot":{}}}}"# + "\n")
+        XCTAssertEqual(HostSubscription.snapshot.capability, .snapshot)
+        XCTAssertNil(HostSubscription.environment.capability)
+        let first = text(try ProtocolLine.item(id: 6, Self.snapshotItems.first))
+        XCTAssertFalse(first.contains("capabilities"), "a snapshot item carries no capabilities: \(first)")
+        XCTAssertTrue(first.contains(#""sidebar":{"sessions":true,"topics":true}"#), first)
+        for shown in [Self.snapshotItems.first, Self.snapshotItems.later] {
+            let line = try ProtocolLine.item(id: 6, shown)
+            XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(line.dropLast()))).payload(EnvironmentShown.self), shown)
+        }
+        var printed = Self.snapshotItems.first
+        printed.capabilities = ["request"]
+        XCTAssertTrue(text(try ProtocolLine.item(id: 6, printed)).contains(#""capabilities":["request"]"#), "the CLI adds its own")
     }
 
     func testAnUnknownRequestCaseThrowsUnsupported() {

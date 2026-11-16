@@ -54,11 +54,11 @@ public struct HostServerContext: @unchecked Sendable {
 }
 
 /// `muxify server`: the Host Server's requests (ADR 0087). It serves `ping` and `shutdown`, the `environment`,
-/// `config`, `repository` and `topic` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and
-/// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads, writes and network
-/// commands, `session_paths`, `visit_session_path` and `upload`. Programs on the Host reach its Mac through its own socket, whose requests it
-/// sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask` goes to the network command that runs it, which
-/// asks the Mac.
+/// `config`, `repository`, `topic` and `snapshot` subscriptions, `environment` requests, `mark_read`, the view commands,
+/// the Topic and Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads, writes and
+/// network commands, `session_paths`, `visit_session_path` and `upload`. Programs on the Host reach its Mac through its
+/// own socket, whose requests it sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask` goes to the
+/// network command that runs it, which asks the Mac.
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
     public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
@@ -71,8 +71,8 @@ public enum HostServer {
             guard let server = box.server else { return .failure("cannot reach Muxify: the Host Server has exited") }
             return await forward(request, to: server)
         }
-        let host = HostEnvironment(context: context, socket: socket, asks: asks, log: log)
         let config = HostConfigFeed(path: context.paths.configFile.path, home: context.home)
+        let host = HostEnvironment(context: context, socket: socket, asks: asks, config: config, log: log)
         let server = ProtocolServer(input: input, output: output, build: build, silence: silence, log: log) { request, server in
             serve(request, server: server, host: host, config: config)
         }
@@ -160,6 +160,8 @@ public enum HostServer {
                 host.watch(repository, for: request)
             case .subscribe(.topic(let topic)):
                 host.subscribe(topic, for: request, nonce: nonce)
+            case .subscribe(.snapshot):
+                host.subscribeSnapshot(request, nonce: nonce)
             case .environment(let environmentRequest):
                 host.run(environmentRequest, for: request, nonce: nonce)
             case .markRead(let mark):
@@ -212,6 +214,8 @@ final class HostConfigFeed: @unchecked Sendable {
     private var watcher: FolderWatcher?
     private var state: HostConfig?
     private var subscribers: [Int: ProtocolIncomingRequest] = [:]
+    /// What the server itself runs on each Config it reads, such as the `snapshot` subscription's `sidebar`.
+    private var observers: [(HostConfig) -> Void] = []
     private var readPending = false
     private var stopped = false
 
@@ -225,13 +229,21 @@ final class HostConfigFeed: @unchecked Sendable {
         queue.async { [self] in
             guard !request.isCancelled, !stopped else { return }
             subscribers[id] = request
-            if watcher == nil {
-                watcher = FolderWatcher(queue: queue) { [weak self] in self?.heard() }
-                read()
-            }
+            watch()
             if let state, !request.sendEvent(state, key: "config") { subscribers[id] = nil }
         }
         request.onCancel { self.queue.async { self.subscribers[id] = nil } }
+    }
+
+    /// Runs `observer` on this feed's queue with the Config that reads now, then with each one that differs, until
+    /// the server stops. It starts the watch as a subscriber does.
+    func observe(_ observer: @escaping (HostConfig) -> Void) {
+        queue.async { [self] in
+            guard !stopped else { return }
+            observers.append(observer)
+            watch()
+            if let state { observer(state) }
+        }
     }
 
     func stop() {
@@ -240,7 +252,15 @@ final class HostConfigFeed: @unchecked Sendable {
             watcher?.stop()
             watcher = nil
             subscribers = [:]
+            observers = []
         }
+    }
+
+    /// The watch of the Config's folders, with the first read, once.
+    private func watch() {
+        guard watcher == nil else { return }
+        watcher = FolderWatcher(queue: queue) { [weak self] in self?.heard() }
+        read()
     }
 
     /// Something changed in a watched folder: the files are read once the events of one save have come.
@@ -264,6 +284,7 @@ final class HostConfigFeed: @unchecked Sendable {
         state = next
         guard !first else { return }
         for (id, request) in subscribers where !request.sendEvent(next, key: "config") { subscribers[id] = nil }
+        for observer in observers { observer(next) }
     }
 }
 
@@ -276,6 +297,8 @@ final class HostEnvironment: @unchecked Sendable {
     let socket: HostServerSocket
     /// The network commands that wait for askpass answers, which come in on `socket`.
     private let asks: GitAskpassRoutes
+    /// The Host's Config as the `config` subscription reads it, which gives the `snapshot` items their Config.
+    private let config: HostConfigFeed
     private let log: (String) -> Void
     /// Where the publisher delivers, and where the subscribers and the state live.
     private let delivery = DispatchQueue(label: "dev.muxify.host-server.environment")
@@ -288,16 +311,24 @@ final class HostEnvironment: @unchecked Sendable {
     private var state = EnvironmentState()
     private var hasState = false
     private var subscribers: [Int: ProtocolIncomingRequest] = [:]
+    /// The `snapshot` subscribers, the Config their items are computed with once it was read, and the JSON of the
+    /// last item computed, so an item goes out only when it differs.
+    private var snapshotSubscribers: [Int: ProtocolIncomingRequest] = [:]
+    private var snapshotConfig: Config?
+    private var observesConfig = false
+    private var lastShown: Data?
     /// The `repository` subscriptions by request; `lock` guards it.
     private var watches: [Int: RepositoryWatch] = [:]
     let uploads: HostUploads
     /// The `topic` subscriptions, which read again on each change of the publisher.
     private let details: HostTopicDetails
 
-    init(context: HostServerContext, socket: HostServerSocket, asks: GitAskpassRoutes, log: @escaping (String) -> Void) {
+    init(context: HostServerContext, socket: HostServerSocket, asks: GitAskpassRoutes, config: HostConfigFeed,
+         log: @escaping (String) -> Void) {
         self.context = context
         self.socket = socket
         self.asks = asks
+        self.config = config
         self.log = log
         uploads = HostUploads(directory: context.temporaryDirectory)
         details = HostTopicDetails { [context] topics in await Self.details(of: topics, context: context, log: log) }
@@ -466,6 +497,7 @@ final class HostEnvironment: @unchecked Sendable {
             if first { send(state.all, to: id, first: true) } else { send(changes, to: id, first: false) }
         }
         details.changed()
+        if !snapshotSubscribers.isEmpty { sendSnapshot() }
     }
 
     private func send(_ changes: [EnvironmentChange], to id: Int, first: Bool) {
@@ -474,6 +506,54 @@ final class HostEnvironment: @unchecked Sendable {
             ? request.sendEvent(EnvironmentItem(changes: changes), key: "all")
             : changes.allSatisfy { request.sendEvent(EnvironmentItem(changes: [$0]), key: $0.key) }
         if !sent { subscribers[id] = nil }
+    }
+
+    // MARK: - The snapshot subscription
+
+    /// The `snapshot` subscription (ADR 0093): `environment show`'s view, computed from the state that the
+    /// `environment` publisher keeps and the Config that the `config` feed reads, so an item costs no read of its own.
+    func subscribeSnapshot(_ request: ProtocolIncomingRequest, nonce: String?) {
+        Task {
+            let publisher = await self.publisher(nonce: nonce)
+            let id = request.id
+            delivery.async { [self] in
+                guard !request.isCancelled else { return }
+                snapshotSubscribers[id] = request
+                if !observesConfig {
+                    observesConfig = true
+                    config.observe { [weak self] hostConfig in self?.delivery.async { self?.configRead(hostConfig) } }
+                }
+                sendSnapshot(first: id)
+            }
+            request.onCancel { self.delivery.async { self.snapshotSubscribers[id] = nil } }
+            publisher.start { changes in self.receive(changes) }
+        }
+    }
+
+    /// On `delivery`: the Config that the feed read. One that does not parse leaves the last that did.
+    private func configRead(_ hostConfig: HostConfig) {
+        switch hostConfig.load(host: Tmux.hostName) ?? .success(Config()) {
+        case .success(let config): snapshotConfig = config
+        case .failure(let error):
+            log("snapshot: \(error)")
+            if snapshotConfig == nil { snapshotConfig = Config() }
+        }
+        sendSnapshot()
+    }
+
+    /// On `delivery`: computes the view once the state and the Config are there, and sends it to every subscriber when
+    /// it differs from the last one, and to the subscriber `first` in any case. A newer item replaces an unsent one.
+    private func sendSnapshot(first: Int? = nil) {
+        guard hasState, let config = snapshotConfig, let tmux = state.snapshot else { return }
+        let shown = EnvironmentShown(contents: state.topicContents, tmux: tmux, config: config)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(shown) else { return }
+        let changed = data != lastShown
+        lastShown = data
+        for (id, request) in snapshotSubscribers where changed || id == first {
+            if !request.sendEvent(shown, key: "snapshot") { snapshotSubscribers[id] = nil }
+        }
     }
 
     // MARK: - Commands

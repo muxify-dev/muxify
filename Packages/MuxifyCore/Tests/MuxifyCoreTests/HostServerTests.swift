@@ -332,6 +332,94 @@ final class HostServerTests: XCTestCase {
         try tmuxOutput(["list-windows", "-t", "=" + session + ":", "-F", "#{window_id}"]).split(separator: "\n").map(String.init)
     }
 
+    // MARK: - The snapshot subscription
+
+    func testASnapshotSubscriberGetsTheViewWithItsSidebarFirstAndANewItemOnlyWhenAnotherProcessMakesATopic() async throws {
+        let client = try await connect(capabilities: ["snapshot"])
+        let recorder = subscribeSnapshot(client)
+
+        try await wait("no first snapshot item") { !recorder.items.isEmpty }
+        let first = try XCTUnwrap(recorder.items.first)
+        XCTAssertEqual(first.sidebar, EnvironmentShown.Sidebar(), "the Config's default sidebar")
+        XCTAssertNil(first.capabilities, "a snapshot item carries no capabilities")
+        XCTAssertEqual(first.snapshot.sessions.map(\.name), ["work"])
+        XCTAssertEqual(first.snapshot.cards, [])
+        // The shell names its Window as it starts, which is a change the view shows.
+        var seen = -1
+        try await wait("the snapshot subscription did not settle", seconds: 10) {
+            let now = recorder.items.count
+            defer { seen = now }
+            if now == seen { return true }
+            try await Task.sleep(nanoseconds: 1_200_000_000)
+            return false
+        }
+
+        // Several `data_version` ticks and the control Client's reads change nothing that the view shows.
+        let settled = recorder.items.count
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertEqual(recorder.items.count, settled, "an item came while nothing changed: \(recorder.items.dropFirst(settled))")
+
+        // As `topic new` makes it: another connection to the same muxify.db.
+        try TopicStore(paths: paths).write { try $0.create(TopicRecord(id: "made", title: "Made")) }
+        try await wait("a Topic made by another process pushed no snapshot item") { recorder.items.count > settled }
+        let ids = recorder.items.last?.snapshot.cards.compactMap { card -> String? in
+            if case .topic(let topic, _, _) = card { return topic.id }
+            return nil
+        }
+        XCTAssertEqual(ids, ["made"])
+    }
+
+    func testAConfigChangeOfTheSidebarPushesANewSnapshotItem() async throws {
+        let (context, home) = configContext()
+        let folder = home.appendingPathComponent(".config/muxify", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("config.yaml")
+        try "sidebar:\n  sessions: true\n".write(to: file, atomically: true, encoding: .utf8)
+        let client = try await connect(context: context, capabilities: ["snapshot"])
+        let recorder = subscribeSnapshot(client)
+        try await wait("no first snapshot item") { !recorder.items.isEmpty }
+        XCTAssertEqual(recorder.items.first?.sidebar.sessions, true)
+
+        try "sidebar:\n  sessions: false\n".write(to: file, atomically: true, encoding: .utf8)
+        try await wait("a change of the Config's sidebar pushed no snapshot item", seconds: 5) {
+            recorder.items.last?.sidebar.sessions == false
+        }
+        XCTAssertEqual(recorder.items.last?.sidebar.topics, true)
+        XCTAssertEqual(recorder.items.last?.snapshot.cards, recorder.items.first?.snapshot.cards, "only the sidebar changed")
+    }
+
+    func testAClientThatDidNotDeclareSnapshotGetsUnsupportedForTheSubscription() async throws {
+        let client = try await connect()
+        do {
+            for try await shown in client.subscribe(HostRequest.subscribe(.snapshot), as: EnvironmentShown.self) {
+                XCTFail("a client without snapshot got an item: \(shown)")
+            }
+            XCTFail("the subscription ended without an error")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .unsupported)
+            XCTAssertTrue(error.message.contains("snapshot"), error.message)
+        }
+    }
+
+    private func subscribeSnapshot(_ client: ProtocolClient) -> SnapshotRecorder {
+        let recorder = SnapshotRecorder()
+        let items = client.subscribe(HostRequest.subscribe(.snapshot), as: EnvironmentShown.self)
+        consumers.append(Task {
+            do {
+                for try await shown in items { recorder.add(shown) }
+            } catch {}
+        })
+        return recorder
+    }
+
+    private final class SnapshotRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [EnvironmentShown] = []
+
+        func add(_ shown: EnvironmentShown) { lock.lock(); log.append(shown); lock.unlock() }
+        var items: [EnvironmentShown] { lock.lock(); defer { lock.unlock() }; return log }
+    }
+
     // MARK: - View commands
 
     func testAViewCommandRunsOnTheServersTmux() async throws {

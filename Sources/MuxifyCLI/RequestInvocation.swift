@@ -454,7 +454,7 @@ extension RequestInvocation {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             // The snapshot is the whole answer of `environment show`, so it prints with no key around it.
-            if case .snapshot(let snapshot) = response { line(String(decoding: try encoder.encode(EnvironmentShown(snapshot: snapshot, sidebar: sidebar)), as: UTF8.self)) }
+            if case .snapshot(let snapshot) = response { line(String(decoding: try encoder.encode(EnvironmentShown(snapshot: snapshot, sidebar: sidebar, capabilities: EnvironmentShown.cliCapabilities)), as: UTF8.self)) }
             else { line(String(decoding: try encoder.encode(response), as: UTF8.self)) }
         case .text:
             switch response {
@@ -676,36 +676,11 @@ extension RequestReply {
     }
 }
 
-/// The `--json` form of `environment show`: the snapshot's own keys, `sidebar`, which of the two lists this Host's Config
-/// shows, and `capabilities`, the options that this command line takes and an older one does not. A caller sends
-/// `--request` only when the list has `request`, and reads `session-paths` with no Topic only when the list has
-/// `session-paths`. Both are of this command line and its Config, so they are not in `EnvironmentSnapshot`, which a
-/// Host Server sends to a Mac of any build.
-struct EnvironmentShown: Encodable {
-    static let capabilities = ["request", "session-paths"]
-
-    let snapshot: EnvironmentSnapshot
-    let sidebar: Sidebar
-
-    private enum CodingKeys: String, CodingKey { case capabilities, sidebar }
-
-    struct Sidebar: Encodable {
-        var topics = true
-        var sessions = true
-
-        init() {}
-        init(_ config: Config.Sidebar) {
-            topics = config.topics
-            sessions = config.sessions
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        try snapshot.encode(to: encoder)
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(sidebar, forKey: .sidebar)
-        try container.encode(Self.capabilities, forKey: .capabilities)
-    }
+extension EnvironmentShown {
+    /// The `capabilities` of `environment show --json`: the options that this command line takes and an older one
+    /// does not. A caller sends `--request` only when the list has `request`, and reads `session-paths` with no Topic
+    /// only when the list has `session-paths`. Both are of this command line, so a `snapshot` item has none.
+    static let cliCapabilities = ["request", "session-paths"]
 }
 
 /// The `--json` form of `topic show --conversations`.

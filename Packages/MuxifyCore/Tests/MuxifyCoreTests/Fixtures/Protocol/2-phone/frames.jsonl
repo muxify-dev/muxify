@@ -18,3 +18,6 @@
 {"id":10,"kind":"request","request":{"browser_tabs":{"window":"@12"}}}
 {"end":{"ok":[{"active":false,"id":"00000000-0000-0000-0000-000000000000","title":"","url":"https://github.com/"},{"active":true,"id":"00000000-0000-0000-0000-000000000001","title":"","url":"https://example.com"}]},"id":10,"kind":"end"}
 {"end":{"error":{"code":"failed","message":"no tmux Window or Pane '@99'"}},"id":11,"kind":"end"}
+{"id":12,"kind":"request","request":{"subscribe":{"snapshot":{}}}}
+{"id":12,"item":{"no_topic":["$1"],"pinned":[],"sessions":[{"activity":1763100000,"id":"$1","mark":null,"name":"work","topic":null,"windows":[{"active":true,"id":"@1","index":0,"mark":null,"name":"shell"}]}],"sidebar":{"sessions":true,"topics":true},"tags":[],"unpinned":{"bench":[],"guests":[],"kind":"in_play","limit":3,"places":[]}},"kind":"item"}
+{"id":12,"item":{"no_topic":[],"pinned":[],"sessions":[{"activity":1763100000,"id":"$1","mark":null,"name":"work","topic":"t1","windows":[{"active":true,"id":"@1","index":0,"mark":null,"name":"shell"}]}],"sidebar":{"sessions":true,"topics":true},"tags":[],"unpinned":{"bench":[],"guests":[],"kind":"in_play","limit":3,"places":[{"kind":"topic","mark":null,"sessions":["$1"],"topic":{"id":"t1","label":"Ship","note":null,"state":"live","tags":[]}}]}},"kind":"item"}

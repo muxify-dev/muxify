@@ -346,16 +346,20 @@ public enum HostSubscription: Codable, Equatable, Sendable {
     /// One Topic's detail, as `TopicDetailItem`s keyed `topic <id>`: the first is the current state, each later one
     /// the detail after a change of the Topic's record or of its Sessions, Windows or Panes. Needs `topic-detail`.
     case topic(TopicSubscription)
+    /// The computed view, as `EnvironmentShown` items keyed `snapshot` with no `capabilities`: the JSON of
+    /// `muxify environment show --json`, first at once, then each time it changes. Needs `snapshot`.
+    case snapshot
 
     /// The capability that this subscription needs; nil for protocol 1's base.
     public var capability: HostCapability? {
         switch self {
         case .environment, .config, .repository: return nil
         case .topic: return .topicDetail
+        case .snapshot: return .snapshot
         }
     }
 
-    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config, repository, topic }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config, repository, topic, snapshot }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: ProtocolKey.self)
@@ -368,6 +372,7 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         case .config: self = .config
         case .repository: self = .repository(try values.decode(RepositorySubscription.self, forKey: ProtocolKey(known.rawValue)))
         case .topic: self = .topic(try values.decode(TopicSubscription.self, forKey: ProtocolKey(known.rawValue)))
+        case .snapshot: self = .snapshot
         }
     }
 
@@ -378,6 +383,7 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         case .config: try values.encode(ProtocolEmpty(), forKey: .config)
         case .repository(let repository): try values.encode(repository, forKey: .repository)
         case .topic(let topic): try values.encode(topic, forKey: .topic)
+        case .snapshot: try values.encode(ProtocolEmpty(), forKey: .snapshot)
         }
     }
 }
