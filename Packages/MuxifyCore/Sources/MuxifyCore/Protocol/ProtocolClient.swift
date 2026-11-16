@@ -48,8 +48,7 @@ public final class ProtocolClient: @unchecked Sendable {
 
     /// Starts reading at once. `nonce` is that of the App Window's Client marker, which the server reads to name
     /// the App Window's own Client. `capabilities` are what this client uses of the server's: the Mac declares none.
-    /// `onRequest` serves the requests that the server starts; without it they are
-    /// answered `unsupported`.
+    /// `onRequest` serves the requests that the server starts; without it they are answered `unsupported`.
     public init(input: FileHandle, output: FileHandle, build: String, capabilities: [String] = [],
                 protocols: ClosedRange<Int> = HostProtocol.supported, helloTimeout: TimeInterval = HostProtocol.helloTimeout,
                 nonce: String? = nil, queueCapacity: Int = 256, onRequest: ((ProtocolIncomingRequest) -> Void)? = nil) {

@@ -56,9 +56,9 @@ public struct HostServerContext: @unchecked Sendable {
 /// `muxify server`: the Host Server's requests (ADR 0087). It serves `ping` and `shutdown`, the `environment`,
 /// `config`, `repository`, `topic` and `snapshot` subscriptions, `environment` requests, `mark_read`, the view commands,
 /// the Topic and Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads, writes and
-/// network commands, `session_paths`, `visit_session_path` and `upload`. Programs on the Host reach its Mac through its
-/// own socket, whose requests it sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask` goes to the
-/// network command that runs it, which asks the Mac.
+/// network commands, `session_paths`, `visit_session_path`, `upload` and `browser_tabs`. Programs on the Host reach its
+/// Mac through its own socket, whose requests it sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask`
+/// goes to the network command that runs it, which asks the Mac.
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
     public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
