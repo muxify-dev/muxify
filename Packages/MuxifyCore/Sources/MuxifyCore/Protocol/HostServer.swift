@@ -142,7 +142,11 @@ public enum HostServer {
     static func serve(_ request: ProtocolIncomingRequest, server: ProtocolServer, host: HostEnvironment, config: HostConfigFeed) {
         do {
             let nonce = server.client?.nonce
-            switch try request.body(HostRequest.self) {
+            let body = try request.body(HostRequest.self)
+            if let needed = body.capability, server.client?.capabilities.contains(needed.rawValue) != true {
+                throw ProtocolError(.unsupported, "this client did not declare the capability \(needed.rawValue)")
+            }
+            switch body {
             case .ping:
                 request.finish()
             case .shutdown:
@@ -429,9 +433,16 @@ final class HostEnvironment: @unchecked Sendable {
     // MARK: - Commands
 
     /// Runs an `EnvironmentRequest` with the Host's Config, as the App Window's own Client, then reads, so the
-    /// events of what it changed go out before its answer.
+    /// events of what it changed go out before its answer. One with a Request id runs through the Request ledger, as
+    /// `muxify --request` does (ADR 0093): a second send gets the first answer and changes nothing.
     func run(_ environmentRequest: EnvironmentRequest, for request: ProtocolIncomingRequest, nonce: String?) {
-        let reads = environmentRequest.command.onlyReads
+        let command = environmentRequest.command
+        let reads = command.onlyReads
+        let pending = PendingRequest(environmentRequest)
+        if pending != nil, command.requestPolicy == .read {
+            let failure = Self.requestOnRead(command)
+            return request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+        }
         Task {
             let config: Config
             do { config = try await context.config() } catch {
@@ -440,12 +451,21 @@ final class HostEnvironment: @unchecked Sendable {
             let publisher = await self.publisher(nonce: nonce)
             let context = context
             guard reads || request.startMutation() else { return }
-            let response = await Self.background {
-                let service = EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths,
-                                                 topics: config.topics, notifications: config.notifications,
-                                                 worktreesRoot: config.worktreesRoot)
-                let client = nonce.flatMap { Self.ownClient(on: context.tmux, nonce: $0) }
-                return service.handle(environmentRequest, client: client?.tty)
+            let handle = {
+                await Self.background {
+                    let service = EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths,
+                                                     topics: config.topics, notifications: config.notifications,
+                                                     worktreesRoot: config.worktreesRoot, request: pending)
+                    let client = nonce.flatMap { Self.ownClient(on: context.tmux, nonce: $0) }
+                    return service.handle(environmentRequest, client: client?.tty)
+                }
+            }
+            let response: EnvironmentResponse
+            if let pending {
+                response = await Self.apply(pending, policy: command.requestPolicy, phrase: command.actionName, paths: context.paths,
+                                            log: log, run: handle)
+            } else {
+                response = await handle()
             }
             if !reads { await publisher.read() }
             if case .failed(let failure) = response {
@@ -453,6 +473,36 @@ final class HostEnvironment: @unchecked Sendable {
             } else {
                 request.finish(response)
             }
+        }
+    }
+
+    /// The refusal of a Request id on a command that changes nothing, as `muxify --request` refuses it on a read.
+    static func requestOnRead(_ command: EnvironmentCommand) -> TopicFailure {
+        TopicFailure(kind: .requestOnRead, phase: .nothingChanged,
+                     message: "A Request id names a change that Muxify applies one time only. \(command.actionName) is not such a change, "
+                         + "so it takes no Request id.")
+    }
+
+    /// Runs one send of a Request through the ledger. The ledger keeps the response's JSON, which a second send
+    /// answers again; a refusal of the ledger is a failure whose kind names it.
+    private static func apply(_ pending: PendingRequest, policy: RequestPolicy, phrase: String, paths: MuxifyPaths, log: @escaping (String) -> Void,
+                              run: () async -> EnvironmentResponse) async -> EnvironmentResponse {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        do {
+            let reply = try await RequestLedger(paths: paths).apply(pending, policy: policy, phrase: phrase, unrecorded: { error in
+                log("muxify server: the ledger could not record the Request \(pending.id): \(error)")
+            }) {
+                let response = await run()
+                let stdout = String(decoding: try encoder.encode(response), as: UTF8.self)
+                guard case .failed(let failure) = response else { return (RequestReply(stdout: stdout), true) }
+                return (RequestReply(stdout: stdout, stderr: failure.message, exitCode: 1), failure.isRefusal)
+            }
+            return try JSONDecoder().decode(EnvironmentResponse.self, from: Data(reply.stdout.utf8))
+        } catch let refusal as RequestRefusal {
+            return .failed(refusal.failure)
+        } catch {
+            return .failed(TopicFailure(kind: .storeFailed, phase: .changesStarted, message: "Muxify could not read the answer of the Request \(pending.id): \(error)"))
         }
     }
 

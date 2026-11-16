@@ -21,13 +21,31 @@ public struct RequestID: Hashable, Sendable, CustomStringConvertible {
     public var description: String { rawValue }
 }
 
+/// On the wire, as the `request` of an `environment` request: the UUID as text. Text that is no UUID does not decode.
+extension RequestID: Codable {
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        let text = try value.decode(String.self)
+        guard let id = RequestID(text) else {
+            throw DecodingError.dataCorruptedError(in: value, debugDescription: "a Request id is a UUID, not \(text)")
+        }
+        self = id
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        try value.encode(rawValue)
+    }
+}
+
 /// A Request that the command line is about to run: its id, its verb and its arguments in one canonical text. Two
 /// sends are the same Request only when all three are equal.
 public struct PendingRequest: Equatable, Sendable {
     public let id: RequestID
-    /// The words of the verb, such as `topic new`.
+    /// The words of the verb, such as `topic new`, or `environment` and the command's key for a Host Server request.
     public let verb: String
-    /// JSON with sorted keys: the words after the verb, the caller Pane and the working directory.
+    /// JSON with sorted keys: the words after the verb, the caller Pane and the working directory; or, for a Host
+    /// Server request, the command, the target, the caller and the expected ids.
     public let arguments: String
 
     public init(id: RequestID, verb: String, words: [String], callerPane: String?, workingDirectory: String) {
@@ -43,6 +61,93 @@ public struct PendingRequest: Equatable, Sendable {
         let words: [String]
         let pane: String?
         let directory: String
+    }
+
+    /// The Request that an `environment` request names with its `request`; nil when it has none. The same command
+    /// with the same target, caller and expected ids is the same Request; anything else is a clash.
+    public init?(_ environment: EnvironmentRequest) {
+        guard let id = environment.request else { return nil }
+        self.id = id
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let command = (try? encoder.encode(environment.command)) ?? Data()
+        let key = ((try? JSONSerialization.jsonObject(with: command)) as? [String: Any])?.keys.first ?? "command"
+        verb = "environment " + key
+        let canonical = EnvironmentCanonical(command: environment.command, target: environment.target, caller: environment.caller,
+                                             expectedSessionIDs: environment.expectedSessionIDs,
+                                             expectedPaneIDs: environment.expectedPaneIDs.map { $0.map(\.rawValue).sorted() })
+        arguments = String(decoding: (try? encoder.encode(canonical)) ?? Data(), as: UTF8.self)
+    }
+
+    private struct EnvironmentCanonical: Encodable {
+        let command: EnvironmentCommand
+        let target: EnvironmentTarget?
+        let caller: TopicCaller?
+        let expectedSessionIDs: [String]?
+        /// Sorted: a set has no order of its own.
+        let expectedPaneIDs: [String]?
+
+        func encode(to encoder: Encoder) throws {
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode(command, forKey: .command)
+            try values.encode(target, forKey: .target)
+            try values.encode(caller, forKey: .caller)
+            try values.encode(expectedSessionIDs, forKey: .expectedSessionIDs)
+            try values.encode(expectedPaneIDs, forKey: .expectedPaneIDs)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case command, target, caller
+            case expectedSessionIDs = "expected_session_ids"
+            case expectedPaneIDs = "expected_pane_ids"
+        }
+    }
+}
+
+/// What a command does with a Request id. For a command that changes something, the policy says what a second
+/// send does when the first one changed the records and did not finish.
+public enum RequestPolicy: Sendable {
+    /// The command changes nothing that a Request can guard, so it refuses a Request id.
+    case read
+    /// The command gives the same end state when it runs again, so the second send runs it to its end.
+    case rerun
+    /// The command could apply its change twice, so the second send fails and runs nothing.
+    case inDoubt
+}
+
+/// Why a send of a Request ran nothing. The command line exits with its status, and the Host Server ends the request
+/// `failed` with its `failure`.
+public enum RequestRefusal: Error, Equatable, Sendable, CustomStringConvertible {
+    /// The id has a row for another verb or other arguments: `verb` is that row's.
+    case clash(RequestID, verb: String)
+    /// The Request changed the records and did not finish, and `phrase` names a command that could apply its change
+    /// twice.
+    case inDoubt(RequestID, phrase: String)
+    /// The ledger in `folder` could not be read, so nothing ran.
+    case ledgerUnreadable(folder: String, problem: String)
+
+    /// The refusal as a failure of the Environment, whose kind tells a client which refusal it is.
+    public var failure: TopicFailure {
+        switch self {
+        case .clash(let id, let verb):
+            return TopicFailure(kind: .requestClash, phase: .nothingChanged,
+                                message: "The Request \(id) is the id of an earlier \(verb) with other arguments. Use a new id for a new change.")
+        case .inDoubt(let id, let phrase):
+            return TopicFailure(kind: .requestInDoubt, phase: .recordSaved,
+                                message: "The Request \(id) changed the Topic records, but \(phrase) did not finish. Muxify does not run it again, "
+                                    + "because that could apply the change twice. Look at the Environment before you send a new Request.")
+        case .ledgerUnreadable(let folder, let problem):
+            return TopicFailure(kind: .storeFailed, phase: .nothingChanged,
+                                message: "Muxify could not read the Request ledger in \(folder). \(problem)")
+        }
+    }
+
+    /// The command line's error line.
+    public var description: String {
+        switch self {
+        case .clash, .ledgerUnreadable: return failure.message + " " + failure.phase.summary
+        case .inDoubt: return failure.message
+        }
     }
 }
 
@@ -160,6 +265,42 @@ public struct RequestLedger: Sendable {
         try database.use(creating: true) { connection in
             try connection.transaction { try RequestTable.finish(request, reply: reply, now: now, connection) }
         }
+    }
+
+    /// Runs one send of `request`. The ledger decides first: a Request that has its answer gives it again and runs
+    /// nothing, and a clash or a Request in doubt throws `RequestRefusal`. Otherwise `run` runs, and a final answer, a
+    /// success or a refusal that a second send must get again, goes into the ledger. The id stays held until then, so a
+    /// second send that starts meanwhile, in this process or another, waits and then finds the answer. A failure to
+    /// record goes to `unrecorded`, and the answer still comes back: the change is made, and only a second send would
+    /// not find it.
+    public func apply(_ request: PendingRequest, policy: RequestPolicy, phrase: String, unrecorded: (Error) -> Void = { _ in },
+                      run: () async throws -> (reply: RequestReply, isFinal: Bool)) async throws -> RequestReply {
+        let held: RequestLock, known: RequestLookup
+        do {
+            // The lock blocks, so it waits off Swift's cooperative threads.
+            held = try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async { continuation.resume(with: Result { try self.lock(request.id) }) }
+            }
+            known = try lookup(request)
+        } catch {
+            throw RequestRefusal.ledgerUnreadable(folder: paths.state.path, problem: "\(error)")
+        }
+        defer { held.unlock() }
+        switch known {
+        case .new: break
+        case .replay(let reply): return reply
+        case .mismatch(let verb): throw RequestRefusal.clash(request.id, verb: verb)
+        case .resume:
+            switch policy {
+            case .rerun, .read: break
+            case .inDoubt: throw RequestRefusal.inDoubt(request.id, phrase: phrase)
+            }
+        }
+        let answer = try await run()
+        if answer.isFinal {
+            do { try finish(request, reply: answer.reply) } catch { unrecorded(error) }
+        }
+        return answer.reply
     }
 
     /// Waits until no other process runs a Request with this id, then holds the id until `unlock`. Two sends of one

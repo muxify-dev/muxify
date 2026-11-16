@@ -24,7 +24,7 @@ The `muxify` on a Remote Environment's machine, which Muxify installs and keeps 
 _Avoid_: remote helper, agent binary, remote CLI
 
 **Request**:
-One Host CLI write that its caller names with a **Request id**, a UUID, as `muxify --request <uuid> <verb> …`. The Host applies it one time: a second send with the same id, verb and arguments prints the first answer and changes nothing. A verb that changes nothing refuses the option.
+One Host CLI write that its caller names with a **Request id**, a UUID, as `muxify --request <uuid> <verb> …` or as the `request` of a Host Server request. The Host applies it one time: a second send with the same id, verb and arguments gives the first answer and changes nothing. A verb that changes nothing refuses the option.
 _Avoid_: idempotency key, transaction, operation id
 
 **Request ledger**:
@@ -32,7 +32,7 @@ The Host's record of the Requests of the last 24 hours, in the state database. A
 _Avoid_: outbox, request log, dedupe table
 
 **Host Server**:
-The Host CLI serving one Remote App Window, over that window's SSH connection, from the moment the connection is ready until it closes. Through it the Mac app shows the Host's Topics and sees the Host's changes as they happen. When it cannot run, the App Window shows only Sessions and says why.
+The Host CLI serving one Remote App Window, or one phone, over that client's SSH connection, from the moment the connection is ready until it closes. Through it the Mac app and the phone show the Host's Topics and see the Host's changes as they happen. When it cannot run, the client shows only Sessions and says why.
 _Avoid_: daemon, agent, remote server, helper
 
 **Active Environment**:

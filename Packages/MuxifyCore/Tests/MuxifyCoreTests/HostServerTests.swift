@@ -148,6 +148,106 @@ final class HostServerTests: XCTestCase {
         try await wait("the marker's Client was not pushed", seconds: 3) { recorder.server?.ownClient == attached }
     }
 
+    // MARK: - Capabilities and Request ids
+
+    func testTheServerDeclaresItsCapabilitiesAndAClientThatDeclaredNoneGetsNoneOfThem() async throws {
+        let client = try await connect()
+        let session = try await client.connect()
+        XCTAssertEqual(session.peerCapabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs"])
+        let recorder = subscribe(client)
+        try await wait("no first item") { !recorder.items.isEmpty }
+        let before = try windows(of: "work")
+
+        let request = EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"), request: RequestID(UUID().uuidString))
+        do {
+            _ = try await client.call(HostRequest.environment(request), as: EnvironmentResponse.self)
+            XCTFail("a Request id from a client that did not declare request must not run")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .unsupported)
+            XCTAssertTrue(error.message.contains("request"), error.message)
+        }
+        XCTAssertEqual(try windows(of: "work"), before, "the refused request changed the Host")
+
+        _ = try await client.call(HostRequest.environment(EnvironmentRequest(.create(title: "Plain"))), as: EnvironmentResponse.self)
+        try await wait("the created Topic's event did not come") { recorder.keys.contains { $0.hasPrefix("topic ") } }
+        let base = ["session ", "topic ", "open_places", "server"]
+        for key in recorder.keys {
+            XCTAssertTrue(base.contains { key.hasPrefix($0) }, "a client that declared no capability got the key \(key)")
+        }
+    }
+
+    func testAWriteWithARequestIDSentTwiceChangesTheHostOnceAndGivesTheFirstAnswerBothTimes() async throws {
+        let client = try await connect(capabilities: ["request"])
+        let before = try windows(of: "work")
+        let request = HostRequest.environment(EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"),
+                                                                 request: RequestID(UUID().uuidString)))
+
+        let first = try await client.call(request, as: EnvironmentResponse.self)
+        let second = try await client.call(request, as: EnvironmentResponse.self)
+
+        guard case .changed(let change) = first, let window = change.window else { return XCTFail("unexpected \(first)") }
+        XCTAssertEqual(second, first)
+        XCTAssertEqual(try windows(of: "work"), before + [window.rawValue])
+    }
+
+    func testAClashAReadAndARequestInDoubtEachFailWithAKindOfTheirOwn() async throws {
+        let client = try await connect(capabilities: ["request"])
+        let id = RequestID(UUID().uuidString)
+        _ = try await client.call(HostRequest.environment(EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"), request: id)),
+                                  as: EnvironmentResponse.self)
+        let before = try windows(of: "work")
+
+        let clash = try await failure(of: EnvironmentRequest(.create(title: "Other"), request: id), from: client)
+        XCTAssertEqual(clash?.kind, .requestClash)
+        XCTAssertEqual(clash?.phase, .nothingChanged)
+        XCTAssertEqual(try TopicStore(paths: paths).read().records.count, 0, "the clash made a Topic")
+
+        let read = try await failure(of: EnvironmentRequest(.list, request: RequestID(UUID().uuidString)), from: client)
+        XCTAssertEqual(read?.kind, .requestOnRead)
+
+        // A first send that wrote its records and never finished: the store writes the `started` row with them.
+        let started = EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"), request: RequestID(UUID().uuidString))
+        try TopicStore(paths: paths, request: PendingRequest(started)).write { try $0.create(TopicRecord(id: "t", title: "T")) }
+        let inDoubt = try await failure(of: started, from: client)
+        XCTAssertEqual(inDoubt?.kind, .requestInDoubt)
+        XCTAssertEqual(inDoubt?.phase, .recordSaved)
+        XCTAssertEqual(try windows(of: "work"), before, "a refused Request changed tmux")
+    }
+
+    func testTwoHostServersOnOneDatabaseApplyOneRequestIDOneTime() async throws {
+        let one = try await connect(context: HostServerContext(paths: paths, tmux: tmux, socketID: "one", temporaryDirectory: uploads.path),
+                                    capabilities: ["request"])
+        let two = try await connect(context: HostServerContext(paths: paths, tmux: tmux, socketID: "two", temporaryDirectory: uploads.path),
+                                    capabilities: ["request"])
+        let before = try windows(of: "work")
+        let request = HostRequest.environment(EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"),
+                                                                 request: RequestID(UUID().uuidString)))
+
+        async let first = one.call(request, as: EnvironmentResponse.self)
+        async let second = two.call(request, as: EnvironmentResponse.self)
+        let answers = try await [first, second]
+
+        XCTAssertEqual(answers[0], answers[1])
+        XCTAssertEqual(try windows(of: "work").count, before.count + 1)
+    }
+
+    /// The `TopicFailure` that a request ends with; nil, with a failure of the test, when it ends otherwise.
+    private func failure(of request: EnvironmentRequest, from client: ProtocolClient) async throws -> TopicFailure? {
+        do {
+            let response = try await client.call(HostRequest.environment(request), as: EnvironmentResponse.self)
+            XCTFail("the request ended ok: \(response)")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+            XCTAssertEqual(error.message, error.topicFailure?.message)
+            return error.topicFailure
+        }
+        return nil
+    }
+
+    private func windows(of session: String) throws -> [String] {
+        try tmuxOutput(["list-windows", "-t", "=" + session + ":", "-F", "#{window_id}"]).split(separator: "\n").map(String.init)
+    }
+
     // MARK: - View commands
 
     func testAViewCommandRunsOnTheServersTmux() async throws {
@@ -406,14 +506,14 @@ final class HostServerTests: XCTestCase {
         var items: [HostConfig] { lock.lock(); defer { lock.unlock() }; return log }
     }
 
-    private func connect(nonce: String? = nil, context: HostServerContext? = nil) async throws -> ProtocolClient {
+    private func connect(nonce: String? = nil, context: HostServerContext? = nil, capabilities: [String] = []) async throws -> ProtocolClient {
         let up = Pipe(), down = Pipe()
         let server = HostServer.make(input: up.fileHandleForReading, output: down.fileHandleForWriting, build: "server",
                                      context: context ?? HostServerContext(paths: paths, tmux: tmux, temporaryDirectory: uploads.path))
         server.start()
         servers.append(server)
         let client = ProtocolClient(input: down.fileHandleForReading, output: up.fileHandleForWriting, build: "client",
-                                    helloTimeout: 5, nonce: nonce)
+                                    capabilities: capabilities, helloTimeout: 5, nonce: nonce)
         clients.append(client)
         try await client.connect()
         return client

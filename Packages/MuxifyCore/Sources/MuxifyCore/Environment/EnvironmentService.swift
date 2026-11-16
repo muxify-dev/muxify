@@ -339,6 +339,29 @@ extension EnvironmentCommand {
         return false
     }
 
+    /// What a Request id means for this command, as `muxify --request` decides it for the verb that sends it. A new
+    /// command does not compile until it chooses.
+    public var requestPolicy: RequestPolicy {
+        switch self {
+        case .list, .show, .environmentShow, .listWorktrees:
+            return .read
+        // Each of these gives one end state however many times it runs: it sets a value, or it finds what its first
+        // run made. A new Topic takes the Request's id, so a second run finds it.
+        case .create, .tags, .note, .rename, .pin, .unpin, .markRead, .markAllRead, .chooseInPlay, .sortSessions:
+            return .rerun
+        // With its exact name and no new Worktree, a second run finds the Session. A new Worktree has setup that only
+        // the first run can type into the Session.
+        case .addSession(_, .newWorktree, _, _): return .inDoubt
+        case .addSession(_, _, _, let chosenName): return chosenName != nil ? .rerun : .inDoubt
+        // A second run could apply these twice: a move from the place where the first run left the card, a Session or
+        // a Window that tmux makes again, a Topic that is no longer where the first run found it.
+        case .settle, .forget, .forgetSettled, .move, .removeFromTopic, .removeAndKill, .reopen, .startFresh, .moveSession, .newWindow,
+             .newSession, .renameSession, .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession, .moveCard, .replaceFromBench,
+             .makeGuest, .benchTopic, .fillOpenPlace, .createWorktree, .removeWorktree:
+            return .inDoubt
+        }
+    }
+
     /// Whether the command acts on Muxify Worktree records.
     public var isWorktreeCommand: Bool {
         switch self {

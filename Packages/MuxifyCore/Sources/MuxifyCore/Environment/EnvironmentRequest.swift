@@ -460,19 +460,23 @@ public struct EnvironmentRequest: Codable, Hashable, Sendable {
     public var expectedSessionIDs: [String]?
     /// Kill requires these Panes to be the ones that the target has, as the user reviewed them.
     public var expectedPaneIDs: Set<PaneID>?
+    /// The Request id of a write that a Host Server applies one time, however often it is sent (ADR 0093). Only a
+    /// client that declared the `request` capability sends it; nil for every other caller.
+    public var request: RequestID?
 
     public init(_ command: EnvironmentCommand, target: EnvironmentTarget? = nil, caller: TopicCaller? = nil, expectedSessionIDs: [String]? = nil,
-                expectedPaneIDs: Set<PaneID>? = nil) {
+                expectedPaneIDs: Set<PaneID>? = nil, request: RequestID? = nil) {
         version = Self.currentVersion
         self.command = command
         self.target = target
         self.caller = caller
         self.expectedSessionIDs = expectedSessionIDs
         self.expectedPaneIDs = expectedPaneIDs
+        self.request = request
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, command, target, caller
+        case version, command, target, caller, request
         case expectedSessionIDs = "expected_session_ids"
         case expectedPaneIDs = "expected_pane_ids"
     }
@@ -591,6 +595,13 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let worktreeSetupInvalid = Kind(rawValue: "worktree_setup_invalid")
         public static let worktreeNameInvalid = Kind(rawValue: "worktree_name_invalid")
         public static let hookFailed = Kind(rawValue: "hook_failed")
+        /// The Request id names an earlier write with another command or other arguments (the CLI's exit status 3).
+        public static let requestClash = Kind(rawValue: "request_clash")
+        /// The Request changed the records and did not finish, and its command could apply the change twice (the
+        /// CLI's exit status 4).
+        public static let requestInDoubt = Kind(rawValue: "request_in_doubt")
+        /// A request that changes nothing carried a Request id.
+        public static let requestOnRead = Kind(rawValue: "request_on_read")
     }
 
     /// How far the request got before it failed.

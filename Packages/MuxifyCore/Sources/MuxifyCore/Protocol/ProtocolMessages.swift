@@ -17,13 +17,30 @@ public enum HostProtocol {
     public static let maxChunkBytes = 64 * 1024
     /// The protocols that this build speaks. Both ends started at 1; a bump needs an ADR.
     public static let supported: ClosedRange<Int> = 1...1
-    /// What this build adds to its protocol. Protocol 1's surface has none.
-    public static let capabilities: [String] = []
+    /// What this build's Host Server adds to its protocol, declared in its `hello`. A client declares only what it
+    /// uses: the Mac declares none, the phone all of them.
+    public static let capabilities: [String] = HostCapability.allCases.map(\.rawValue)
     /// How long the client waits for the server's `hello`.
     public static let helloTimeout: TimeInterval = 10
     /// How long the server waits for any frame before it exits. Longer than the Mac's own master timeout
     /// (`ServerAliveInterval=15` × `ServerAliveCountMax=2`), so a server never exits while the Mac holds its master.
     public static let serverSilence: TimeInterval = 45
+}
+
+/// What a Host Server adds to protocol 1 (ADR 0086's change rule, ADR 0093). Each side sends a request case, a
+/// subscription case or a key that a capability adds only when the other side's `hello` declared it, and the server
+/// answers `unsupported` to one that a client sends without declaring it.
+public enum HostCapability: String, CaseIterable, Sendable {
+    /// An `environment` request may carry a Request id, which applies it one time however often it is sent.
+    case request
+    /// `subscribe { snapshot }`: the computed `environment show` view.
+    case snapshot
+    /// `subscribe { topic }`: one Topic's detail.
+    case topicDetail = "topic-detail"
+    /// `session_paths` with `query` or `topic`, and `visit_session_path`.
+    case rankedSessionPaths = "ranked-session-paths"
+    /// `browser_tabs`: a Window's stored Browser Tabs.
+    case browserTabs = "browser-tabs"
 }
 
 /// The `kind` of a frame.
@@ -180,6 +197,18 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// ends `failed` and the server deletes the partial file.
     case upload(UploadChunk)
 
+    /// The capability that the client must have declared for the server to serve this request; nil for protocol 1's
+    /// base. A new case does not compile until it chooses.
+    public var capability: HostCapability? {
+        switch self {
+        case .environment(let request): return request.request == nil ? nil : .request
+        case .subscribe(let subscription): return subscription.capability
+        case .ping, .shutdown, .markRead, .view, .topicChoices, .worktreeStarts, .adoptWorktrees, .claimOpen, .releaseOpen, .git, .gitWrite,
+             .gitNetwork, .sessionPaths, .upload:
+            return nil
+        }
+    }
+
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case ping, shutdown, subscribe, environment
         case markRead = "mark_read"
@@ -297,6 +326,13 @@ public enum HostSubscription: Codable, Equatable, Sendable {
     /// A folder's repository, as `RepositoryEvent`s keyed `repository`: the first is the whole state, each later one a
     /// change of HEAD, the index or the working tree.
     case repository(RepositorySubscription)
+
+    /// The capability that this subscription needs; nil for protocol 1's base.
+    public var capability: HostCapability? {
+        switch self {
+        case .environment, .config, .repository: return nil
+        }
+    }
 
     private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config, repository }
 

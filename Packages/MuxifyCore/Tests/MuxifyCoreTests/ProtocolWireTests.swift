@@ -6,8 +6,27 @@ import XCTest
 final class ProtocolWireTests: XCTestCase {
     private static let build = "muxify 1a2b3c4 1763100000"
 
-    /// This release's messages, in the order of the newest fixtures folder.
+    private static let requestID = RequestID("3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c")!
+
+    /// This release's messages, in the order of the newest fixtures folder: the capabilities that the phone uses.
     private func thisReleasesFrames() throws -> [Data] {
+        let id = Self.requestID
+        let created = EnvironmentResponse.changed(TopicChange(topicID: id.rawValue, created: true))
+        func failed(_ failure: TopicFailure) -> ProtocolError { ProtocolError(.failed, failure.message, topicFailure: failure) }
+        return [
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, minProtocol: 1, build: Self.build, capabilities: HostProtocol.capabilities)),
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, build: Self.build, capabilities: HostProtocol.capabilities)),
+            try ProtocolLine.request(id: 1, HostRequest.environment(EnvironmentRequest(.create(title: "T"), request: id))),
+            try ProtocolLine.ok(id: 1, created),
+            try ProtocolLine.ok(id: 2, created),
+            ProtocolLine.error(id: 3, failed(RequestRefusal.clash(id, verb: "environment create").failure)),
+            ProtocolLine.error(id: 4, failed(RequestRefusal.inDoubt(id, phrase: EnvironmentCommand.moveCard(.up).actionName).failure)),
+            ProtocolLine.error(id: 5, failed(HostEnvironment.requestOnRead(.list))),
+        ]
+    }
+
+    /// The first server's messages, pinned in `1-first-server`.
+    private func firstServersFrames() throws -> [Data] {
         [
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, minProtocol: 1, build: Self.build)),
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, build: Self.build)),
@@ -217,6 +236,29 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertThrowsError(try ProtocolFrame.decode(Data(#"{"kind":"end"}"#.utf8)), "a line with no id is not a frame")
     }
 
+    func testTheRequestCapabilityIsPinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        XCTAssertEqual(HostProtocol.capabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs"])
+        let request = HostRequest.environment(EnvironmentRequest(.create(title: "T"), request: Self.requestID))
+        let line = text(try ProtocolLine.request(id: 1, request))
+        XCTAssertEqual(line, #"{"id":1,"kind":"request","request":{"environment":{"command":{"create":{"title":"T"}},"request":"3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c","version":2}}}"# + "\n")
+        XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(line.dropLast().utf8))).payload(HostRequest.self), request)
+        XCTAssertEqual(request.capability, .request)
+        XCTAssertNil(HostRequest.environment(EnvironmentRequest(.create(title: "T"))).capability, "an environment request with no id is protocol 1's base")
+        XCTAssertThrowsError(try JSONDecoder().decode(EnvironmentRequest.self, from: Data(#"{"version":2,"command":{"list":{}},"request":"x"}"#.utf8)),
+                             "a Request id is a UUID")
+
+        let same = PendingRequest(EnvironmentRequest(.create(title: "T"), request: Self.requestID))
+        XCTAssertEqual(same, PendingRequest(EnvironmentRequest(.create(title: "T"), request: Self.requestID)))
+        XCTAssertEqual(same?.verb, "environment create")
+        XCTAssertNotEqual(same?.arguments, PendingRequest(EnvironmentRequest(.create(title: "U"), request: Self.requestID))?.arguments)
+        XCTAssertNotEqual(same?.arguments, PendingRequest(EnvironmentRequest(.create(title: "T"), target: .topic(.id("t")), request: Self.requestID))?.arguments)
+        let panes: Set<PaneID> = [PaneID(rawValue: "%1")!, PaneID(rawValue: "%2")!, PaneID(rawValue: "%3")!]
+        XCTAssertEqual(PendingRequest(EnvironmentRequest(.killWindow, expectedPaneIDs: panes, request: Self.requestID))?.arguments,
+                       #"{"caller":null,"command":{"kill_window":{}},"expected_pane_ids":["%1","%2","%3"],"expected_session_ids":null,"target":null}"#,
+                       "a set of Panes is in one order")
+    }
+
     func testAnUnknownRequestCaseThrowsUnsupported() {
         XCTAssertThrowsError(try JSONDecoder().decode(HostRequest.self, from: Data(#"{"frob":{}}"#.utf8))) { error in
             XCTAssertEqual((error as? ProtocolError)?.code, .unsupported)
@@ -229,7 +271,7 @@ final class ProtocolWireTests: XCTestCase {
         let root = try XCTUnwrap(Bundle.module.url(forResource: "Protocol", withExtension: nil, subdirectory: "Fixtures"))
         let folders = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        XCTAssertEqual(folders.last?.lastPathComponent, "1-first-server")
+        XCTAssertEqual(folders.map(\.lastPathComponent).suffix(2), ["1-first-server", "2-phone"])
         for folder in folders {
             let text = try String(contentsOf: folder.appendingPathComponent("frames.jsonl"), encoding: .utf8)
             let lines = text.split(separator: "\n").map { Data($0.utf8) }
@@ -247,6 +289,9 @@ final class ProtocolWireTests: XCTestCase {
             }
             if folder == folders.last {
                 XCTAssertEqual(lines, try thisReleasesFrames().map { $0.dropLast() }, "the newest fixtures are this release's messages")
+            }
+            if folder.lastPathComponent == "1-first-server" {
+                XCTAssertEqual(lines, try firstServersFrames().map { $0.dropLast() }, "the first server's messages still encode as pinned")
             }
         }
     }
