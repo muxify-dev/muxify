@@ -242,6 +242,8 @@ public struct Config: Equatable {
     public var findKeybinds = FindKeybinds.defaults
     /// In Config order (ADR 0009).
     public var commandPalettes = CommandPaletteConfig.defaults
+    /// The Go to… palette: the Config's own, else the default one. Its rules rank Go to… and the Host CLI's `session-paths`.
+    public var goToPalette: CommandPaletteConfig { commandPalettes.first { $0.name == CommandPaletteConfig.goTo.name } ?? .goTo }
     /// `pick_lists`: the rules of the Action lists it names.
     public var pickLists: [ActionList: PickRules] = [:]
     /// `ui.font_size`: the Interface font size, which all of Muxify's own text keeps its ratio to (ADR 0068).

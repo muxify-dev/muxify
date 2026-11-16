@@ -85,6 +85,28 @@ final class PaletteTagsTests: XCTestCase {
         XCTAssertEqual(palette.flow?.tagField?.chipField.chips, [tag("ops")], "⌫ in the empty field removes the new chip whole")
     }
 
+    @MainActor
+    func testNewTopicDoesNothingOnReturnUntilTheTitleHasText() {
+        let store = WorkspaceStore(configStore: ConfigStore(path: FileManager.default.temporaryDirectory
+            .appendingPathComponent("muxify-new-topic-\(UUID().uuidString).yaml").path), defaults: isolatedDefaults(), visitStore: isolatedVisits())
+        let palette = store.palette
+        palette.begin(.text(.tags(TagField(mode: .newTopic, defined: defined, chips: [tag("backend")]))))
+        for typed in ["", "   ", " #backend "] {
+            palette.query = typed
+            XCTAssertFalse(palette.canAccept, "\"\(typed)\" has no title")
+            XCTAssertEqual(palette.stepNote, "Give the Topic a title.")
+            palette.accept(.accept)
+            XCTAssertFalse(store.changingTopic, "\"\(typed)\": ↩ makes no Topic, not even an Untitled one")
+        }
+        palette.query = "Fix drop"
+        XCTAssertTrue(palette.canAccept)
+        XCTAssertNotEqual(palette.stepNote, "Give the Topic a title.")
+
+        palette.begin(.text(.tags(TagField(mode: .editTags(TopicRecord(id: "t")), defined: defined))))
+        palette.query = ""
+        XCTAssertTrue(palette.canAccept, "Edit Tags may save no Tags")
+    }
+
     func testATopicRowShowsItsConfigTagsAsChipsInTheirConfigColour() throws {
         let pair = MarkColor.pair(light: .rgb(red: 0x5e, green: 0x8c, blue: 0x6a), dark: .rgb(red: 0x7f, green: 0xa8, blue: 0x8a))
         let shown = [ShownTag(tag: tag("be"), definition: TagDefinition(tag: tag("be"), color: pair)),

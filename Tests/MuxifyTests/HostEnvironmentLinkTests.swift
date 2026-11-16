@@ -264,7 +264,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
             })
         }
         let store = WorkspaceStore(configStore: configStore(), environment: RemoteEnvironment(name: "box", host: "box", username: "user"),
-                                   defaults: isolatedDefaults()) { _ in link }
+                                   defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }
         var alerts: [String] = []
         store.showAlert = { _, text in alerts.append(text) }
         store.startLinkForTesting()

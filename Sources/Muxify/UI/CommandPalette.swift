@@ -259,7 +259,7 @@ final class CommandPalette {
     /// It starts nothing itself. A Worktree no Session Path holds opens it searched for by its folder's name.
     func openGoTo(at worktree: Folder) {
         guard let store else { return }
-        let palette = store.config.commandPalettes.first { $0.name == CommandPaletteConfig.goTo.name } ?? .goTo
+        let palette = store.config.goToPalette
         if current?.name != palette.name { toggle(palette) }
         let choice = SessionChoice.containing(worktree, in: store.sessionPaths)
         query = choice?.displayName ?? URL(fileURLWithPath: worktree.path).lastPathComponent
@@ -312,6 +312,7 @@ final class CommandPalette {
     private func open() {
         store?.hintHold.receive(.reset)
         if !isOpen {
+            store?.reloadVisits()
             DiagnosticsInput.countUserAction(\.paletteOpens)
             // A field editor serves one field at a time, and the palette's field takes it: the field it edited is
             // what gets Focus back.

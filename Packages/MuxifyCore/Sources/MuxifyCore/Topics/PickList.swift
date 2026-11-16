@@ -1,9 +1,7 @@
 import Foundation
-import SwiftUI
-import MuxifyCore
 
-struct SearchField: Equatable {
-    enum Place: Equatable {
+public struct SearchField: Equatable {
+    public enum Place: Equatable {
         case title
         /// "topic", "settled", ...; shown in the detail line only when it matched.
         case typeWord
@@ -18,31 +16,42 @@ struct SearchField: Equatable {
         case tag
     }
 
-    let text: String
-    let place: Place
+    public let text: String
+    public let place: Place
     /// The colour of a `.tag` field's chip: its Tag's colour in the Config.
-    var color: MarkColor? = nil
+    public var color: MarkColor? = nil
 
-    static func title(_ text: String) -> SearchField { SearchField(text: text, place: .title) }
-    static func typeWord(_ text: String) -> SearchField { SearchField(text: text, place: .typeWord) }
-    static func detail(_ text: String) -> SearchField { SearchField(text: text, place: .detail) }
-    static func hidden(_ text: String) -> SearchField { SearchField(text: text, place: .hidden) }
-    static func label(_ text: String) -> SearchField { SearchField(text: text, place: .label) }
-    static func tag(_ definition: TagDefinition) -> SearchField {
+    public init(text: String, place: Place, color: MarkColor? = nil) {
+        self.text = text
+        self.place = place
+        self.color = color
+    }
+
+    public static func title(_ text: String) -> SearchField { SearchField(text: text, place: .title) }
+    public static func typeWord(_ text: String) -> SearchField { SearchField(text: text, place: .typeWord) }
+    public static func detail(_ text: String) -> SearchField { SearchField(text: text, place: .detail) }
+    public static func hidden(_ text: String) -> SearchField { SearchField(text: text, place: .hidden) }
+    public static func label(_ text: String) -> SearchField { SearchField(text: text, place: .label) }
+    public static func tag(_ definition: TagDefinition) -> SearchField {
         SearchField(text: definition.tag.description, place: .tag, color: definition.color)
     }
 
     /// The chips of a Topic's Tags in the palette. A Tag the Config no longer defines is not listed (ADR 0034).
-    static func tags(_ shown: [ShownTag]) -> [SearchField] { shown.compactMap(\.definition).map(tag) }
+    public static func tags(_ shown: [ShownTag]) -> [SearchField] { shown.compactMap(\.definition).map(tag) }
 }
 
 /// The best field per word, summed over words. Nil when some word matches no field at its minimum score.
-struct FieldsMatch: Equatable {
-    let score: Int
+public struct FieldsMatch: Equatable {
+    public let score: Int
     /// Per field index, the positions of every word whose best field it is.
-    let positions: [Int: [Int]]
+    public let positions: [Int: [Int]]
 
-    static func best(_ query: FuzzyQuery, in fields: [SearchField]) -> FieldsMatch? {
+    public init(score: Int, positions: [Int: [Int]]) {
+        self.score = score
+        self.positions = positions
+    }
+
+    public static func best(_ query: FuzzyQuery, in fields: [SearchField]) -> FieldsMatch? {
         var score = 0
         var positions: [Int: [Int]] = [:]
         for (word, minimum) in zip(query.words, query.minimumScores) {
@@ -60,141 +69,196 @@ struct FieldsMatch: Equatable {
     }
 }
 
-struct Highlighted: Equatable {
-    let text: String
+public struct Highlighted: Equatable {
+    public let text: String
     /// Character offsets into `text`.
-    let marks: [Int]
+    public let marks: [Int]
 
-    static func plain(_ text: String) -> Highlighted { Highlighted(text: text, marks: []) }
-
-    /// The marked characters in bold and the accent color.
-    var attributed: AttributedString {
-        var attributed = AttributedString(text)
-        let count = text.count
-        for mark in marks where mark < count {
-            let start = attributed.index(attributed.startIndex, offsetByCharacters: mark)
-            let end = attributed.index(start, offsetByCharacters: 1)
-            attributed[start..<end].inlinePresentationIntent = .stronglyEmphasized
-            attributed[start..<end].foregroundColor = .accentColor
-        }
-        return attributed
+    public init(text: String, marks: [Int]) {
+        self.text = text
+        self.marks = marks
     }
+
+    public static func plain(_ text: String) -> Highlighted { Highlighted(text: text, marks: []) }
 }
 
-enum Pick<Payload: Equatable>: Equatable {
+public enum Pick<Payload: Equatable>: Equatable {
     case available(Payload)
     case blocked(reason: String)
 
-    var payload: Payload? {
+    public var payload: Payload? {
         if case .available(let payload) = self { return payload }
         return nil
     }
 
-    var reason: String? {
+    public var reason: String? {
         if case .blocked(let reason) = self { return reason }
         return nil
     }
 }
 
-struct PickCandidate<Payload: Equatable> {
+public struct PickCandidate<Payload: Equatable> {
     /// The accessibility id suffix, stable across queries.
-    let id: String
+    public let id: String
     /// `show` keeps or drops the row; the view picks its icon by it.
-    let kind: RowKind
+    public let kind: RowKind
     /// The id of a row that makes this one redundant: while that row is listed, this one is not. A Session Path names
     /// the row of the Session with its launch name, so `show` without that Session's kind lists the path again.
-    var shadowedBy: String? = nil
-    var symbol: String? = nil
-    let title: String
+    public var shadowedBy: String? = nil
+    public var symbol: String? = nil
+    public let title: String
     /// A choice that removes what it cannot bring back, such as All time in Clear Browser History: its title is red.
-    var isDestructive = false
-    var fields: [SearchField] = []
+    public var isDestructive = false
+    public var fields: [SearchField] = []
     /// Plain detail text, never matched: "until Mon 9:00", "4 Windows".
-    var note: String? = nil
+    public var note: String? = nil
     /// The right column: "2m", "Reopen · 2d", "Active".
-    var trailing = ""
+    public var trailing = ""
     /// The Agent mark that the row's Sidebar card shows.
-    var mark: CardMark? = nil
-    var lastVisit: Date? = nil
+    public var mark: CardMark? = nil
+    public var lastVisit: Date? = nil
     /// The Active Topic or the current Session: first after the Pinned rows on an empty query.
-    var isCurrent = false
+    public var isCurrent = false
     /// A Pinned Topic: first on an empty query, in candidate order.
-    var isPinned = false
+    public var isPinned = false
     /// A SessionPath or Worktree with no Session yet. On a tie it goes after the rows you can go to.
-    var unopened = false
+    public var unopened = false
     /// The Session's last activity in tmux, which breaks a tie after the last visit.
-    var activity = 0
+    public var activity = 0
     /// A Settled Topic: seldom the place to go, so it goes after an equal match.
-    var isSetAside = false
-    let pick: Pick<Payload>
+    public var isSetAside = false
+    public let pick: Pick<Payload>
     /// The text ⌃Y types where the Focus was before the picker opened, as pop's Yank does. A terminal gets it as one shell word.
-    var paste: String? = nil
+    public var paste: String? = nil
     /// `.tag` when the title is a Tag, such as "#backend", so only a `#` word matches it.
-    var titlePlace: SearchField.Place = .title
+    public var titlePlace: SearchField.Place = .title
+
+    public init(id: String, kind: RowKind, shadowedBy: String? = nil, symbol: String? = nil, title: String, isDestructive: Bool = false,
+                fields: [SearchField] = [], note: String? = nil, trailing: String = "", mark: CardMark? = nil, lastVisit: Date? = nil,
+                isCurrent: Bool = false, isPinned: Bool = false, unopened: Bool = false, activity: Int = 0, isSetAside: Bool = false,
+                pick: Pick<Payload>, paste: String? = nil, titlePlace: SearchField.Place = .title) {
+        self.id = id
+        self.kind = kind
+        self.shadowedBy = shadowedBy
+        self.symbol = symbol
+        self.title = title
+        self.isDestructive = isDestructive
+        self.fields = fields
+        self.note = note
+        self.trailing = trailing
+        self.mark = mark
+        self.lastVisit = lastVisit
+        self.isCurrent = isCurrent
+        self.isPinned = isPinned
+        self.unopened = unopened
+        self.activity = activity
+        self.isSetAside = isSetAside
+        self.pick = pick
+        self.paste = paste
+        self.titlePlace = titlePlace
+    }
 
     /// The title first: on an equal score the field listed first takes the word, so a title hit wins.
-    var searchFields: [SearchField] { [SearchField(text: title, place: titlePlace)] + fields }
+    public var searchFields: [SearchField] { [SearchField(text: title, place: titlePlace)] + fields }
 }
 
-struct PickRow<Payload: Equatable>: Identifiable, Equatable {
-    let id: String
-    let kind: RowKind
-    let symbol: String?
-    let title: Highlighted
-    var isDestructive = false
-    let detail: Highlighted
+public struct PickRow<Payload: Equatable>: Identifiable, Equatable {
+    public let id: String
+    public let kind: RowKind
+    public let symbol: String?
+    public let title: Highlighted
+    public var isDestructive = false
+    public let detail: Highlighted
     /// The Tags of the row's Topic, each with the marks of the query.
-    var tags: [RowTag] = []
-    let trailing: String
-    let mark: CardMark?
-    let pick: Pick<Payload>
-    let paste: String?
+    public var tags: [RowTag] = []
+    public let trailing: String
+    public let mark: CardMark?
+    public let pick: Pick<Payload>
+    public let paste: String?
+
+    public init(id: String, kind: RowKind, symbol: String?, title: Highlighted, isDestructive: Bool = false, detail: Highlighted,
+                tags: [RowTag] = [], trailing: String, mark: CardMark?, pick: Pick<Payload>, paste: String?) {
+        self.id = id
+        self.kind = kind
+        self.symbol = symbol
+        self.title = title
+        self.isDestructive = isDestructive
+        self.detail = detail
+        self.tags = tags
+        self.trailing = trailing
+        self.mark = mark
+        self.pick = pick
+        self.paste = paste
+    }
 }
 
 /// A Tag chip after a row's title.
-struct RowTag: Equatable {
-    let text: Highlighted
-    let color: MarkColor?
+public struct RowTag: Equatable {
+    public let text: Highlighted
+    public let color: MarkColor?
+
+    public init(text: Highlighted, color: MarkColor?) {
+        self.text = text
+        self.color = color
+    }
 }
 
-struct PickSection<Payload: Equatable>: Identifiable, Equatable {
-    let id: String
+public struct PickSection<Payload: Equatable>: Identifiable, Equatable {
+    public let id: String
     /// The header; nil draws none.
-    let title: String?
-    let rows: [PickRow<Payload>]
+    public let title: String?
+    public let rows: [PickRow<Payload>]
+
+    public init(id: String, title: String?, rows: [PickRow<Payload>]) {
+        self.id = id
+        self.title = title
+        self.rows = rows
+    }
 }
 
-struct PickList<Payload: Equatable>: Equatable {
+public struct PickList<Payload: Equatable>: Equatable {
     /// Never holds an empty section.
-    let sections: [PickSection<Payload>]
+    public let sections: [PickSection<Payload>]
 
-    static var empty: PickList { PickList(sections: []) }
-    var rows: [PickRow<Payload>] { sections.flatMap(\.rows) }
+    public init(sections: [PickSection<Payload>]) { self.sections = sections }
+
+    public static var empty: PickList { PickList(sections: []) }
+    public var rows: [PickRow<Payload>] { sections.flatMap(\.rows) }
 
     /// The payload of an available row; nil for a blocked or unknown id.
-    func payload(of id: String?) -> Payload? {
+    public func payload(of id: String?) -> Payload? {
         rows.first { $0.id == id }?.pick.payload
     }
 }
 
-enum SectionRule: Equatable {
+public enum SectionRule: Equatable {
     /// Fuzzy filter and sort; hidden on an empty query when `showsWhenEmpty` is false.
     case ranked(showsWhenEmpty: Bool)
     /// Never filtered or sorted: the Move form's New Topic row.
     case fixed
 }
 
-struct PickSectionInput<Payload: Equatable> {
-    let id: String
-    var title: String? = nil
-    let rule: SectionRule
-    var candidates: [PickCandidate<Payload>]
-    var currentLast = false
+public struct PickSectionInput<Payload: Equatable> {
+    public let id: String
+    public var title: String? = nil
+    public let rule: SectionRule
+    public var candidates: [PickCandidate<Payload>]
+    public var currentLast = false
     /// False for a list whose candidate order means something, such as Commands or Tags in Config order.
-    var shorterTitleFirst = true
+    public var shorterTitleFirst = true
+
+    public init(id: String, title: String? = nil, rule: SectionRule, candidates: [PickCandidate<Payload>], currentLast: Bool = false,
+                shorterTitleFirst: Bool = true) {
+        self.id = id
+        self.title = title
+        self.rule = rule
+        self.candidates = candidates
+        self.currentLast = currentLast
+        self.shorterTitleFirst = shorterTitleFirst
+    }
 
     /// The `topics.tags` Tags, which keep Config order on a tie.
-    static func tags(_ candidates: [PickCandidate<Payload>], showsWhenEmpty: Bool) -> PickSectionInput {
+    public static func tags(_ candidates: [PickCandidate<Payload>], showsWhenEmpty: Bool) -> PickSectionInput {
         PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: showsWhenEmpty), candidates: candidates, shorterTitleFirst: false)
     }
 }
@@ -233,9 +297,9 @@ private extension PickCandidate {
 /// drop non-matches, sort by score, then by each `tiebreak` rule in turn (`length` only for a query, in a section that
 /// wants it), then candidate order; on an empty query only, Pinned rows go first in candidate order, then current rows.
 /// Empty sections drop out. `ranked` merges the sections into one list. A fixed section keeps every row.
-enum FuzzyRanker {
+public enum FuzzyRanker {
     /// `rules` has no default, so every ranked list is ranked by its own Config rules.
-    static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery, rules: PickRules,
+    public static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery, rules: PickRules,
                               order: PaletteOrder = .grouped) -> PickList<Payload> {
         let sections = shown(sections, show: rules.show)
         let tiebreak = rules.tiebreak
@@ -260,7 +324,7 @@ enum FuzzyRanker {
     }
 
     /// Rows no rule touches, in candidate order: a step's choices, a confirmation.
-    static func fixed<Payload>(_ candidates: [PickCandidate<Payload>]) -> PickList<Payload> {
+    public static func fixed<Payload>(_ candidates: [PickCandidate<Payload>]) -> PickList<Payload> {
         list([PickSectionInput(id: "choices", rule: .fixed, candidates: candidates)], query: FuzzyQuery(""), rules: .standard)
     }
 
@@ -315,14 +379,14 @@ enum FuzzyRanker {
     }
 
     /// The Tag fields after the title, and their marks.
-    static func tags(_ fields: [SearchField], match: FieldsMatch?) -> [RowTag] {
+    public static func tags(_ fields: [SearchField], match: FieldsMatch?) -> [RowTag] {
         fields.enumerated().dropFirst().filter { $0.element.place == .tag }.map { index, field in
             RowTag(text: Highlighted(text: field.text, marks: match?.positions[index] ?? []), color: field.color)
         }
     }
 
     /// The detail line and its marks: what matched, and what always shows.
-    static func detail(_ fields: [SearchField], note: String?, match: FieldsMatch?) -> Highlighted {
+    public static func detail(_ fields: [SearchField], note: String?, match: FieldsMatch?) -> Highlighted {
         var parts: [Highlighted] = []
         func shown(_ place: SearchField.Place, onlyWhenMatched: Bool) {
             // The first field is the title, which the row shows on its own line.

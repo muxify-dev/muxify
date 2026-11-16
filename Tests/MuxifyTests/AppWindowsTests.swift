@@ -35,7 +35,7 @@ final class AppWindowsTests: XCTestCase {
     @MainActor func testOnlyTheFirstAppWindowUsesTheRememberedEnvironment() throws {
         try withWindows { windows, _ in
             defaults.set("Home", forKey: "selectedEnvironment")
-            let remembered = AppWindows(configStore: windows.configStore, defaults: defaults)
+            let remembered = AppWindows(configStore: windows.configStore, defaults: defaults, visitStore: isolatedVisits())
             var opened: [AppWindowRequest] = []
             remembered.openWindow = { opened.append($0) }
             remembered.openFirstWindow()
@@ -553,7 +553,7 @@ final class AppWindowsTests: XCTestCase {
         let path = directory.appendingPathComponent("config.yaml").path
         try Self.config.write(toFile: path, atomically: true, encoding: .utf8)
         defaults = isolatedDefaults()
-        let windows = AppWindows(configStore: ConfigStore(path: path), defaults: defaults)
+        let windows = AppWindows(configStore: ConfigStore(path: path), defaults: defaults, visitStore: isolatedVisits())
         defer {
             let finished = expectation(description: "fixture window cleanup")
             windows.shutdown { finished.fulfill() }

@@ -1796,6 +1796,19 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(try sandbox.requestState(move), "started")
     }
 
+    func testSessionNewTwiceWithOneRequestMakesOneSessionAndPrintsTheSameJSON() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let arguments = ["session", "new", sandbox.game.path, "--name", "api", "--json", "--request", UUID().uuidString.lowercased()]
+        let first = try await run(cli, arguments: arguments, environment: environment)
+        XCTAssertEqual(first.status, 0, first.output)
+        let again = try await run(cli, arguments: arguments, environment: environment)
+        XCTAssertEqual(again.status, 0, again.output)
+        XCTAssertEqual(again.stdout, first.stdout)
+        XCTAssertEqual(try sandbox.sessions(), ["api", "main"], "one Session, and no api+2")
+    }
+
     func testAddSessionWithANameAndARequestMakesOneSession() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
@@ -1823,14 +1836,14 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(try sandbox.sessions(), ["api/ship", "game/ship", "main"])
     }
 
-    func testEnvironmentShowJSONListsTheRequestCapabilityAndAReadRefusesARequest() async throws {
+    func testEnvironmentShowJSONListsTheCapabilitiesAndAReadRefusesARequest() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
         let environment = sandbox.cliEnvironment(pane: nil)
         let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: environment)
         XCTAssertEqual(shown.status, 0, shown.output)
-        XCTAssertTrue(shown.stdout.contains(#""capabilities":["request"]"#), shown.stdout)
-        XCTAssertEqual(try jsonLine(shown.stdout)["capabilities"] as? [String], ["request"])
+        XCTAssertTrue(shown.stdout.contains(#""capabilities":["request","session-paths"]"#), shown.stdout)
+        XCTAssertEqual(try jsonLine(shown.stdout)["capabilities"] as? [String], ["request", "session-paths"])
         let text = try await run(cli, arguments: ["environment", "show"], environment: environment)
         XCTAssertFalse(text.stdout.contains("capabilities"), text.stdout)
 
@@ -1847,6 +1860,131 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(try sandbox.records().count, 0)
         // After `--`, the words are the command's own.
         XCTAssertNoThrow(try CLICommand(arguments: ["topic", "exec", "--topic", "Ship", "--", "echo", "--request", "soon"], environment: [:]))
+    }
+
+    func testSessionPathsRanksByTheLastVisitAndByTheQueryAndAVisitRequestAppliesOnce() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let source = sandbox.tools.appendingPathComponent("src")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        func rows(_ arguments: [String] = []) async throws -> [[String: Any]] {
+            let listed = try await run(cli, arguments: ["session-paths", "--json"] + arguments, environment: environment)
+            XCTAssertEqual(listed.status, 0, listed.output)
+            return try XCTUnwrap(try jsonLine(listed.stdout)["rows"] as? [[String: Any]])
+        }
+        func names(_ rows: [[String: Any]]) -> [String] { rows.compactMap { $0["name"] as? String } }
+        let visits = VisitStore(paths: MuxifyPaths(environment: environment, home: "/nonexistent"))
+
+        let unvisited = try await rows()
+        XCTAssertEqual(names(unvisited), ["game", "tools"], "with no visit, the order of the Config")
+        XCTAssertTrue(unvisited.allSatisfy { $0["last_visit"] is NSNull && $0["in_this_topic"] == nil && $0["kind"] as? String == "session_path" })
+
+        let request = UUID().uuidString
+        let visit = try await run(cli, arguments: ["session-paths", "visit", source.path, "--json", "--request", request], environment: environment)
+        XCTAssertEqual(visit.status, 0, visit.output)
+        let visited = try XCTUnwrap(try jsonLine(visit.stdout)["visited"] as? [String: String])
+        XCTAssertEqual(visited["directory"], sandbox.tools.path, "the visit is to the Session Path that holds the folder")
+        let stamp = try XCTUnwrap(visited["last_visit"])
+        let time = try XCTUnwrap(ISO8601DateFormatter().date(from: stamp), stamp)
+        XCTAssertLessThan(abs(time.timeIntervalSinceNow), 60)
+        let saved = try XCTUnwrap(try visits.times()[.directory(sandbox.tools.path)])
+
+        let ranked = try await rows()
+        XCTAssertEqual(names(ranked), ["tools", "game"], "the last visited first")
+        XCTAssertEqual(ranked[0]["last_visit"] as? String, stamp)
+        let text = try await run(cli, arguments: ["session-paths"], environment: environment)
+        XCTAssertEqual(text.stdout, "tools\tsession_path\t\(sandbox.tools.path)\t\(stamp)\ngame\tsession_path\t\(sandbox.game.path)\t\n")
+
+        let again = try await run(cli, arguments: ["session-paths", "visit", source.path, "--json", "--request", request], environment: environment)
+        XCTAssertEqual(again.stdout, visit.stdout)
+        XCTAssertEqual(again.status, 0, again.output)
+        XCTAssertEqual(try visits.times()[.directory(sandbox.tools.path)], saved, "a second send of the Request records no new visit")
+        let other = try await run(cli, arguments: ["session-paths", "visit", source.path, "--request", UUID().uuidString], environment: environment)
+        XCTAssertEqual(other.stdout, sandbox.tools.path + "\n")
+        XCTAssertGreaterThan(try XCTUnwrap(try visits.times()[.directory(sandbox.tools.path)]), saved, "a new id is a new visit")
+
+        let matches = try await rows(["--query", "gam"])
+        XCTAssertEqual(names(matches), ["game"])
+        let all = try await rows(["--query", "work"])
+        XCTAssertEqual(names(all), ["game", "tools"], "an equal match of the folder: the shorter title first, as in Go to…")
+        let none = try await rows(["--query", "zzz"])
+        XCTAssertEqual(names(none), [])
+
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let topic = try await run(cli, arguments: ["topic", "session-paths", "--topic", id, "--json"], environment: environment)
+        let topicRows = try XCTUnwrap(try jsonLine(topic.stdout)["rows"] as? [[String: Any]])
+        XCTAssertEqual(topicRows.map { $0["last_visit"] as? String }, [nil, try visits.times()[.directory(sandbox.tools.path)].map(ISO8601DateFormatter().string)])
+        XCTAssertEqual(topicRows.map { $0["in_this_topic"] as? Bool }, [true, false])
+
+        let missing = try await run(cli, arguments: ["session-paths", "visit", sandbox.root.appendingPathComponent("missing").path,
+                                                     "--request", UUID().uuidString], environment: environment)
+        XCTAssertEqual(missing.status, 2, missing.output)
+        let read = try await run(cli, arguments: ["session-paths", "--request", UUID().uuidString], environment: environment)
+        XCTAssertEqual(read.status, 2, "a read takes no Request: \(read.output)")
+    }
+
+    /// The fake git takes 3 seconds for each call, so an answer that waited for the discovery, or a refresh that
+    /// held the answer's pipes, would not be back in 2.
+    func testSessionPathsAnswersFromTheDiscoveryCacheAndFindsTheFoldersAgainAfterTheAnswer() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        // Discovery runs git only in a repository.
+        try sandbox.makeRepository(sandbox.game)
+        var environment = sandbox.cliEnvironment(pane: nil)
+        func names() async throws -> [String] {
+            let listed = try await run(cli, arguments: ["session-paths", "--json"], environment: environment)
+            XCTAssertEqual(listed.status, 0, listed.output)
+            return try XCTUnwrap(try jsonLine(listed.stdout)["rows"] as? [[String: Any]]).compactMap { $0["name"] as? String }
+        }
+        let cache = MuxifyPaths(environment: environment, home: "/nonexistent").sessionPathCache(remote: nil)
+        let first = try await names()
+        XCTAssertEqual(first, ["game", "tools"], "with no cache, the answer waits for the discovery")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.path), "and saves it")
+
+        try FileManager.default.createDirectory(at: sandbox.root.appendingPathComponent("work/late"), withIntermediateDirectories: true)
+        let bin = sandbox.root.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try Data("#!/bin/sh\nsleep 3\nexec /usr/bin/git \"$@\"\n".utf8).write(to: bin.appendingPathComponent("git"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent("git").path)
+        environment["PATH"] = bin.path + ":/usr/bin:/bin"
+
+        let start = Date()
+        let cached = try await names()
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2, "the answer does not wait for git")
+        XCTAssertEqual(cached, ["game", "tools"], "the answer is the cache's")
+        XCTAssertEqual((try? String(contentsOf: cache, encoding: .utf8))?.contains("late"), false, "the discovery is still running")
+
+        let deadline = Date().addingTimeInterval(30)
+        var refreshed = false
+        while !refreshed, Date() < deadline {
+            refreshed = (try? String(contentsOf: cache, encoding: .utf8))?.contains("late") == true
+            if !refreshed { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        XCTAssertTrue(refreshed, "the refresh that the answer started saved the new folder")
+        environment["PATH"] = "/usr/bin:/bin"
+        let later = try await names()
+        XCTAssertEqual(later, ["game", "late", "tools"])
+    }
+
+    func testEnvironmentShowJSONSaysWhichSidebarListsTheConfigShows() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let config = try String(contentsOf: sandbox.config, encoding: .utf8)
+        func sidebar() async throws -> [String: Bool] {
+            let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: environment)
+            XCTAssertEqual(shown.status, 0, shown.output)
+            return try XCTUnwrap(try jsonLine(shown.stdout)["sidebar"] as? [String: Bool], shown.stdout)
+        }
+        let absent = try await sidebar()
+        XCTAssertEqual(absent, ["topics": true, "sessions": true], "both lists show when the Config has no keys")
+        try (config + "\nsidebar:\n  topics: false\n").write(to: sandbox.config, atomically: true, encoding: .utf8)
+        let sessionsOnly = try await sidebar()
+        XCTAssertEqual(sessionsOnly, ["topics": false, "sessions": true])
+        try (config + "\nsidebar:\n  sessions: false\n").write(to: sandbox.config, atomically: true, encoding: .utf8)
+        let topicsOnly = try await sidebar()
+        XCTAssertEqual(topicsOnly, ["topics": true, "sessions": false])
     }
 
     private func standaloneCLI() throws -> URL {

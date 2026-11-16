@@ -314,7 +314,7 @@ extension CommandPalette {
         }
         switch flow {
         case .text(.renameWindow), .text(.renameSession), .text(.worktreeName): return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .text(.tags(let field)): return field.text(query).refusedWords.isEmpty
+        case .text(.tags(let field)): return field.text(query).canAccept
         case .text(.forgetSettledDays): return forgetSettledChoice?.topics.isEmpty == false
         default: break
         }
@@ -672,7 +672,7 @@ extension CommandPalette {
             switch text {
             case .tags(let field):
                 let typed = field.text(value)
-                guard typed.refusedWords.isEmpty else { return }
+                guard typed.canAccept else { return }
                 switch field.mode {
                 case .newTopic: store.createTopic(title: typed.title, tags: typed.tags)
                 case .editTags(let topic): store.setTags(of: topic.id, typed.tags)

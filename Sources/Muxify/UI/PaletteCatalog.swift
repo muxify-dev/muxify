@@ -257,15 +257,9 @@ struct PaletteCatalog {
     }
 
     private func pathCandidate(_ choice: SessionChoice, shadowedBy: String?) -> PickCandidate<PaletteItem> {
-        let visit = visits.last(.directory(choice.directory.real))
-        return PickCandidate(
-            id: "session-path:\(choice.directory.path)", kind: choice.isWorktree ? .worktree : .sessionPath, shadowedBy: shadowedBy,
-            symbol: "□", title: choice.displayName,
-            fields: [.typeWord(choice.isWorktree ? "worktree" : "session"), .detail(Paths.tildify(choice.directory.path, home: homeDirectory))] + choice.nameFields,
-            trailing: "↩ open", lastVisit: visit, unopened: true,
-            pick: .available(PaletteItem(ref: .sessionPath(OpenDirectory(directory: choice.directory, name: choice.name)),
-                                         path: choice.directory.path)),
-            paste: choice.directory.path)
+        .sessionPath(choice, lastVisit: visits.last(.directory(choice.directory.real)), home: homeDirectory, shadowedBy: shadowedBy,
+                     pick: .available(PaletteItem(ref: .sessionPath(OpenDirectory(directory: choice.directory, name: choice.name)),
+                                                  path: choice.directory.path)))
     }
 
     private func looseSessionCandidates(_ windows: [TmuxWindow]) -> [PickCandidate<PaletteItem>] {

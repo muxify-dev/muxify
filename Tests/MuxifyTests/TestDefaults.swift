@@ -1,3 +1,4 @@
+import MuxifyCore
 import XCTest
 
 extension XCTestCase {
@@ -8,5 +9,15 @@ extension XCTestCase {
         let defaults = UserDefaults(suiteName: name)!
         addTeardownBlock { defaults.removePersistentDomain(forName: name) }
         return defaults
+    }
+}
+
+extension XCTestCase {
+    /// A visit store in a state folder of this test's own, so a `WorkspaceStore` or `AppWindows` it builds never
+    /// reads or writes the user's `muxify.db`. The folder is removed when the test ends.
+    func isolatedVisits() -> VisitStore {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-test-visits-" + UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        return VisitStore(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": root.path], home: "/nonexistent"))
     }
 }

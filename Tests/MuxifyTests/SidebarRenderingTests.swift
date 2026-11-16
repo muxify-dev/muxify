@@ -37,7 +37,7 @@ final class SidebarRenderingTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("config.yaml").path
         let config = ConfigStore(path: path)
-        let store = WorkspaceStore(configStore: config, defaults: isolatedDefaults())
+        let store = WorkspaceStore(configStore: config, defaults: isolatedDefaults(), visitStore: isolatedVisits())
         store.sessionsVisible = true
         store.agentsVisible = false
         let host = NSHostingView(rootView: ConfiguredSidebar(store: store, config: config)

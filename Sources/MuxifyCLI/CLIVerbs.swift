@@ -343,8 +343,10 @@ enum CLIVerbs {
                 Muxify shows them: the Sessions in tmux order, then the Pinned Topics, the
                 In Play places, the Guests and the Bench, each with its Sessions, and each
                 No Topic Session. JSON includes each Session's Windows in tmux index order,
-                with marks, and the Tags that the Config defines. For a Topic's Panes,
-                use topic show. It changes nothing.
+                with marks, and the Tags that the Config defines. JSON also has `sidebar`,
+                {"topics":bool,"sessions":bool}: which of the two lists the Config shows
+                (sidebar.topics, sidebar.sessions; both true when unset). For a Topic's
+                Panes, use topic show. It changes nothing.
                   --json          print the full result as one line of JSON
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
@@ -501,6 +503,34 @@ enum CLIVerbs {
                 targets: [.topic, .window, .pane],
                 help: "Prints the Add a Session rows and other running Sessions for this Topic.") { parsed in
             .topicSessionPaths(try TopicSessionPathsInvocation(parsed: parsed))
+        },
+        CLIVerb(path: .sessionPaths, synopsis: "[--query <text>] [--json]", options: [.value("--query"), .flag("--json")],
+                help: """
+                Prints this machine's Session Paths and Worktrees, in the order of Go to…:
+                the last visited first, or the best match of <text> first. It needs no
+                Topic, Window or Pane. It answers from the last discovery and then finds
+                the folders again, so the next answer is up to date.
+                  --query <text>   only the rows that match <text>
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            return .sessionPaths(SessionPathsInvocation(.list(query: try parsed.value("--query") ?? ""), parsed: parsed))
+        },
+        CLIVerb(path: .sessionPathsVisit, synopsis: "<dir> [--json]", options: [.flag("--json")],
+                help: """
+                Records that a Session opened in <dir> now, as a look at the Session in
+                Muxify does, so its Session Path or Worktree ranks first in Go to… and in
+                session-paths. Prints the visited folder.
+                """) { parsed in
+            guard parsed.operands.count == 1 else { throw CLIError.usage }
+            return .request(try RequestInvocation(.visitSessionPath(directory: parsed.operands[0], at: parsed.now), parsed: parsed))
+        },
+        CLIVerb(path: .sessionPathsRefresh, synopsis: "", options: [],
+                help: """
+                Finds the Session Paths again and saves them for session-paths, which
+                runs it after each answer.
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            return .sessionPaths(SessionPathsInvocation(.refresh, parsed: parsed))
         },
         topicVerb(.topicAddSession, synopsis: "<dir> [--name <name>] [--worktree [--base <ref> | --branch <name>]]\n\(topicTarget) [--json]",
                   options: [.value("--name"), .flag("--worktree"), .value("--base"), .value("--branch")],

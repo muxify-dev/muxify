@@ -25,11 +25,12 @@ struct TopicSessionPathsInvocation: Equatable {
         for warning in SessionPathDiscovery.warnings(in: config.sessionPaths) {
             FileHandle.standardError.write(Data((warning + "\n").utf8))
         }
-        print(try Self.render(choices, output: output))
+        print(try Self.render(choices, visits: (try? VisitStore(paths: paths).times()) ?? [:], output: output))
     }
 
-    static func render(_ choices: TopicSessionPathChoices, output: RequestInvocation.Output) throws -> String {
-        let response = Response(choices)
+    /// `visits` are this machine's: each row's `last_visit` is the visit to its folder.
+    static func render(_ choices: TopicSessionPathChoices, visits: [VisitKey: Date] = [:], output: RequestInvocation.Output) throws -> String {
+        let response = Response(choices, visits: visits)
         switch output {
         case .json:
             let encoder = JSONEncoder()
@@ -42,34 +43,7 @@ struct TopicSessionPathsInvocation: Equatable {
         }
     }
 
-    private struct Topic: Codable, Hashable, Sendable {
-        let id: String
-        let label: String
-        init(_ summary: TopicSummary) { id = summary.id; label = summary.label }
-    }
-
-    private struct Checkout: Codable, Hashable, Sendable {
-        let path: String
-        @EncodesNull var branch: String?
-    }
-
-    private struct Row: Encodable {
-        let kind: String
-        let name: String
-        let label: String
-        let directory: String
-        @EncodesNull var worktree: Checkout?
-        let inThisTopic: Bool
-        let alsoIn: [Topic]
-        @EncodesNull var lastVisit: Double? = nil
-
-        enum CodingKeys: String, CodingKey {
-            case kind, name, label, directory, worktree
-            case inThisTopic = "in_this_topic"
-            case alsoIn = "also_in"
-            case lastVisit = "last_visit"
-        }
-    }
+    private typealias Topic = SessionPathAnswer.Topic
 
     private struct Session: Encodable {
         let id: String
@@ -80,17 +54,13 @@ struct TopicSessionPathsInvocation: Equatable {
 
     private struct Response: Encodable {
         let topic: Topic
-        let rows: [Row]
+        let rows: [SessionPathAnswer]
         let sessions: [Session]
 
-        init(_ choices: TopicSessionPathChoices) {
+        init(_ choices: TopicSessionPathChoices, visits: [VisitKey: Date]) {
             topic = Topic(choices.topic)
-            rows = choices.rows.map { value in
-                let choice = value.row.choice
-                return Row(kind: choice.isWorktree ? "worktree" : "session_path", name: choice.name,
-                           label: choice.displayName, directory: choice.directory.path,
-                           worktree: choice.worktree.map { Checkout(path: $0.folder.path, branch: $0.branch) },
-                           inThisTopic: value.inThisTopic, alsoIn: value.row.alsoIn.map(Topic.init))
+            rows = choices.rows.map {
+                SessionPathAnswer($0.row, inThisTopic: $0.inThisTopic, lastVisit: visits[.directory($0.row.choice.directory.real)])
             }
             sessions = choices.sessions.map { Session(id: $0.id, name: $0.name, directory: $0.directory, topic: $0.topic.map(Topic.init)) }
         }
