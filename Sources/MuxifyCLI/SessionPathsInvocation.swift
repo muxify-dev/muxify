@@ -78,10 +78,15 @@ struct SessionPathsInvocation: Equatable {
     #endif
 
     /// Runs `muxify session-paths refresh` in a session of its own, with no terminal and with `/dev/null` for its
-    /// input and output. It holds no pipe of this command, so `ssh host muxify session-paths` ends when the answer
-    /// is out, and the end of the connection does not stop the refresh. A refresh that does not start costs only an
-    /// older answer next time, so a failure here is not an error of the command.
+    /// input and output. It holds no descriptor of this command, so `ssh host muxify session-paths` ends when the
+    /// answer is out, and the end of the connection does not stop the refresh. A refresh that does not start costs
+    /// only an older answer next time, so a failure here is not an error of the command.
     private static func startRefresh(_ executable: URL, environment: [String: String]) {
+        // posix_spawn passes on each descriptor without FD_CLOEXEC, such as a pipe whose end tells a caller that this
+        // command ended. This command exits next, so closing them all at the exec costs it nothing.
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd")) ?? [] {
+            if let descriptor = Int32(name), descriptor > STDERR_FILENO { _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC) }
+        }
         #if canImport(Darwin)
         var actions: posix_spawn_file_actions_t?
         var attributes: posix_spawnattr_t?
