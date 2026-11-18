@@ -576,6 +576,21 @@ class TopicsBenchSidebar(TopicsSidebar):
                          'the Bench did not scroll: %s' % self.tops([bench[0]], s.rows()))
         self.assert_in_place(fixed, before, rs)
 
+    def test_a_swipe_on_a_shown_bench_of_one_card_does_not_move_it(self):
+        s = self.s
+        self.bench_topics('bench-one', in_play=2)
+        c = 'topic-bench-one-c'
+        self.show_bench()
+        rs = s.wait_rows(lambda rs: self.shown_after_line(rs) == [c], 'the Bench does not show one card: %s' % self.shown_after_line(s.rows()))
+        before = self.top(c, rs)
+        # A swipe up past the end, which bounces a list that bounces.
+        swiped = s.act('scroll', 'topics-list', wheel=True, by=200, steps=10, watch=[c, 'topics-more-above'], watch_seconds=1)
+        self.assertTrue(swiped['pressed'], 'the swipe found no scroll view under the Topics list')
+        tops = [y + height for _, y, _, height in swiped['frames'][c]]
+        self.assertTrue(all(abs(top - before) <= 1 for top in tops),
+                        'a drawn frame showed %s away from its place under the line: %s, before %s' % (c, tops, before))
+        self.assertNotIn('topics-more-above', swiped['frames'], 'the "more above" pill showed over a Bench that fits')
+
     def test_a_lifted_card_held_at_the_bottom_edge_scrolls_the_bench(self):
         s = self.s
         bench = self.long_bench('bench-edge')

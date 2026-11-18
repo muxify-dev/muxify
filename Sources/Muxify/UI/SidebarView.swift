@@ -219,6 +219,10 @@ private struct TopicsSection: View {
         }
         .coordinateSpace(.named(TopicCard.viewport))
         .scrollIndicators(.never)
+        // A list that fits does not bounce. With one Benched card the tail makes the content exactly the viewport's
+        // height, and a bounce at its end would slide that card under the block that sticks and flash the "more
+        // above" pill.
+        .scrollBounceBehavior(.basedOnSize, axes: .vertical)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { viewportTop = $0 }
         .background {
