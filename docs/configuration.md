@@ -296,11 +296,13 @@ problem, and you can remove the line.
   gets it. A Guest dropped on an Open Place fills it. A Guest Session cannot
   take a place, and an In Play card cannot trade with a Guest Session. Replace
   from Bench on a Guest gives its mark to the card that comes in.
-- A new Topic goes to the top of the Bench, right after the In Play cards. It
-  does not fill an Open Place. A Settled Topic that Reopen or Start Fresh brings
-  back goes there too. When the
-  list has fewer cards than `in_play`, it goes last. A Pinned Topic that
-  returns goes last among the Pinned Topics. A Dormant Topic keeps its place.
+- A new Topic is a Guest: New Topic, `muxify topic new` and Move to a new
+  Topic put it at the end of the Guests, also when an In Play place is free.
+  Move it In Play or to the Bench yourself. A Settled Topic that Reopen or Start
+  Fresh brings back goes to the top of the Bench, right after the In Play cards.
+  It does not fill an Open Place. When the list has fewer cards than
+  `in_play`, it goes last. A Pinned Topic that returns goes last among the
+  Pinned Topics. A Dormant Topic keeps its place.
   A Topic made from a Guest Session takes that Guest's place.
 - Choose In Play… (`choose_in_play`, ⇧⌥⌘S) sets which cards are In Play, and
   in what order. It opens in the palette with a box on each open Topic that is

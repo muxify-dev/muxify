@@ -957,7 +957,7 @@ final class ConfigTests: XCTestCase {
     func testTopicInsertPositionIsGoneAndTheProblemSaysWhereATopicGoes() throws {
         for value in ["top", "bottom"] {
             XCTAssertEqual(try load("topics:\n  insert_position: " + value).problems, [ConfigProblem(
-                path: root, line: 2, message: "topics.insert_position is gone: a new or returning Topic always goes to the top of the Bench")])
+                path: root, line: 2, message: "topics.insert_position is gone: a new Topic is a Guest, and a returning Topic goes to the top of the Bench")])
         }
     }
 

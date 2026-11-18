@@ -60,6 +60,15 @@ class TopicServiceTestCase: XCTestCase {
         return id
     }
 
+    /// A Topic that is not a Guest, for a test that needs a list of regular cards: New Topic makes a Guest, and Bench
+    /// takes it to the first free place, else to the top of the Bench.
+    @discardableResult
+    fileprivate func regularTopic(_ title: String, using service: EnvironmentService) throws -> String {
+        let id = try XCTUnwrap(change(service.handle(EnvironmentRequest(.create(title: title)))).topicID)
+        _ = try change(service.handle(EnvironmentRequest(.benchTopic, target: .topic(.id(id)))))
+        return id
+    }
+
     fileprivate func assertThrowawayServer() throws {
         let socket = try server.run(["display-message", "-p", "#{socket_path}"]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard socket.hasPrefix(root.path + "/") else { throw CancellationError() }
@@ -861,14 +870,15 @@ final class TopicServiceWorktreeTests: TopicServiceTestCase {
 final class TopicServiceCardTests: TopicServiceTestCase {
     func testMakeAGuestPutsANoTopicSessionAtTheEndOfTheGuestsAndBenchEndsIt() throws {
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        _ = try change(service().handle(EnvironmentRequest(.create(title: "First"))))
-        _ = try topicWithSession("Second", at: sessionPath.folder.path, using: service())
+        try regularTopic("First", using: service())
+        let second = try topicWithSession("Second", at: sessionPath.folder.path, using: service())
+        _ = try change(service().handle(EnvironmentRequest(.benchTopic, target: .topic(.id(second)))))
         let locked = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
         XCTAssertNil(locked.topicID)
         XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes"])
         _ = try change(service().handle(EnvironmentRequest(.create(title: "Third"))))
         _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["First", "Second", "Third", "lock:notes"], "a Guest Session keeps its place under the places")
+        XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes", "Third"], "a new Topic is the last Guest, and a Guest Session keeps its place")
 
         let inTopic = try failure(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("game/second"))))
         XCTAssertEqual(inTopic.kind, .cardNotBenched, "a Session in a Topic names the Topic's card, which is In Play")
@@ -883,10 +893,10 @@ final class TopicServiceCardTests: TopicServiceTestCase {
     func testALockedSessionThatGoesIntoATopicLosesItsLock() throws {
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
         try server.run(["new-session", "-d", "-s", "chores", "-c", tools.folder.path])
-        _ = try change(service().handle(EnvironmentRequest(.create(title: "First"))))
+        try regularTopic("First", using: service())
+        try regularTopic("Second", using: service())
         _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
         _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("chores"))))
-        _ = try change(service().handle(EnvironmentRequest(.create(title: "Second"))))
         XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes", "lock:chores"])
 
         let notes = try XCTUnwrap(SessionID(rawValue: try server.snapshot().windows.first { $0.sessionName == "notes" }!.sessionID))
@@ -902,8 +912,8 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
     func testAReturningTopicGoesAfterAGuestSessionAndSavesNormalizedLockRanks() throws {
         let one = service(inPlay: 1)
-        _ = try change(one.handle(EnvironmentRequest(.create(title: "First"))))
-        let returning = try XCTUnwrap(change(one.handle(EnvironmentRequest(.create(title: "Returning")))).topicID)
+        try regularTopic("First", using: one)
+        let returning = try regularTopic("Returning", using: one)
         XCTAssertEqual(try topicList(), ["First", "Returning"])
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
         try server.run(["set-option", "-t", "notes", SessionLock.option, String(Double.greatestFiniteMagnitude)])
@@ -917,19 +927,24 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         XCTAssertEqual(try topicList(), ["First", "lock:notes", "Returning"])
     }
 
-    func testANewOrReturningTopicGoesToTheTopOfTheBench() throws {
+    func testANewTopicIsTheLastGuestAndAReturningTopicGoesToTheTopOfTheBench() throws {
         let inPlay = service(inPlay: 2)
         func settle(_ title: String) throws -> String {
             let id = try XCTUnwrap(records().first { $0.title == title }).id
             try TopicStore(paths: paths).write { try $0.update(id) { $0.settledAt = "2026-10-01T00:00:00Z" } }
             return id
         }
-        for title in ["First", "Second", "Third", "Fourth"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
-        XCTAssertEqual(try topicList(), ["First", "Second", "Fourth", "Third"], "a new Topic")
+        for title in ["First", "Second", "Third", "Fourth"] { try regularTopic(title, using: inPlay) }
+        XCTAssertEqual(try topicList(), ["First", "Second", "Fourth", "Third"])
         _ = try change(inPlay.handle(EnvironmentRequest(.reopen, target: .topic(.id(settle("Second"))))))
         XCTAssertEqual(try topicList(), ["First", "Fourth", "Second", "Third"], "Reopen")
         _ = try change(inPlay.handle(EnvironmentRequest(.startFresh, target: .topic(.id(settle("Third"))))))
         XCTAssertEqual(try topicList(), ["First", "Fourth", "Third", "Second"], "Start Fresh")
+
+        _ = try change(inPlay.handle(EnvironmentRequest(.create(title: "Fifth"))))
+        _ = try change(inPlay.handle(EnvironmentRequest(.create(title: "Sixth"))))
+        XCTAssertEqual(try topicList(), ["First", "Fourth", "Fifth", "Sixth", "Third", "Second"], "a new Topic is the last Guest")
+        XCTAssertEqual(try guests(), ["Fifth", "Sixth"])
     }
 
     /// A service with `topics.in_play` set to `count`.
@@ -951,13 +966,13 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
     func testChooseInPlayFillsThePlacesInTheChosenOrderAndLeavesTheOthersOpen() throws {
         let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        for title in ["A", "B", "C", "D", "Pinned"] { try regularTopic(title, using: inPlay) }
         _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
         let notes = try sessionID("notes")
         XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "lock:notes", "D", "C"],
-                       "a new Topic goes to the top of the Bench, and a Lock is a Guest at the end of In Play")
+                       "Bench puts each Topic after the places at the top of the Bench, and a Lock is a Guest at the end of In Play")
 
         _ = try change(inPlay.handle(EnvironmentRequest(.chooseInPlay([.topic(.named("C")), .topic(.named("A"))]))))
         XCTAssertEqual(try topicList(), ["Pinned", "C", "A", "lock:notes", "B", "D"], "the Guest stays a Guest")
@@ -978,7 +993,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
     func testReplaceFromBenchPutsTheBenchedCardInThePlaceAndGivesItTheMarkOfAGuest() throws {
         let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        for title in ["A", "B", "C", "D", "Pinned"] { try regularTopic(title, using: inPlay) }
         _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
@@ -1005,7 +1020,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
     func testATradeExchangesThePlacesOfTwoCardsAndEachCardTakesTheMarkOfItsNewSection() throws {
         let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        for title in ["A", "B", "C", "D", "Pinned"] { try regularTopic(title, using: inPlay) }
         _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
@@ -1034,7 +1049,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
     func testMakeAGuestPutsABenchedTopicAtTheEndOfTheGuestsAndBenchTopicPutsItAtTheTopOfTheBench() throws {
         let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        for title in ["A", "B", "C", "D"] { try regularTopic(title, using: inPlay) }
         XCTAssertEqual(try topicList(), ["A", "B", "D", "C"])
 
         let made = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
@@ -1069,7 +1084,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
     func testMoveAppliesTheStepOfTheCardAndARefusedStepChangesNothing() throws {
         let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        for title in ["A", "B", "C"] { try regularTopic(title, using: inPlay) }
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
         XCTAssertEqual(try topicList(), ["A", "B", "lock:notes", "C"])
@@ -1096,7 +1111,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
     func testMoveUpOnAnUnlockedSessionLocksItAsTheLastGuestAndDownRefuses() throws {
         let wide = service(inPlay: 3)
-        for title in ["A", "B", "C"] { _ = try change(wide.handle(EnvironmentRequest(.create(title: title)))) }
+        for title in ["A", "B", "C"] { try regularTopic(title, using: wide) }
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
         let notes = EnvironmentRequest(.moveCard(.down), target: .sessionName("notes"))
         let down = try failure(wide.handle(notes))
@@ -1111,7 +1126,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
     func testTheSidebarDragPutsAnInPlayCardNextToAnOpenPlace() throws {
         let inPlay = service(inPlay: 3)
-        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        for title in ["A", "B", "C", "D"] { try regularTopic(title, using: inPlay) }
         _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("B")))))
         XCTAssertEqual(try topicList(), ["A", "_", "C", "B", "D"])
         let open = try XCTUnwrap(TopicStore(paths: paths).read().openPlaces.first).id
@@ -1122,7 +1137,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
     func testPinOfACardInAPlaceLeavesAnOpenPlaceAndUnpinPutsItAtTheTopOfTheBench() throws {
         let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        for title in ["A", "B", "C", "D"] { try regularTopic(title, using: inPlay) }
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
         XCTAssertEqual(try topicList(), ["A", "B", "C", "D"])
 
@@ -1133,7 +1148,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
     }
 
     func testTheUpgradeGatherPutsTheLocksAtTheEndOfInPlayAndASecondGatherWritesNothing() throws {
-        for title in ["A", "B", "C"] { _ = try change(service().handle(EnvironmentRequest(.create(title: title)))) }
+        for title in ["A", "B", "C"] { try regularTopic(title, using: service()) }
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
         _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
         _ = try change(service().handle(EnvironmentRequest(.moveCard(.before(.topic(.named("A")))), target: .sessionName("notes"))))
@@ -1184,6 +1199,7 @@ final class TopicServiceSessionTests: TopicServiceTestCase {
 
     func testSessionMoveUpAndDownStepsAmongTheTopicsSessionsAndMovesALockedSessionsCard() throws {
         let id = try twoSessionPathTopic("Steps")
+        _ = try change(service().handle(EnvironmentRequest(.benchTopic, target: .topic(.id(id)))))
         let live = try server.snapshot().windows.filter { $0.topicID == id }
         let game = try XCTUnwrap(live.first { $0.sessionName == "game/steps" }), tools = try XCTUnwrap(live.first { $0.sessionName == "tools/steps" })
         let paths = { try XCTUnwrap(self.records().first { $0.id == id }).sessions.compactMap { $0["directory"]?.string }.map(Folder.local) }

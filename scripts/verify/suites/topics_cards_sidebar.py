@@ -46,21 +46,19 @@ class TopicsCardsSidebar(TopicsSidebar):
     def client_windows(self):
         return self.s.tmux('list-clients', '-F', '#{window_id}').split()
 
-    def test_a_new_topic_takes_the_next_in_play_place_above_a_guest_session(self):
+    def test_a_new_topic_is_a_guest_under_a_guest_session_also_with_a_free_place(self):
         self.write_topic('insert-pin', 'Pinned', order=0, pinned=True)
         self.write_topic('insert-existing', 'Existing', order=0)
         sid = self.new_session('insert-guest', self.beta)
         self.s.tmux('set-option', '-t', sid, '@muxify_lock', '2')
         guest = 'locked-' + sid
         self.find(guest)
-        record = self.create_topic('Inserted after the place')
-        key = 'topic-' + record['id']
-        expected = ['topic-insert-pin', 'topic-insert-existing', key, guest]
+        key = 'topic-' + self.create_topic('Inserted as a Guest')['id']
+        expected = ['topic-insert-pin', 'topic-insert-existing', guest, key]
         def shown(rs):
             return [row for row in self.s.ids(rs) if row in expected]
-        rs = self.s.wait_rows(lambda rs: shown(rs) == expected,
-                              lambda: 'the new Topic is not after the last In Play place and above the Guest Session: %s' % shown(self.s.rows()))
-        self.assertLess(record['order'], 2, 'the new Topic has no order before the Guest Session: %s' % record)
+        self.s.wait_rows(lambda rs: shown(rs) == expected and 'Guest' in self.s.row(key, rs).get('accessibilityValue', ''),
+                         lambda: 'the new Topic is not a Guest under the Guest Session: %s' % shown(self.s.rows()))
 
     def test_window_moved_to_topic_keeps_its_panes_agent_and_browser(self):
         s = self.s

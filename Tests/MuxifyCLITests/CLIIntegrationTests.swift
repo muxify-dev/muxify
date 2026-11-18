@@ -41,6 +41,15 @@ class CLIIntegrationTestCase: XCTestCase {
         return String(id)
     }
 
+    /// A Topic with a Session that is not a Guest, for a test that needs regular cards: `topic new` makes a Guest, and
+    /// `topic bench` takes it to the first free place, else to the top of the Bench.
+    fileprivate func regularTopic(_ title: String, in sessionPath: URL, sandbox: TopicSandbox) async throws -> String {
+        let id = try await newTopic(title, in: sessionPath, sandbox: sandbox)
+        let benched = try await run(cli, arguments: ["topic", "bench", "--topic", id], environment: sandbox.cliEnvironment(pane: nil))
+        guard benched.status == 0 else { throw CLIError("topic bench: \(benched.output)") }
+        return id
+    }
+
     /// The names of the live Sessions of the Topic, in its order, as topic show --json gives them.
     fileprivate func topicSessions(_ id: String, sandbox: TopicSandbox) async throws -> [String] {
         let shown = try await run(cli, arguments: ["topic", "show", "--topic", id, "--json"], environment: sandbox.cliEnvironment(pane: nil))
@@ -332,7 +341,7 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
         defer { sandbox.stop() }
         let config = try String(contentsOf: sandbox.config, encoding: .utf8)
         try Data(config.replacingOccurrences(of: "topics:\n", with: "topics:\n  in_play: 2\n").utf8).write(to: sandbox.config)
-        for name in ["First", "Second", "Third", "Fourth"] { _ = try await newTopic(name, in: sandbox.game, sandbox: sandbox) }
+        for name in ["First", "Second", "Third", "Fourth"] { _ = try await regularTopic(name, in: sandbox.game, sandbox: sandbox) }
         try sandbox.tmux(["new-session", "-d", "-s", "notes", "-c", sandbox.tools.path])
         let notes = try sandbox.tmux(["display-message", "-p", "-t", "=notes:", "#{session_id}"])
         let environment = sandbox.cliEnvironment(pane: nil)
@@ -466,6 +475,24 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(change["created"] as? Bool, true)
     }
 
+    func testTopicNewMakesEachTopicTheLastGuest() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        for title in ["Ship", "Docs"] {
+            let made = try await run(cli, arguments: ["topic", "new", title], environment: environment)
+            XCTAssertEqual(made.status, 0, made.output)
+        }
+        let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: environment)
+        let unpinned = try XCTUnwrap(try jsonLine(shown.stdout)["unpinned"] as? [String: Any], shown.stdout)
+        func labels(_ section: String) -> [String] {
+            (unpinned[section] as? [[String: Any]] ?? []).compactMap { ($0["topic"] as? [String: Any])?["label"] as? String }
+        }
+        XCTAssertEqual(labels("guests"), ["Ship", "Docs"], "a new Topic is the last Guest, also while an In Play place is free")
+        XCTAssertEqual(labels("places"), [])
+        XCTAssertEqual(labels("bench"), [])
+    }
+
     func testJsonListsTheOpenTopics() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
@@ -536,10 +563,13 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
         let config = try String(contentsOf: sandbox.config, encoding: .utf8)
         try Data(config.replacingOccurrences(of: "topics:\n", with: "topics:\n  in_play: 1\n").utf8).write(to: sandbox.config)
         let environment = sandbox.cliEnvironment(pane: nil)
-        // One place: the next Topics go to the Bench, each new one to its top.
+        // One place: Bench takes the first Topic out of the Guests into the place, and each next one to the top of the Bench.
         var ids: [String] = []
         for title in ["Pin in play", "Pin pinned", "Pin benched"] {
-            ids.append(try await run(cli, arguments: ["topic", "new", title], environment: environment).stdout.trimmingCharacters(in: .newlines))
+            let id = try await run(cli, arguments: ["topic", "new", title], environment: environment).stdout.trimmingCharacters(in: .newlines)
+            let benched = try await run(cli, arguments: ["topic", "bench", "--topic", id], environment: environment)
+            XCTAssertEqual(benched.status, 0, benched.output)
+            ids.append(id)
         }
         let (inPlay, pinned, benched) = (ids[0], ids[1], ids[2])
         let pin = try await run(cli, arguments: ["topic", "pin", "--topic", pinned], environment: environment)

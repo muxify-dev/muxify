@@ -128,7 +128,7 @@ final class GuestTests: XCTestCase {
         for (order, id) in ["payments", "auth-bug", "docs", "release"].enumerated() {
             var record = TopicRecord(id: id, title: id)
             record.order = Double(order)
-            try store.write { try $0.create(record) }
+            try store.write { try $0.create(record); try $0.apply(.bench, to: .topic(id)) }
         }
         try store.write { transaction in
             let before = transaction.records.first { $0.id == "auth-bug" }!
@@ -265,17 +265,17 @@ final class GuestTests: XCTestCase {
 
         var none = transaction("payments auth-bug docs + ~scratch(G) | release")
         try none.create(TopicRecord(id: "new", title: "new"), replacingLockOf: "gone")
-        XCTAssertEqual(sidebar(none), "payments auth-bug docs + ~scratch(G) | new release", "a Topic from no Lock goes where a new Topic goes")
+        XCTAssertEqual(sidebar(none), "payments auth-bug docs + ~scratch(G) new(G) | release", "a Topic from no Lock goes where a new Topic goes")
     }
 
-    func testANewTopicGoesToTheTopOfTheBenchAndLeavesAnOpenPlaceOpen() throws {
+    func testANewTopicIsTheLastGuestAndLeavesAnOpenPlaceOpen() throws {
         var full = transaction("payments _ docs + infra(G) | release")
         try full.create(TopicRecord(id: "new", title: "new"))
-        XCTAssertEqual(sidebar(full), "payments _ docs + infra(G) | new release")
+        XCTAssertEqual(sidebar(full), "payments _ docs + infra(G) new(G) | release")
 
         var short = transaction("payments + infra(G) |")
         try short.create(TopicRecord(id: "new", title: "new"))
-        XCTAssertEqual(sidebar(short), "payments new + infra(G) |", "with a free place, it is In Play")
+        XCTAssertEqual(sidebar(short), "payments + infra(G) new(G) |", "with a free place, it is still a Guest")
     }
 
     func testChooseInPlayFillsThePlacesFromTheCheckedCardsAndGuests() throws {

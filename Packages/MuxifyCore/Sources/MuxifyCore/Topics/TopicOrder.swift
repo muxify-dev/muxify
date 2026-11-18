@@ -325,14 +325,14 @@ public enum TopicOrder {
     }
 
     /// Pin puts the Topic last among the Pinned Topics and ends its Guest mark. Unpin puts it at the top of the Bench,
-    /// where a new Topic goes.
+    /// where a returning Topic goes.
     public static func pinning(_ id: String, _ pinned: Bool, inPlay: Int, in entries: [TopicListEntry]) throws -> [TopicListEntry] {
         guard let found = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
         guard found.isPinned != pinned, case .topic(let record) = found.pinned(pinned) else { return [] }
         return inserting(record, inPlay: inPlay, in: entries)
     }
 
-    /// Places a new Topic, or a Topic that Reopen, Start Fresh or Unpin brings back, at the top of the Bench. A Pinned
+    /// Places a Topic that Reopen, Start Fresh or Unpin brings back at the top of the Bench. A Pinned
     /// Topic has no Bench, so it goes last among the Pinned Topics.
     public static func inserting(_ record: TopicRecord, inPlay: Int, in entries: [TopicListEntry]) -> [TopicListEntry] {
         let original = sorted(entries).filter { $0.id != .topic(record.id) }
@@ -343,7 +343,7 @@ public enum TopicOrder {
         return placing(source, at: index, in: zone, others: original.filter { $0.isPinned != record.isPinned })
     }
 
-    /// The index in `zone`, the cards that are not Pinned, where a new or returning Topic goes: right after the last
+    /// The index in `zone`, the cards that are not Pinned, where a returning Topic goes: right after the last
     /// In Play place while there are fewer places than `inPlay`, else right before the first Benched card, or last when
     /// there is none. A Guest does not count toward `inPlay`.
     static func topOfBench(in zone: [TopicListEntry], inPlay: Int) -> Int {
@@ -439,6 +439,17 @@ public enum TopicOrder {
         guard !entry.isPinned else { throw Failure.pinned }
         let cut = cut(entries, inPlay: inPlay)
         guard cut.bench.contains(where: { $0.id == entry.id }) else { throw Failure.notBenched }
+        return appendingGuest(entry, inPlay: inPlay, in: entries)
+    }
+
+    /// A new Topic: it goes to the end of the Guests with the Guest mark, as Make a Guest puts a Benched Topic there.
+    /// It takes no place, also when one is free, so no other card moves.
+    static func insertingGuest(_ record: TopicRecord, inPlay: Int, in entries: [TopicListEntry]) -> TopicListChange {
+        appendingGuest(.topic(record), inPlay: inPlay, in: entries)
+    }
+
+    private static func appendingGuest(_ entry: TopicListEntry, inPlay: Int, in entries: [TopicListEntry]) -> TopicListChange {
+        let cut = cut(entries, inPlay: inPlay)
         return rewriting(cut.places + cut.guests + [entry.guest(true)] + cut.bench.filter { $0.id != entry.id },
                          from: layout(entries, inPlay: inPlay))
     }

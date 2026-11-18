@@ -166,7 +166,7 @@ The In Play places and the Guests. It is the only way the Sidebar lists the Topi
 _Avoid_: active Topics, focus Topics, front Topics, WIP limit
 
 **Bench**:
-The open Topics in the Topics list that are not Pinned, not Guests and hold no In Play place. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic keeps its place in the list, its Sessions and its Agents. A new Topic and a Topic that comes back go to the top of the Bench. A Locked Session is never Benched: it is a Guest.
+The open Topics in the Topics list that are not Pinned, not Guests and hold no In Play place. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic keeps its place in the list, its Sessions and its Agents. A Topic that comes back goes to the top of the Bench. A new Topic is a Guest. A Locked Session is never Benched: it is a Guest.
 _Avoid_: backlog, queue, hidden Topics, overflow, Snooze (when you mean the Bench)
 
 **Choose In Play**:
@@ -194,7 +194,7 @@ To end a Lock, which Bench of a Guest Session does. The Session stays, as a No T
 _Avoid_: unpin, release, Unlock Session (as a Command or an Action)
 
 **Guest**:
-A card In Play above the number that the Config gives: a Topic with the Guest mark, or a Locked Session. It does not count toward that number, and it shows under the Guests line, after the In Play places. It never waits on the Bench, and when it leaves it leaves no Open Place.
+A card In Play above the number that the Config gives: a Topic with the Guest mark, or a Locked Session. It does not count toward that number, and it shows under the Guests line, after the In Play places. It never waits on the Bench, and when it leaves it leaves no Open Place. Every new Topic is a Guest: it goes to the end of the Guests, also when an In Play place is free.
 _Avoid_: visitor, temporary Topic, extra slot, Pin (when you mean a Guest)
 
 **Make a Guest**:
