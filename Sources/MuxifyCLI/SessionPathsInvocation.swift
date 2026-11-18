@@ -50,21 +50,19 @@ struct SessionPathsInvocation: Equatable {
             fflush(stdout)
             if fromCache { Self.startRefresh(executable, environment: environment) }
         case .refresh:
-            guard let lock = RefreshLock(cache.file.appendingPathExtension("lock")) else { return }
-            defer { lock.unlock() }
-            ConfigSessions.discover(try ConfigSessions.read(paths.configFile), into: cache)
+            cache.refresh(try ConfigSessions.read(paths.configFile))
         }
     }
 
     static func render(_ rows: [RankedSessionPath], output: RequestInvocation.Output) throws -> String {
-        let answers = rows.map { SessionPathAnswer($0.row, lastVisit: $0.lastVisit) }
+        let answer = RankedSessionPathsAnswer(rows)
         switch output {
         case .json:
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-            return String(decoding: try encoder.encode(["rows": answers]), as: UTF8.self)
+            return String(decoding: try encoder.encode(answer), as: UTF8.self)
         case .text:
-            return answers.map { [$0.name, $0.kind, $0.directory, $0.lastVisit ?? ""].map(\.oneLineField).joined(separator: "\t") }
+            return answer.rows.map { [$0.name, $0.kind, $0.directory, $0.lastVisit ?? ""].map(\.oneLineField).joined(separator: "\t") }
                 .joined(separator: "\n")
         }
     }
@@ -108,82 +106,5 @@ struct SessionPathsInvocation: Equatable {
         defer { (argv + envp).forEach { free($0) } }
         var pid: pid_t = 0
         _ = posix_spawn(&pid, executable.path, &actions, &attributes, &argv, &envp)
-    }
-}
-
-/// One refresh at a time for a cache file: a second one that starts meanwhile has nothing to add, so it ends.
-private struct RefreshLock {
-    private let descriptor: Int32
-
-    /// Nil when another process holds the lock, or the lock file cannot be made.
-    init?(_ file: URL) {
-        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let descriptor = open(file.path, O_RDWR | O_CREAT, 0o600)
-        guard descriptor >= 0 else { return nil }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            close(descriptor)
-            return nil
-        }
-        self.descriptor = descriptor
-    }
-
-    func unlock() { close(descriptor) }
-}
-
-/// A Session Path or Worktree row in the `--json` answers of `session-paths` and `topic session-paths`.
-struct SessionPathAnswer: Encodable {
-    struct Topic: Codable, Hashable, Sendable {
-        let id: String
-        let label: String
-        init(_ summary: TopicSummary) { id = summary.id; label = summary.label }
-    }
-
-    struct Checkout: Codable, Hashable, Sendable {
-        let path: String
-        @EncodesNull var branch: String?
-    }
-
-    let kind: String
-    let name: String
-    let label: String
-    let directory: String
-    let worktree: Checkout?
-    /// Only `topic session-paths` has it: whether a Session of that Topic uses this exact folder.
-    let inThisTopic: Bool?
-    let alsoIn: [Topic]
-    /// ISO 8601, in UTC.
-    let lastVisit: String?
-
-    init(_ row: SessionPathRow, inThisTopic: Bool? = nil, lastVisit: Date?) {
-        let choice = row.choice
-        kind = choice.isWorktree ? "worktree" : "session_path"
-        name = choice.name
-        label = choice.displayName
-        directory = choice.directory.path
-        worktree = choice.worktree.map { Checkout(path: $0.folder.path, branch: $0.branch) }
-        self.inThisTopic = inThisTopic
-        alsoIn = row.alsoIn.map(Topic.init)
-        self.lastVisit = lastVisit.map(Self.timestamp)
-    }
-
-    static func timestamp(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
-
-    private enum CodingKeys: String, CodingKey {
-        case kind, name, label, directory, worktree
-        case inThisTopic = "in_this_topic"
-        case alsoIn = "also_in"
-        case lastVisit = "last_visit"
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(kind, forKey: .kind)
-        try container.encode(name, forKey: .name)
-        try container.encode(label, forKey: .label)
-        try container.encode(directory, forKey: .directory)
-        try container.encode(worktree, forKey: .worktree)
-        try container.encodeIfPresent(inThisTopic, forKey: .inThisTopic)
-        try container.encode(alsoIn, forKey: .alsoIn)
-        try container.encode(lastVisit, forKey: .lastVisit)
     }
 }

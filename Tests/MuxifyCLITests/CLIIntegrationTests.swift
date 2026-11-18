@@ -1344,16 +1344,109 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertTrue(server.stderr().contains("muxify server: exits, no frame came in time"))
     }
 
+    /// The `snapshot` subscription of `muxify server` is the JSON of `environment show --json` without `capabilities`
+    /// for the same state, and `topic new` on the same muxify.db pushes the next item.
+    func testAServersSnapshotItemIsEnvironmentShowWithoutCapabilities() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        _ = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let server = try startServer(environment: environment, capabilities: ["snapshot"])
+        defer { stopIfRunning(server.process) }
+        try await server.client.connect()
+        let items = JSONItems()
+        let stream = server.client.subscribe(HostRequest.subscribe(.snapshot), as: JSONValue.self)
+        let consumer = Task {
+            do {
+                for try await item in stream { items.add(item) }
+            } catch {}
+        }
+        defer { consumer.cancel() }
+
+        func shown() async throws -> JSONValue {
+            let result = try await run(self.cli, arguments: ["environment", "show", "--json"], environment: environment)
+            XCTAssertEqual(result.status, 0, result.output)
+            guard case .object(var keys) = try JSONDecoder().decode(JSONValue.self, from: Data(result.stdout.utf8)) else {
+                throw CLIError("environment show printed no object: \(result.stdout)")
+            }
+            XCTAssertNotNil(keys.removeValue(forKey: "capabilities"), "the CLI lists its capabilities")
+            return .object(keys)
+        }
+        // A Pane's shell may still draw its prompt or name its Window, which the next item shows: the last item and
+        // what the CLI prints agree once tmux settled.
+        func assertAgree(_ message: String) async throws {
+            var printed = try await shown()
+            let deadline = Date().addingTimeInterval(10)
+            while items.last != printed, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(200))
+                printed = try await shown()
+            }
+            XCTAssertEqual(items.last, printed, message)
+        }
+        try await assertAgree("the snapshot item is environment show --json without capabilities")
+        guard case .object(let keys)? = items.last else { return XCTFail("no snapshot item") }
+        XCTAssertEqual(keys["sidebar"], .object(["topics": .bool(true), "sessions": .bool(true)]))
+
+        let made = try await run(cli, arguments: ["topic", "new", "Other"], environment: environment)
+        XCTAssertEqual(made.status, 0, made.output)
+        let id = made.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        func text(_ item: JSONValue?) -> String { item.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? "" }
+        try await wait("topic new pushed no snapshot item with its Topic") { text(items.last).contains("\"\(id)\"") }
+        try await assertAgree("the item after topic new is environment show --json without capabilities")
+    }
+
+    /// The JSON items of a subscription, as they came.
+    private final class JSONItems: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [JSONValue] = []
+
+        func add(_ item: JSONValue) { lock.lock(); log.append(item); lock.unlock() }
+        var last: JSONValue? { lock.lock(); defer { lock.unlock() }; return log.last }
+    }
+
     /// A running `muxify server` with a protocol client on its stdout and stdin, and its stderr.
-    private func startServer(environment: [String: String] = [:]) throws -> (process: Process, client: ProtocolClient, stderr: () -> String) {
+    private func startServer(environment: [String: String] = [:], capabilities: [String] = []) throws
+        -> (process: Process, client: ProtocolClient, stderr: () -> String) {
         let output = Pipe()
         let errors = Pipe()
         let input = Pipe()
         let process = makeProcess(cli, arguments: ["server"], output: output, errors: errors, environment: environment)
         process.standardInput = input
         try process.run()
-        let client = ProtocolClient(input: output.fileHandleForReading, output: input.fileHandleForWriting, build: "muxify test")
+        let client = ProtocolClient(input: output.fileHandleForReading, output: input.fileHandleForWriting, build: "muxify test",
+                                    capabilities: capabilities)
         return (process, client, { String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self) })
+    }
+
+    /// The `topic` subscription's item is the JSON that `muxify topic show --json` prints for the same Topic and state.
+    func testServerTopicItemIsTheJSONOfTopicShow() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        _ = try sandbox.fakeAgent(in: "game/ship", status: "blocked", unread: true)
+        let server = try startServer(environment: sandbox.cliEnvironment(pane: nil), capabilities: ["topic-detail"])
+        defer { stopIfRunning(server.process) }
+        try await server.client.connect()
+        let latest = LatestTopicItem()
+        let events = server.client.subscribe(HostRequest.subscribe(.topic(TopicSubscription(id: id))), as: TopicDetailItem.self)
+        let consumer = Task {
+            do { for try await item in events { latest.set(item) } } catch {}
+        }
+        defer { consumer.cancel() }
+
+        // The server writes the Topic's remembered Sessions after its first read, so the two agree once it settled.
+        var item: Any?, shown: Any?
+        for _ in 0..<50 {
+            let result = try await run(cli, arguments: ["topic", "show", "--topic", id, "--json"], environment: sandbox.cliEnvironment(pane: nil))
+            XCTAssertEqual(result.status, 0, result.output)
+            shown = try jsonLine(result.stdout)
+            item = try latest.json()
+            if let item = item as? NSDictionary, let shown = shown as? NSDictionary, item == shown { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let sessions = (shown as? [String: Any])?["topic"].flatMap { ($0 as? [String: Any])?["sessions"] as? [Any] }
+        XCTAssertEqual(sessions?.count, 1, "\(String(describing: shown))")
+        XCTAssertEqual(item as? NSDictionary, shown as? NSDictionary)
     }
 
     func testTopicShowListsEveryLiveSessionOfTheTopicAndTheStatusOfItsAgent() async throws {
@@ -1675,6 +1768,38 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
                        "example.com https://GitHub.com#readme https://example.com/", "a read leaves the queue for the app")
     }
 
+    /// The phone reads a Window's Tabs from its Host Server: `browser_tabs` answers the JSON that `muxify browser tabs
+    /// --window <id> --json` prints with no Mac, and an unknown Window fails with the CLI's words.
+    func testTheHostServersBrowserTabsAnswerTheJSONThatTheCLIPrintsWithNoMac() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let window = try sandbox.tmux(["display-message", "-p", "-t", try sandbox.pane(of: "main").rawValue, "#{window_id}"])
+        _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_tabs", "https://github.com/ about:blank https://example.com/a"])
+        _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_active_tab", "2"])
+        _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_open", "https://GitHub.com#readme"])
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let server = try startServer(environment: environment, capabilities: [HostCapability.browserTabs.rawValue])
+        defer { stopIfRunning(server.process) }
+        try await server.client.connect()
+
+        let printed = try await run(cli, arguments: ["browser", "tabs", "--window", window, "--json"], environment: environment)
+        XCTAssertEqual(printed.status, 0, printed.output)
+        let answer = try await server.client.call(HostRequest.browserTabs(BrowserTabsRequest(window: window)), as: JSONValue.self)
+        XCTAssertEqual(answer, try JSONDecoder().decode(JSONValue.self, from: Data(printed.stdout.utf8)), printed.stdout)
+        XCTAssertEqual(try JSONDecoder().decode([BrowserAgentTab].self, from: Data(printed.stdout.utf8)).map(\.active), [true, false, false],
+                       "the queued page that the first Tab has selects it")
+
+        let unknown = try await run(cli, arguments: ["browser", "tabs", "--window", "@999", "--json"], environment: environment)
+        XCTAssertEqual(unknown.status, 1, unknown.output)
+        do {
+            _ = try await server.client.call(HostRequest.browserTabs(BrowserTabsRequest(window: "@999")), as: JSONValue.self)
+            XCTFail("an unknown Window must not end ok")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+            XCTAssertEqual("muxify: \(error.message)\n", unknown.stderr)
+        }
+    }
+
     // MARK: - Requests
 
     func testTopicNewTwiceWithOneRequestMakesOneTopicAndPrintsTheSameJSON() async throws {
@@ -1967,6 +2092,84 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(later, ["game", "late", "tools"])
     }
 
+    /// `muxify server` through pipes, as the phone reaches it, against the CLI on the same Config, cache and visits.
+    func testTheHostServerAnswersSessionPathsAsTheCLIPrintsThemAndAVisitOfEitherRanksForBoth() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let source = sandbox.tools.appendingPathComponent("src")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let up = Pipe(), down = Pipe(), errors = Pipe()
+        let server = makeProcess(cli, arguments: ["server"], output: down, errors: errors, environment: environment)
+        server.standardInput = up
+        try server.run()
+        defer { stopIfRunning(server) }
+        let client = ProtocolClient(input: down.fileHandleForReading, output: up.fileHandleForWriting, build: "phone",
+                                    capabilities: [HostCapability.rankedSessionPaths.rawValue], helloTimeout: 10)
+        defer { client.close() }
+        try await client.connect()
+
+        func object(_ value: some Encodable) throws -> NSDictionary {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            return try XCTUnwrap(try JSONSerialization.jsonObject(with: try encoder.encode(value)) as? NSDictionary)
+        }
+        func printed(_ arguments: [String]) async throws -> NSDictionary {
+            let listed = try await run(cli, arguments: arguments + ["--json"], environment: environment)
+            XCTAssertEqual(listed.status, 0, listed.output)
+            return try jsonLine(listed.stdout) as NSDictionary
+        }
+        func answered(_ ask: SessionPathsRequest.Ask) async throws -> NSDictionary {
+            if case .topic = ask {
+                return try object(try await client.call(HostRequest.sessionPaths(SessionPathsRequest(ask)), as: TopicSessionPathsAnswer.self))
+            }
+            return try object(try await client.call(HostRequest.sessionPaths(SessionPathsRequest(ask)), as: RankedSessionPathsAnswer.self))
+        }
+        func names(_ answer: NSDictionary) -> [String] { (answer["rows"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String } }
+
+        let unvisited = try await answered(.ranked(query: ""))
+        XCTAssertEqual(names(unvisited), ["game", "tools"])
+        let printedUnvisited = try await printed(["session-paths"])
+        XCTAssertEqual(unvisited, printedUnvisited)
+        let empty = try await client.call(HostRequest.sessionPaths(try JSONDecoder().decode(SessionPathsRequest.self, from: Data("{}".utf8))),
+                                          as: RankedSessionPathsAnswer.self)
+        XCTAssertEqual(try object(empty), unvisited, "session_paths {} is the ranking for an empty query")
+
+        _ = try await client.call(HostRequest.visitSessionPath(VisitSessionPath(folder: source.path)), as: ProtocolEmpty.self)
+        let afterServerVisit = try await printed(["session-paths"])
+        XCTAssertEqual(names(afterServerVisit), ["tools", "game"], "the server's visit ranks the Session Path first for the CLI")
+        let answeredAfterServerVisit = try await answered(.ranked(query: ""))
+        XCTAssertEqual(answeredAfterServerVisit, afterServerVisit)
+
+        let visited = try await run(cli, arguments: ["session-paths", "visit", sandbox.game.path], environment: environment)
+        XCTAssertEqual(visited.status, 0, visited.output)
+        let afterCLIVisit = try await answered(.ranked(query: ""))
+        XCTAssertEqual(names(afterCLIVisit), ["game", "tools"], "the CLI's visit ranks the Session Path first for the server")
+        let printedAfterCLIVisit = try await printed(["session-paths"])
+        XCTAssertEqual(afterCLIVisit, printedAfterCLIVisit)
+
+        for query in ["gam", "work", "zzz"] {
+            let answer = try await answered(.ranked(query: query))
+            let line = try await printed(["session-paths", "--query", query])
+            XCTAssertEqual(answer, line, query)
+        }
+
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let topic = try await answered(.topic(id))
+        let printedTopic = try await printed(["topic", "session-paths", "--topic", id])
+        XCTAssertEqual(topic, printedTopic)
+        XCTAssertEqual((topic["rows"] as? [[String: Any]])?.map { $0["in_this_topic"] as? Bool }, [true, false])
+
+        do {
+            _ = try await client.call(HostRequest.visitSessionPath(VisitSessionPath(folder: sandbox.root.appendingPathComponent("missing").path)),
+                                      as: ProtocolEmpty.self)
+            XCTFail("a visit to a missing folder must fail")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+            XCTAssertTrue(error.message.contains("no directory"), error.message)
+        }
+    }
+
     func testEnvironmentShowJSONSaysWhichSidebarListsTheConfigShows() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
@@ -2257,6 +2460,22 @@ private final class TopicSandbox {
         }
         if (try? ownsServer()) == true { _ = try? tmux(["kill-server"]) }
         try? FileManager.default.removeItem(at: root)
+    }
+}
+
+/// The latest item of a `topic` subscription, as the JSON object that it encodes to.
+private final class LatestTopicItem: @unchecked Sendable {
+    private let lock = NSLock()
+    private var item: TopicDetailItem??
+
+    func set(_ item: TopicDetailItem) { lock.lock(); self.item = item; lock.unlock() }
+
+    func json() throws -> Any? {
+        lock.lock()
+        let item = self.item
+        lock.unlock()
+        guard let item else { return nil }
+        return try JSONSerialization.jsonObject(with: try JSONEncoder().encode(item), options: .fragmentsAllowed)
     }
 }
 

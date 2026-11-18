@@ -17,13 +17,30 @@ public enum HostProtocol {
     public static let maxChunkBytes = 64 * 1024
     /// The protocols that this build speaks. Both ends started at 1; a bump needs an ADR.
     public static let supported: ClosedRange<Int> = 1...1
-    /// What this build adds to its protocol. Protocol 1's surface has none.
-    public static let capabilities: [String] = []
+    /// What this build's Host Server adds to its protocol, declared in its `hello`. A client declares only what it
+    /// uses: the Mac declares none, the phone all of them.
+    public static let capabilities: [String] = HostCapability.allCases.map(\.rawValue)
     /// How long the client waits for the server's `hello`.
     public static let helloTimeout: TimeInterval = 10
     /// How long the server waits for any frame before it exits. Longer than the Mac's own master timeout
     /// (`ServerAliveInterval=15` × `ServerAliveCountMax=2`), so a server never exits while the Mac holds its master.
     public static let serverSilence: TimeInterval = 45
+}
+
+/// What a Host Server adds to protocol 1 (ADR 0086's change rule, ADR 0093). Each side sends a request case, a
+/// subscription case or a key that a capability adds only when the other side's `hello` declared it, and the server
+/// answers `unsupported` to one that a client sends without declaring it.
+public enum HostCapability: String, CaseIterable, Sendable {
+    /// An `environment` request may carry a Request id, which applies it one time however often it is sent.
+    case request
+    /// `subscribe { snapshot }`: the computed `environment show` view.
+    case snapshot
+    /// `subscribe { topic }`: one Topic's detail.
+    case topicDetail = "topic-detail"
+    /// `session_paths` with `query` or `topic`, and `visit_session_path`.
+    case rankedSessionPaths = "ranked-session-paths"
+    /// `browser_tabs`: a Window's stored Browser Tabs.
+    case browserTabs = "browser-tabs"
 }
 
 /// The `kind` of a frame.
@@ -174,11 +191,34 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// `GitWritten`. Each of git's and ssh's questions comes to the Mac as an `ask` of its operation while it runs. A
     /// cancelled question ends it `cancelled`; any other failure `failed` with git's words. It is never sent again.
     case gitNetwork(GitNetworkRequest)
-    /// Session Path discovery on the Host, for New Session and Add Session, answered as `SessionPathsOutput`.
+    /// Session Path discovery on the Host, for New Session and Add Session, answered as `SessionPathsOutput`. With the
+    /// `ranked-session-paths` capability it also answers Go to…'s rows (`RankedSessionPathsAnswer`) and a Topic's Add
+    /// a Session rows (`TopicSessionPathsAnswer`).
     case sessionPaths(SessionPathsRequest)
+    /// Records a visit to a folder, as `muxify session-paths visit` does. Answers `{}`. It needs `ranked-session-paths`.
+    case visitSessionPath(VisitSessionPath)
     /// One chunk of an Attachment's upload, answered with the file's path on the Host as `UploadPath`. A failed chunk
     /// ends `failed` and the server deletes the partial file.
     case upload(UploadChunk)
+    /// A Window's stored Browser Tabs (ADR 0084), answered as the JSON array that `muxify browser tabs --window <id>
+    /// --json` prints when no Mac serves the Window. The server never asks a client for them. A target that names no
+    /// Window ends `failed` with the CLI's message. Needs `browser-tabs`.
+    case browserTabs(BrowserTabsRequest)
+
+    /// The capability that the client must have declared for the server to serve this request; nil for protocol 1's
+    /// base. A new case does not compile until it chooses.
+    public var capability: HostCapability? {
+        switch self {
+        case .environment(let request): return request.request == nil ? nil : .request
+        case .sessionPaths(let request): return request.ask.capability
+        case .visitSessionPath: return .rankedSessionPaths
+        case .subscribe(let subscription): return subscription.capability
+        case .browserTabs: return .browserTabs
+        case .ping, .shutdown, .markRead, .view, .topicChoices, .worktreeStarts, .adoptWorktrees, .claimOpen, .releaseOpen, .git, .gitWrite,
+             .gitNetwork, .upload:
+            return nil
+        }
+    }
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case ping, shutdown, subscribe, environment
@@ -193,7 +233,9 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case gitWrite = "git_write"
         case gitNetwork = "git_network"
         case sessionPaths = "session_paths"
+        case visitSessionPath = "visit_session_path"
         case upload
+        case browserTabs = "browser_tabs"
     }
 
     public init(from decoder: Decoder) throws {
@@ -219,7 +261,9 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .gitWrite: self = .gitWrite(try values.decode(GitWrite.self, forKey: key))
         case .gitNetwork: self = .gitNetwork(try values.decode(GitNetworkRequest.self, forKey: key))
         case .sessionPaths: self = .sessionPaths(try values.decode(SessionPathsRequest.self, forKey: key))
+        case .visitSessionPath: self = .visitSessionPath(try values.decode(VisitSessionPath.self, forKey: key))
         case .upload: self = .upload(try values.decode(UploadChunk.self, forKey: key))
+        case .browserTabs: self = .browserTabs(try values.decode(BrowserTabsRequest.self, forKey: key))
         }
     }
 
@@ -241,7 +285,9 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .gitWrite(let write): try values.encode(write, forKey: .gitWrite)
         case .gitNetwork(let network): try values.encode(network, forKey: .gitNetwork)
         case .sessionPaths(let request): try values.encode(request, forKey: .sessionPaths)
+        case .visitSessionPath(let visit): try values.encode(visit, forKey: .visitSessionPath)
         case .upload(let chunk): try values.encode(chunk, forKey: .upload)
+        case .browserTabs(let request): try values.encode(request, forKey: .browserTabs)
         }
     }
 }
@@ -297,8 +343,23 @@ public enum HostSubscription: Codable, Equatable, Sendable {
     /// A folder's repository, as `RepositoryEvent`s keyed `repository`: the first is the whole state, each later one a
     /// change of HEAD, the index or the working tree.
     case repository(RepositorySubscription)
+    /// One Topic's detail, as `TopicDetailItem`s keyed `topic <id>`: the first is the current state, each later one
+    /// the detail after a change of the Topic's record or of its Sessions, Windows or Panes. Needs `topic-detail`.
+    case topic(TopicSubscription)
+    /// The computed view, as `EnvironmentShown` items keyed `snapshot` with no `capabilities`: the JSON of
+    /// `muxify environment show --json`, first at once, then each time it changes. Needs `snapshot`.
+    case snapshot
 
-    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config, repository }
+    /// The capability that this subscription needs; nil for protocol 1's base.
+    public var capability: HostCapability? {
+        switch self {
+        case .environment, .config, .repository: return nil
+        case .topic: return .topicDetail
+        case .snapshot: return .snapshot
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config, repository, topic, snapshot }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: ProtocolKey.self)
@@ -310,6 +371,8 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         case .environment: self = .environment
         case .config: self = .config
         case .repository: self = .repository(try values.decode(RepositorySubscription.self, forKey: ProtocolKey(known.rawValue)))
+        case .topic: self = .topic(try values.decode(TopicSubscription.self, forKey: ProtocolKey(known.rawValue)))
+        case .snapshot: self = .snapshot
         }
     }
 
@@ -319,9 +382,22 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         case .environment: try values.encode(ProtocolEmpty(), forKey: .environment)
         case .config: try values.encode(ProtocolEmpty(), forKey: .config)
         case .repository(let repository): try values.encode(repository, forKey: .repository)
+        case .topic(let topic): try values.encode(topic, forKey: .topic)
+        case .snapshot: try values.encode(ProtocolEmpty(), forKey: .snapshot)
         }
     }
 }
+
+/// What the `topic` subscription subscribes to: one Topic, by its id.
+public struct TopicSubscription: Codable, Equatable, Sendable {
+    public var id: String
+
+    public init(id: String) { self.id = id }
+}
+
+/// An item of the `topic` subscription: the Topic's detail exactly as `environment { show }` answers it, which is the
+/// JSON of `muxify topic show --json`, or nil, sent as `null`, when the Topic is gone: forgotten, Settled or never there.
+public typealias TopicDetailItem = EnvironmentResponse?
 
 /// `mark_read`: Unread on visit. The server clears the Topic Unread of `topics` and the Agent Unread of `panes`,
 /// then reads the server again, which writes the Topics' remembered Sessions and sends the events of all of it.
@@ -417,8 +493,10 @@ public struct AdoptedWorktree: Codable, Equatable, Sendable {
     }
 }
 
-/// `session_paths`: the roots of the Config's `sessions.paths`, each with its depth. The Host runs
-/// `SessionPathDiscovery` with them, so `~` is the Host's home.
+/// `session_paths`. With `roots` alone, the roots of the Mac's Config's `sessions.paths`, each with its depth: the
+/// Host runs `SessionPathDiscovery` with them, so `~` is the Host's home, and answers `SessionPathsOutput`. With the
+/// `ranked-session-paths` capability, a `topic` asks for that Topic's Add a Session rows (`TopicSessionPathsAnswer`),
+/// and a `query`, or no key at all, for the Host's rows of Go to… (`RankedSessionPathsAnswer`).
 public struct SessionPathsRequest: Codable, Equatable, Sendable {
     public struct Root: Codable, Equatable, Sendable {
         /// Absolute, or starting with `~`. It may be a glob.
@@ -432,14 +510,55 @@ public struct SessionPathsRequest: Codable, Equatable, Sendable {
         }
     }
 
-    public var roots: [Root]
+    /// What the request asks the Host for.
+    public enum Ask: Equatable, Sendable {
+        /// The discovery's output for these roots. How a SessionPath is named stays with the Mac, which reads it.
+        case discovery([SessionPathRoot])
+        /// The Host's Session Paths and Worktrees with no Topic, ranked for the text as Go to… ranks them, the last
+        /// visited first for "": the rows of `muxify session-paths --query <text> --json`.
+        case ranked(query: String)
+        /// The Add a Session rows of the Topic with this id, slug or title: those of
+        /// `muxify topic session-paths --topic <topic> --json`.
+        case topic(String)
+
+        /// Nil for the discovery, protocol 1's base.
+        public var capability: HostCapability? {
+            if case .discovery = self { return nil }
+            return .rankedSessionPaths
+        }
+    }
+
+    public var roots: [Root]?
+    public var query: String?
+    public var topic: String?
 
     public init(roots: [SessionPathRoot]) {
         self.roots = roots.map { Root(path: $0.path, depth: $0.depth) }
     }
 
-    /// The roots that discovery takes. How a SessionPath is named stays with the Mac, which reads the output.
-    public var sessionPathRoots: [SessionPathRoot] { roots.map { SessionPathRoot(path: $0.path, depth: $0.depth) } }
+    public init(_ ask: Ask) {
+        switch ask {
+        case .discovery(let roots): self.roots = roots.map { Root(path: $0.path, depth: $0.depth) }
+        case .ranked(let query): self.query = query
+        case .topic(let topic): self.topic = topic
+        }
+    }
+
+    /// A `topic` before a `query`, and a `query` before `roots`; with no key, the ranking for "".
+    public var ask: Ask {
+        if let topic { return .topic(topic) }
+        if let query { return .ranked(query: query) }
+        if let roots { return .discovery(roots.map { SessionPathRoot(path: $0.path, depth: $0.depth) }) }
+        return .ranked(query: "")
+    }
+}
+
+/// `visit_session_path`: a Session opened at `folder` on the Host now. The visit goes to the Session Path or Worktree
+/// that holds the folder, else to the folder itself, as `muxify session-paths visit` records it.
+public struct VisitSessionPath: Codable, Equatable, Sendable {
+    public var folder: String
+
+    public init(folder: String) { self.folder = folder }
 }
 
 /// The answer to `session_paths`: `SessionPathDiscovery`'s output, which the Mac reads and saves as it reads a local
@@ -453,6 +572,14 @@ public struct SessionPathsOutput: Codable, Equatable, Sendable {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(output, forKey: .output)
     }
+}
+
+/// `browser_tabs`: the Window whose stored Browser Tabs the client reads. A Window id, such as `@12`; a Pane id names
+/// its Window, as `--window` of the CLI takes one.
+public struct BrowserTabsRequest: Codable, Equatable, Sendable {
+    public var window: String
+
+    public init(window: String) { self.window = window }
 }
 
 /// `upload`: one chunk of an Attachment. An upload is a pipelined run of these, of at most

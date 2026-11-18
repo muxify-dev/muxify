@@ -31,6 +31,14 @@ public struct Folder: Hashable, Sendable, CustomStringConvertible {
         return Folder(path: shown, real: shown)
     }
 
+    /// The folder on this machine at `path`; nil when no directory is there.
+    public static func existingDirectory(_ path: String) -> Folder? {
+        var isDirectory: ObjCBool = false
+        let folder = local(path)
+        guard FileManager.default.fileExists(atPath: folder.real, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+        return folder
+    }
+
     public static func == (lhs: Folder, rhs: Folder) -> Bool { lhs.real == rhs.real }
     public func hash(into hasher: inout Hasher) { hasher.combine(real) }
 

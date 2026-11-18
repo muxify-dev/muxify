@@ -54,11 +54,11 @@ public struct HostServerContext: @unchecked Sendable {
 }
 
 /// `muxify server`: the Host Server's requests (ADR 0087). It serves `ping` and `shutdown`, the `environment`,
-/// `config` and `repository` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and
-/// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads, writes and network
-/// commands, `session_paths` and `upload`. Programs on the Host reach its Mac through its own socket, whose requests it
-/// sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask` goes to the network command that runs it, which
-/// asks the Mac.
+/// `config`, `repository`, `topic` and `snapshot` subscriptions, `environment` requests, `mark_read`, the view commands,
+/// the Topic and Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads, writes and
+/// network commands, `session_paths`, `visit_session_path`, `upload` and `browser_tabs`. Programs on the Host reach its
+/// Mac through its own socket, whose requests it sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask`
+/// goes to the network command that runs it, which asks the Mac.
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
     public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
@@ -71,8 +71,8 @@ public enum HostServer {
             guard let server = box.server else { return .failure("cannot reach Muxify: the Host Server has exited") }
             return await forward(request, to: server)
         }
-        let host = HostEnvironment(context: context, socket: socket, asks: asks, log: log)
         let config = HostConfigFeed(path: context.paths.configFile.path, home: context.home)
+        let host = HostEnvironment(context: context, socket: socket, asks: asks, config: config, log: log)
         let server = ProtocolServer(input: input, output: output, build: build, silence: silence, log: log) { request, server in
             serve(request, server: server, host: host, config: config)
         }
@@ -142,7 +142,11 @@ public enum HostServer {
     static func serve(_ request: ProtocolIncomingRequest, server: ProtocolServer, host: HostEnvironment, config: HostConfigFeed) {
         do {
             let nonce = server.client?.nonce
-            switch try request.body(HostRequest.self) {
+            let body = try request.body(HostRequest.self)
+            if let needed = body.capability, server.client?.capabilities.contains(needed.rawValue) != true {
+                throw ProtocolError(.unsupported, "this client did not declare the capability \(needed.rawValue)")
+            }
+            switch body {
             case .ping:
                 request.finish()
             case .shutdown:
@@ -154,6 +158,10 @@ public enum HostServer {
                 config.subscribe(request)
             case .subscribe(.repository(let repository)):
                 host.watch(repository, for: request)
+            case .subscribe(.topic(let topic)):
+                host.subscribe(topic, for: request, nonce: nonce)
+            case .subscribe(.snapshot):
+                host.subscribeSnapshot(request, nonce: nonce)
             case .environment(let environmentRequest):
                 host.run(environmentRequest, for: request, nonce: nonce)
             case .markRead(let mark):
@@ -180,8 +188,12 @@ public enum HostServer {
                 host.gitNetwork(network, for: request, server: server)
             case .sessionPaths(let sessionPaths):
                 host.sessionPaths(sessionPaths, for: request)
+            case .visitSessionPath(let visit):
+                host.visit(visit, for: request)
             case .upload(let chunk):
                 host.uploads.receive(chunk, for: request)
+            case .browserTabs(let tabs):
+                host.browserTabs(tabs, for: request)
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -202,6 +214,8 @@ final class HostConfigFeed: @unchecked Sendable {
     private var watcher: FolderWatcher?
     private var state: HostConfig?
     private var subscribers: [Int: ProtocolIncomingRequest] = [:]
+    /// What the server itself runs on each Config it reads, such as the `snapshot` subscription's `sidebar`.
+    private var observers: [(HostConfig) -> Void] = []
     private var readPending = false
     private var stopped = false
 
@@ -215,13 +229,21 @@ final class HostConfigFeed: @unchecked Sendable {
         queue.async { [self] in
             guard !request.isCancelled, !stopped else { return }
             subscribers[id] = request
-            if watcher == nil {
-                watcher = FolderWatcher(queue: queue) { [weak self] in self?.heard() }
-                read()
-            }
+            watch()
             if let state, !request.sendEvent(state, key: "config") { subscribers[id] = nil }
         }
         request.onCancel { self.queue.async { self.subscribers[id] = nil } }
+    }
+
+    /// Runs `observer` on this feed's queue with the Config that reads now, then with each one that differs, until
+    /// the server stops. It starts the watch as a subscriber does.
+    func observe(_ observer: @escaping (HostConfig) -> Void) {
+        queue.async { [self] in
+            guard !stopped else { return }
+            observers.append(observer)
+            watch()
+            if let state { observer(state) }
+        }
     }
 
     func stop() {
@@ -230,7 +252,15 @@ final class HostConfigFeed: @unchecked Sendable {
             watcher?.stop()
             watcher = nil
             subscribers = [:]
+            observers = []
         }
+    }
+
+    /// The watch of the Config's folders, with the first read, once.
+    private func watch() {
+        guard watcher == nil else { return }
+        watcher = FolderWatcher(queue: queue) { [weak self] in self?.heard() }
+        read()
     }
 
     /// Something changed in a watched folder: the files are read once the events of one save have come.
@@ -254,6 +284,7 @@ final class HostConfigFeed: @unchecked Sendable {
         state = next
         guard !first else { return }
         for (id, request) in subscribers where !request.sendEvent(next, key: "config") { subscribers[id] = nil }
+        for observer in observers { observer(next) }
     }
 }
 
@@ -266,6 +297,8 @@ final class HostEnvironment: @unchecked Sendable {
     let socket: HostServerSocket
     /// The network commands that wait for askpass answers, which come in on `socket`.
     private let asks: GitAskpassRoutes
+    /// The Host's Config as the `config` subscription reads it, which gives the `snapshot` items their Config.
+    private let config: HostConfigFeed
     private let log: (String) -> Void
     /// Where the publisher delivers, and where the subscribers and the state live.
     private let delivery = DispatchQueue(label: "dev.muxify.host-server.environment")
@@ -278,16 +311,27 @@ final class HostEnvironment: @unchecked Sendable {
     private var state = EnvironmentState()
     private var hasState = false
     private var subscribers: [Int: ProtocolIncomingRequest] = [:]
+    /// The `snapshot` subscribers, the Config their items are computed with once it was read, and the JSON of the
+    /// last item computed, so an item goes out only when it differs.
+    private var snapshotSubscribers: [Int: ProtocolIncomingRequest] = [:]
+    private var snapshotConfig: Config?
+    private var observesConfig = false
+    private var lastShown: Data?
     /// The `repository` subscriptions by request; `lock` guards it.
     private var watches: [Int: RepositoryWatch] = [:]
     let uploads: HostUploads
+    /// The `topic` subscriptions, which read again on each change of the publisher.
+    private let details: HostTopicDetails
 
-    init(context: HostServerContext, socket: HostServerSocket, asks: GitAskpassRoutes, log: @escaping (String) -> Void) {
+    init(context: HostServerContext, socket: HostServerSocket, asks: GitAskpassRoutes, config: HostConfigFeed,
+         log: @escaping (String) -> Void) {
         self.context = context
         self.socket = socket
         self.asks = asks
+        self.config = config
         self.log = log
         uploads = HostUploads(directory: context.temporaryDirectory)
+        details = HostTopicDetails { [context] topics in await Self.details(of: topics, context: context, log: log) }
     }
 
     func stop() {
@@ -300,6 +344,7 @@ final class HostEnvironment: @unchecked Sendable {
         publisher?.stop()
         watches.forEach { $0.stop() }
         uploads.stop()
+        details.stop()
     }
 
     // MARK: - The Git View
@@ -403,6 +448,41 @@ final class HostEnvironment: @unchecked Sendable {
         }
     }
 
+    /// The `topic` subscription of one Topic: its detail now, then again after each change of the publisher that
+    /// changes it.
+    func subscribe(_ topic: TopicSubscription, for request: ProtocolIncomingRequest, nonce: String?) {
+        details.subscribe(request, topic: topic.id)
+        Task {
+            await self.publisher(nonce: nonce).start { changes in self.receive(changes) }
+        }
+    }
+
+    /// What `environment { show }` answers for each Topic, read with the Host's Config. A Topic that is not open is
+    /// gone; one that cannot be read now has no entry.
+    private static func details(of topics: Set<String>, context: HostServerContext, log: @escaping (String) -> Void) async
+        -> [String: HostTopicDetails.Read] {
+        let config: Config
+        do { config = try await context.config() } catch {
+            log("muxify server: topic: \(message(error))")
+            return [:]
+        }
+        return await background {
+            let service = EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths,
+                                             topics: config.topics, notifications: config.notifications,
+                                             worktreesRoot: config.worktreesRoot)
+            var found: [String: HostTopicDetails.Read] = [:]
+            for topic in topics.sorted() {
+                let response = service.handle(EnvironmentRequest(.show, target: .topic(.id(topic))))
+                switch response {
+                case .failed(let failure) where failure.kind == .topicUnavailable: found[topic] = .gone
+                case .failed(let failure): log("muxify server: topic \(topic): \(failure.message)")
+                default: found[topic] = .shown(response)
+                }
+            }
+            return found
+        }
+    }
+
     /// On `delivery`: the first item of the publisher holds every key, and goes whole to each subscriber; each later
     /// change goes as an event of its own key, which replaces an unsent one.
     private func receive(_ changes: [EnvironmentChange]) {
@@ -416,6 +496,8 @@ final class HostEnvironment: @unchecked Sendable {
         for id in subscribers.keys.sorted() {
             if first { send(state.all, to: id, first: true) } else { send(changes, to: id, first: false) }
         }
+        details.changed()
+        if !snapshotSubscribers.isEmpty { sendSnapshot() }
     }
 
     private func send(_ changes: [EnvironmentChange], to id: Int, first: Bool) {
@@ -426,12 +508,67 @@ final class HostEnvironment: @unchecked Sendable {
         if !sent { subscribers[id] = nil }
     }
 
+    // MARK: - The snapshot subscription
+
+    /// The `snapshot` subscription (ADR 0093): `environment show`'s view, computed from the state that the
+    /// `environment` publisher keeps and the Config that the `config` feed reads, so an item costs no read of its own.
+    func subscribeSnapshot(_ request: ProtocolIncomingRequest, nonce: String?) {
+        Task {
+            let publisher = await self.publisher(nonce: nonce)
+            let id = request.id
+            delivery.async { [self] in
+                guard !request.isCancelled else { return }
+                snapshotSubscribers[id] = request
+                if !observesConfig {
+                    observesConfig = true
+                    config.observe { [weak self] hostConfig in self?.delivery.async { self?.configRead(hostConfig) } }
+                }
+                sendSnapshot(first: id)
+            }
+            request.onCancel { self.delivery.async { self.snapshotSubscribers[id] = nil } }
+            publisher.start { changes in self.receive(changes) }
+        }
+    }
+
+    /// On `delivery`: the Config that the feed read. One that does not parse leaves the last that did.
+    private func configRead(_ hostConfig: HostConfig) {
+        switch hostConfig.load(host: Tmux.hostName) ?? .success(Config()) {
+        case .success(let config): snapshotConfig = config
+        case .failure(let error):
+            log("snapshot: \(error)")
+            if snapshotConfig == nil { snapshotConfig = Config() }
+        }
+        sendSnapshot()
+    }
+
+    /// On `delivery`: computes the view once the state and the Config are there, and sends it to every subscriber when
+    /// it differs from the last one, and to the subscriber `first` in any case. A newer item replaces an unsent one.
+    private func sendSnapshot(first: Int? = nil) {
+        guard hasState, let config = snapshotConfig, let tmux = state.snapshot else { return }
+        let shown = EnvironmentShown(contents: state.topicContents, tmux: tmux, config: config)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(shown) else { return }
+        let changed = data != lastShown
+        lastShown = data
+        for (id, request) in snapshotSubscribers where changed || id == first {
+            if !request.sendEvent(shown, key: "snapshot") { snapshotSubscribers[id] = nil }
+        }
+    }
+
     // MARK: - Commands
 
     /// Runs an `EnvironmentRequest` with the Host's Config, as the App Window's own Client, then reads, so the
-    /// events of what it changed go out before its answer.
+    /// events of what it changed go out before its answer. One with a Request id runs through the Request ledger, as
+    /// `muxify --request` does (ADR 0093): a second send gets the first answer and changes nothing.
     func run(_ environmentRequest: EnvironmentRequest, for request: ProtocolIncomingRequest, nonce: String?) {
-        let reads = environmentRequest.command.onlyReads
+        let command = environmentRequest.command
+        let reads = command.onlyReads
+        let pending = PendingRequest(environmentRequest)
+        if pending != nil, command.requestPolicy == .read {
+            let failure = Self.requestOnRead(command)
+            return request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+        }
         Task {
             let config: Config
             do { config = try await context.config() } catch {
@@ -440,19 +577,58 @@ final class HostEnvironment: @unchecked Sendable {
             let publisher = await self.publisher(nonce: nonce)
             let context = context
             guard reads || request.startMutation() else { return }
-            let response = await Self.background {
-                let service = EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths,
-                                                 topics: config.topics, notifications: config.notifications,
-                                                 worktreesRoot: config.worktreesRoot)
-                let client = nonce.flatMap { Self.ownClient(on: context.tmux, nonce: $0) }
-                return service.handle(environmentRequest, client: client?.tty)
+            let handle = {
+                await Self.background {
+                    let service = EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths,
+                                                     topics: config.topics, notifications: config.notifications,
+                                                     worktreesRoot: config.worktreesRoot, request: pending)
+                    let client = nonce.flatMap { Self.ownClient(on: context.tmux, nonce: $0) }
+                    return service.handle(environmentRequest, client: client?.tty)
+                }
             }
-            if !reads { await publisher.read() }
+            let response: EnvironmentResponse
+            if let pending {
+                response = await Self.apply(pending, policy: command.requestPolicy, phrase: command.actionName, paths: context.paths,
+                                            log: log, run: handle)
+            } else {
+                response = await handle()
+            }
+            if !reads { await readAgain(publisher) }
             if case .failed(let failure) = response {
                 request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
             } else {
                 request.finish(response)
             }
+        }
+    }
+
+    /// The refusal of a Request id on a command that changes nothing, as `muxify --request` refuses it on a read.
+    static func requestOnRead(_ command: EnvironmentCommand) -> TopicFailure {
+        TopicFailure(kind: .requestOnRead, phase: .nothingChanged,
+                     message: "A Request id names a change that Muxify applies one time only. \(command.actionName) is not such a change, "
+                         + "so it takes no Request id.")
+    }
+
+    /// Runs one send of a Request through the ledger. The ledger keeps the response's JSON, which a second send
+    /// answers again; a refusal of the ledger is a failure whose kind names it.
+    private static func apply(_ pending: PendingRequest, policy: RequestPolicy, phrase: String, paths: MuxifyPaths, log: @escaping (String) -> Void,
+                              run: () async -> EnvironmentResponse) async -> EnvironmentResponse {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        do {
+            let reply = try await RequestLedger(paths: paths).apply(pending, policy: policy, phrase: phrase, unrecorded: { error in
+                log("muxify server: the ledger could not record the Request \(pending.id): \(error)")
+            }) {
+                let response = await run()
+                let stdout = String(decoding: try encoder.encode(response), as: UTF8.self)
+                guard case .failed(let failure) = response else { return (RequestReply(stdout: stdout), true) }
+                return (RequestReply(stdout: stdout, stderr: failure.message, exitCode: 1), failure.isRefusal)
+            }
+            return try JSONDecoder().decode(EnvironmentResponse.self, from: Data(reply.stdout.utf8))
+        } catch let refusal as RequestRefusal {
+            return .failed(refusal.failure)
+        } catch {
+            return .failed(TopicFailure(kind: .storeFailed, phase: .changesStarted, message: "Muxify could not read the answer of the Request \(pending.id): \(error)"))
         }
     }
 
@@ -510,12 +686,91 @@ final class HostEnvironment: @unchecked Sendable {
         }
     }
 
-    /// Session Path discovery on the Host's folders, `~` being the Host's home. It changes nothing.
+    /// Session Path discovery on the Host's folders, `~` being the Host's home; or the Host's ranked rows, or a Topic's
+    /// Add a Session rows, read with the Host's Config, as `muxify session-paths` and `muxify topic session-paths`
+    /// answer them. It changes nothing.
     func sessionPaths(_ sessionPaths: SessionPathsRequest, for request: ProtocolIncomingRequest) {
         Task {
-            let roots = sessionPaths.sessionPathRoots
-            let output = await Self.background { SessionPathDiscovery.output(for: roots) }
-            request.finish(SessionPathsOutput(output: output))
+            if case .discovery(let roots) = sessionPaths.ask {
+                let output = await Self.background { SessionPathDiscovery.output(for: roots) }
+                return request.finish(SessionPathsOutput(output: output))
+            }
+            let config: Config, fromCache: Bool
+            do { (config, fromCache) = try await sessionPathConfig() } catch {
+                return request.fail(ProtocolError(.failed, Self.message(error)))
+            }
+            let context = context
+            switch sessionPaths.ask {
+            case .discovery: return
+            case .ranked(let query):
+                let result = await Self.background {
+                    EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths, topics: config.topics)
+                        .rankedSessionPaths(query: query, tiebreak: config.goToPalette.rules.tiebreak, home: context.home)
+                }
+                switch result {
+                case .success(let ranked): request.finish(RankedSessionPathsAnswer(ranked))
+                case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+                }
+                // As `muxify session-paths` does after an answer from the cache, so the next answer is up to date.
+                let cache = SessionPathCache(file: context.paths.sessionPathCache(remote: nil))
+                if fromCache { await Self.background { cache.refresh(config) } }
+            case .topic(let topic):
+                let result = await Self.background {
+                    EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths, topics: config.topics)
+                        .sessionPathChoices(for: .topic(.named(topic)))
+                        .map { TopicSessionPathsAnswer($0, visits: (try? VisitStore(paths: context.paths).times()) ?? [:]) }
+                }
+                switch result {
+                case .success(let answer): request.finish(answer)
+                case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+                }
+            }
+        }
+    }
+
+    /// The Host's Config with the SessionPaths of the discovery cache, as `muxify session-paths` reads them, and
+    /// whether the cache had them. Without them it finds the SessionPaths and saves them.
+    private func sessionPathConfig() async throws -> (config: Config, fromCache: Bool) {
+        var config = try await context.config()
+        let cache = SessionPathCache(file: context.paths.sessionPathCache(remote: nil))
+        let found = await Self.background { [config] in cache.sessionPaths(of: config) }
+        config.sessionPaths = found.sessionPaths
+        return (config, found.fromCache)
+    }
+
+    /// Records a visit to a folder on the Host, as `muxify session-paths visit` does, so the Host's next ranking,
+    /// the CLI's and the server's alike, puts its Session Path first.
+    func visit(_ visit: VisitSessionPath, for request: ProtocolIncomingRequest) {
+        Task {
+            let config: Config
+            do { config = try await sessionPathConfig().config } catch {
+                return request.fail(ProtocolError(.failed, Self.message(error)))
+            }
+            guard let directory = Folder.existingDirectory(visit.folder) else {
+                return request.fail(ProtocolError(.failed, "no directory '\(visit.folder)'"))
+            }
+            guard request.startMutation() else { return }
+            let context = context
+            let result = await Self.background {
+                EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths).recordVisit(opening: directory, at: Date())
+            }
+            switch result {
+            case .success: request.finish()
+            case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+            }
+        }
+    }
+
+    /// A Window's stored Browser Tabs, read as `muxify browser tabs --window <id> --json` reads them with no Mac
+    /// (ADR 0084), so both answer the same JSON. It changes nothing; the queued opens stay for the app.
+    func browserTabs(_ tabs: BrowserTabsRequest, for request: ProtocolIncomingRequest) {
+        let tmux = context.tmux
+        Task {
+            let read = await Self.background { () -> [BrowserAgentTab]? in
+                (try? tmux.run(StoredBrowser.storedTabsArguments(target: tabs.window))).flatMap(StoredBrowser.agentTabs(listedPanes:))
+            }
+            guard let read else { return request.fail(ProtocolError(.failed, StoredBrowser.noWindow(tabs.window))) }
+            request.finish(read)
         }
     }
 
@@ -540,7 +795,7 @@ final class HostEnvironment: @unchecked Sendable {
                         try ViewCommandExecutor(server: tmux).run(.setAgentUnread(mark.panes.map { PaneUnread(pane: $0, unread: false) }))
                     }
                 }
-                await publisher.read()
+                await readAgain(publisher)
                 request.finish()
             } catch {
                 request.fail(ProtocolError(.failed, Self.message(error)))
@@ -564,7 +819,7 @@ final class HostEnvironment: @unchecked Sendable {
             guard !changes || request.startMutation() else { return }
             do {
                 let output = try await Self.background { [own] in try ViewCommandExecutor(server: tmux, ownClient: own).run(command) }
-                if changes, let publisher = runningPublisher { await publisher.read() }
+                if changes, let publisher = runningPublisher { await readAgain(publisher) }
                 request.finish(ViewOutput(output: output))
             } catch {
                 request.fail(ProtocolError(.failed, Self.message(error)))
@@ -573,6 +828,13 @@ final class HostEnvironment: @unchecked Sendable {
     }
 
     // MARK: - Helpers
+
+    /// Reads everything again after a write, and returns once the events and the Topic details of what it changed
+    /// went out, so they come before the write's answer.
+    private func readAgain(_ publisher: EnvironmentPublisher) async {
+        await publisher.read()
+        await details.caughtUp()
+    }
 
     /// The publisher, made once, with the Client marker of the first request's `hello` and the Config's Session order.
     private func publisher(nonce: String?) async -> EnvironmentPublisher {

@@ -30,7 +30,7 @@ struct TopicSessionPathsInvocation: Equatable {
 
     /// `visits` are this machine's: each row's `last_visit` is the visit to its folder.
     static func render(_ choices: TopicSessionPathChoices, visits: [VisitKey: Date] = [:], output: RequestInvocation.Output) throws -> String {
-        let response = Response(choices, visits: visits)
+        let response = TopicSessionPathsAnswer(choices, visits: visits)
         switch output {
         case .json:
             let encoder = JSONEncoder()
@@ -40,29 +40,6 @@ struct TopicSessionPathsInvocation: Equatable {
             let rows = response.rows.map { [$0.name, $0.kind, $0.directory, response.topic.label] }
             let sessions = response.sessions.map { [$0.name, "running", $0.directory, $0.topic?.label ?? ""] }
             return (rows + sessions).map { $0.map(\.oneLineField).joined(separator: "\t") }.joined(separator: "\n")
-        }
-    }
-
-    private typealias Topic = SessionPathAnswer.Topic
-
-    private struct Session: Encodable {
-        let id: String
-        let name: String
-        let directory: String
-        @EncodesNull var topic: Topic?
-    }
-
-    private struct Response: Encodable {
-        let topic: Topic
-        let rows: [SessionPathAnswer]
-        let sessions: [Session]
-
-        init(_ choices: TopicSessionPathChoices, visits: [VisitKey: Date]) {
-            topic = Topic(choices.topic)
-            rows = choices.rows.map {
-                SessionPathAnswer($0.row, inThisTopic: $0.inThisTopic, lastVisit: visits[.directory($0.row.choice.directory.real)])
-            }
-            sessions = choices.sessions.map { Session(id: $0.id, name: $0.name, directory: $0.directory, topic: $0.topic.map(Topic.init)) }
         }
     }
 }

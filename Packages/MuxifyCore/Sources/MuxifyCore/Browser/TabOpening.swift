@@ -102,6 +102,26 @@ extension StoredBrowser {
         }
     }
 
+    /// The tmux command that reads a Window's stored Tabs and queued opens, Window options read through one of its
+    /// Panes. `target` is a Window or a Pane id. `muxify browser tabs` with no app and the Host Server's
+    /// `browser_tabs` both run it, so both answer the same Tabs.
+    public static func storedTabsArguments(target: String) -> [String] {
+        let format = [Tmux.tabsOption, Tmux.activeTabOption, Tmux.openOption].map { "#{\($0)}" }.joined(separator: Tmux.separator)
+        return ["list-panes", "-t", target, "-F", format]
+    }
+
+    /// The Tabs that `storedTabsArguments`'s output names, as `agentTabs(opening:)` lists them; nil when the output
+    /// is not of a Window.
+    public static func agentTabs(listedPanes output: String) -> [BrowserAgentTab]? {
+        let fields = output.split(separator: "\n", omittingEmptySubsequences: false).first?.components(separatedBy: Tmux.separator) ?? []
+        guard fields.count == 3 else { return nil }
+        let stored = StoredBrowser(tabs: fields[0], activeTab: fields[1], shown: "", maximized: "")
+        return stored.agentTabs(opening: fields[2].split(separator: " ").map(String.init))
+    }
+
+    /// What a read of the stored Tabs of a target that names no Window or Pane says.
+    public static func noWindow(_ target: String) -> String { "no tmux Window or Pane '\(target)'" }
+
     private static func storedTabID(_ index: Int) -> UUID {
         UUID(uuidString: String(format: "00000000-0000-0000-0000-%012X", index))!
     }

@@ -73,7 +73,7 @@ struct BrowserAgentInvocation: Equatable {
                      using runner: any CLICommandRunning) throws -> BrowserAgentReply {
         let panes = try runner.run("tmux", arguments: ["list-panes", "-t", target, "-F", "#{window_id}"], quiet: true)
         guard panes.status == 0, let window = panes.output.split(separator: "\n").first.map(String.init) else {
-            throw CLIError("no tmux Window or Pane '\(target)'")
+            throw CLIError(StoredBrowser.noWindow(target))
         }
         let option = try runner.run("tmux", arguments: ["show-options", "-sqv", BrowserAgentChannel.option], quiet: false)
         guard option.status == 0 else {
@@ -90,13 +90,11 @@ struct BrowserAgentInvocation: Equatable {
     /// (ADR 0084). Window options, read through one of its Panes. `-u`, as `TmuxServer` reads: without a UTF-8
     /// locale, tmux prints the separator as `_`.
     private static func storedTabs(target: String, using runner: any CLICommandRunning) throws -> [BrowserAgentTab] {
-        let format = [Tmux.tabsOption, Tmux.activeTabOption, Tmux.openOption].map { "#{\($0)}" }.joined(separator: Tmux.separator)
-        let result = try runner.run("tmux", arguments: ["-u", "list-panes", "-t", target, "-F", format], quiet: true)
-        let fields = result.output.split(separator: "\n", omittingEmptySubsequences: false).first?
-            .components(separatedBy: Tmux.separator) ?? []
-        guard result.status == 0, fields.count == 3 else { throw CLIError("no tmux Window or Pane '\(target)'") }
-        let stored = StoredBrowser(tabs: fields[0], activeTab: fields[1], shown: "", maximized: "")
-        return stored.agentTabs(opening: fields[2].split(separator: " ").map(String.init))
+        let result = try runner.run("tmux", arguments: ["-u"] + StoredBrowser.storedTabsArguments(target: target), quiet: true)
+        guard result.status == 0, let tabs = StoredBrowser.agentTabs(listedPanes: result.output) else {
+            throw CLIError(StoredBrowser.noWindow(target))
+        }
+        return tabs
     }
 
     static func json(_ value: some Encodable) throws -> String {

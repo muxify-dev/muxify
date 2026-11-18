@@ -232,17 +232,6 @@ struct RequestInvocation: Equatable {
         }
     }
 
-    /// What a command does with a Request id. For a command that changes something, the policy says what a second
-    /// send does when the first one changed the records and did not finish.
-    enum RequestPolicy {
-        /// The command changes nothing that a Request can guard, so it refuses `--request`.
-        case read
-        /// The command gives the same end state when it runs again, so the second send runs it to its end.
-        case rerun
-        /// The command could apply its change twice, so the second send fails and runs nothing.
-        case inDoubt
-    }
-
     /// The exit status when the Request id has a row for another verb or other arguments.
     static let requestMismatchExitCode: Int32 = 3
     /// The exit status when the Request changed the records, did not finish, and cannot run again.
@@ -368,41 +357,22 @@ extension RequestInvocation {
     /// prints it again and changes nothing.
     func run() async throws -> Int32 {
         guard let request else { return try await answer().reply.emit() }
-        let ledger = RequestLedger(paths: paths)
-        let lock: RequestLock, known: RequestLookup
+        let reply: RequestReply
         do {
-            lock = try ledger.lock(request.id)
-            known = try ledger.lookup(request)
-        } catch {
-            throw CLIError("Muxify could not read the Request ledger in \(paths.state.path). \(error) No changes were made.")
-        }
-        // Held until the answer is in the ledger, so a second send that starts meanwhile waits and then finds it.
-        defer { lock.unlock() }
-        switch known {
-        case .new: break
-        case .replay(let reply): return try reply.emit()
-        case .mismatch(let verb):
-            throw CLIError("The Request \(request.id) is the id of an earlier \(verb) with other arguments. Use a new id for a new change. No changes were made.",
-                           exitCode: Self.requestMismatchExitCode)
-        case .resume:
-            switch command.requestPolicy {
-            case .rerun, .read: break
-            case .inDoubt:
-                throw CLIError("The Request \(request.id) changed the Topic records, but \(command.phrase) did not finish. Muxify does not run it again, "
-                               + "because that could apply the change twice. Look at the Environment before you send a new Request.",
-                               exitCode: Self.requestInDoubtExitCode)
-            }
-        }
-        let answer = try await answer()
-        if answer.isFinal {
-            do {
-                try ledger.finish(request, reply: answer.reply)
-            } catch {
-                // The answer still goes out: the change is made, and only a second send would not find it.
+            reply = try await RequestLedger(paths: paths).apply(request, policy: command.requestPolicy, phrase: command.phrase, unrecorded: { error in
                 FileHandle.standardError.write(Data("muxify: the ledger could not record the Request \(request.id): \(error)\n".utf8))
+            }) {
+                let answer = try await answer()
+                return (answer.reply, answer.isFinal)
+            }
+        } catch let refusal as RequestRefusal {
+            switch refusal {
+            case .clash: throw CLIError(refusal.description, exitCode: Self.requestMismatchExitCode)
+            case .inDoubt: throw CLIError(refusal.description, exitCode: Self.requestInDoubtExitCode)
+            case .ledgerUnreadable: throw CLIError(refusal.description)
             }
         }
-        return try answer.reply.emit()
+        return try reply.emit()
     }
 
     /// What one run of the command gave. `isFinal` is true for an answer that a second send must get again: a
@@ -484,7 +454,7 @@ extension RequestInvocation {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             // The snapshot is the whole answer of `environment show`, so it prints with no key around it.
-            if case .snapshot(let snapshot) = response { line(String(decoding: try encoder.encode(EnvironmentShown(snapshot: snapshot, sidebar: sidebar)), as: UTF8.self)) }
+            if case .snapshot(let snapshot) = response { line(String(decoding: try encoder.encode(EnvironmentShown(snapshot: snapshot, sidebar: sidebar, capabilities: EnvironmentShown.cliCapabilities)), as: UTF8.self)) }
             else { line(String(decoding: try encoder.encode(response), as: UTF8.self)) }
         case .text:
             switch response {
@@ -692,11 +662,7 @@ extension RequestInvocation {
 
     /// The directory `path` names. Its real path is where `cd -P` would reach it.
     static func directory(_ path: String) throws -> Folder {
-        var isDirectory: ObjCBool = false
-        let folder = Folder.local(path)
-        guard FileManager.default.fileExists(atPath: folder.real, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw CLIError("no directory '\(path)'", exitCode: 2)
-        }
+        guard let folder = Folder.existingDirectory(path) else { throw CLIError("no directory '\(path)'", exitCode: 2) }
         return folder
     }
 }
@@ -710,36 +676,11 @@ extension RequestReply {
     }
 }
 
-/// The `--json` form of `environment show`: the snapshot's own keys, `sidebar`, which of the two lists this Host's Config
-/// shows, and `capabilities`, the options that this command line takes and an older one does not. A caller sends
-/// `--request` only when the list has `request`, and reads `session-paths` with no Topic only when the list has
-/// `session-paths`. Both are of this command line and its Config, so they are not in `EnvironmentSnapshot`, which a
-/// Host Server sends to a Mac of any build.
-struct EnvironmentShown: Encodable {
-    static let capabilities = ["request", "session-paths"]
-
-    let snapshot: EnvironmentSnapshot
-    let sidebar: Sidebar
-
-    private enum CodingKeys: String, CodingKey { case capabilities, sidebar }
-
-    struct Sidebar: Encodable {
-        var topics = true
-        var sessions = true
-
-        init() {}
-        init(_ config: Config.Sidebar) {
-            topics = config.topics
-            sessions = config.sessions
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        try snapshot.encode(to: encoder)
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(sidebar, forKey: .sidebar)
-        try container.encode(Self.capabilities, forKey: .capabilities)
-    }
+extension EnvironmentShown {
+    /// The `capabilities` of `environment show --json`: the options that this command line takes and an older one
+    /// does not. A caller sends `--request` only when the list has `request`, and reads `session-paths` with no Topic
+    /// only when the list has `session-paths`. Both are of this command line, so a `snapshot` item has none.
+    static let cliCapabilities = ["request", "session-paths"]
 }
 
 /// The `--json` form of `topic show --conversations`.

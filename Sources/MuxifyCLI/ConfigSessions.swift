@@ -10,7 +10,7 @@ enum ConfigSessions {
         var config = try read(configFile)
         let cached = folders == nil && !config.sessionRoots.isEmpty
             ? cache?.output(for: SessionPathDiscovery.arguments(for: config.sessionRoots)) : nil
-        config.sessionPaths = sessionPaths(in: cached ?? SessionPathDiscovery.output(for: config.sessionRoots, within: folders), config)
+        config.sessionPaths = config.sessionPaths(inDiscovery: cached ?? SessionPathDiscovery.output(for: config.sessionRoots, within: folders))
         return config
     }
 
@@ -18,19 +18,9 @@ enum ConfigSessions {
     /// finds the SessionPaths and saves them, so only the first answer on a machine waits for the discovery.
     static func loadCached(_ configFile: URL, cache: SessionPathCache) throws -> (config: Config, fromCache: Bool) {
         var config = try read(configFile)
-        let arguments = SessionPathDiscovery.arguments(for: config.sessionRoots)
-        let cached = config.sessionRoots.isEmpty ? nil : cache.output(for: arguments)
-        config.sessionPaths = sessionPaths(in: cached ?? discover(config, into: cache), config)
-        return (config, cached != nil)
-    }
-
-    /// Finds every SessionPath of the Config and saves the output in `cache`. Nil when the Config has no
-    /// `sessions.paths` or the discovery fails, which saves nothing.
-    @discardableResult
-    static func discover(_ config: Config, into cache: SessionPathCache) -> String? {
-        guard !config.sessionRoots.isEmpty, let output = SessionPathDiscovery.output(for: config.sessionRoots) else { return nil }
-        cache.save(output, for: SessionPathDiscovery.arguments(for: config.sessionRoots))
-        return output
+        let found = cache.sessionPaths(of: config)
+        config.sessionPaths = found.sessionPaths
+        return (config, found.fromCache)
     }
 
     static func read(_ configFile: URL) throws -> Config {
@@ -43,9 +33,5 @@ enum ConfigSessions {
             FileHandle.standardError.write(Data("muxify: \(problem.description)\n".utf8))
         }
         return config
-    }
-
-    private static func sessionPaths(in output: String?, _ config: Config) -> [SessionPath] {
-        output.map { SessionPathDiscovery.sessionPaths(in: $0, roots: config.sessionRoots, aliases: config.sessionAliases) } ?? []
     }
 }

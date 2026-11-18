@@ -1,13 +1,80 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// The JSON of every frame of the Host Server protocol is a contract (ADR 0086's change rule): these strings are
 /// pinned, and every release's fixtures folder must still decode.
 final class ProtocolWireTests: XCTestCase {
     private static let build = "muxify 1a2b3c4 1763100000"
 
-    /// This release's messages, in the order of the newest fixtures folder.
+    private static let requestID = RequestID("3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c")!
+
+    /// This release's messages, in the order of the newest fixtures folder: the capabilities that the phone uses.
     private func thisReleasesFrames() throws -> [Data] {
+        let id = Self.requestID
+        let created = EnvironmentResponse.changed(TopicChange(topicID: id.rawValue, created: true))
+        func failed(_ failure: TopicFailure) -> ProtocolError { ProtocolError(.failed, failure.message, topicFailure: failure) }
+        return [
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, minProtocol: 1, build: Self.build, capabilities: HostProtocol.capabilities)),
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, build: Self.build, capabilities: HostProtocol.capabilities)),
+            try ProtocolLine.request(id: 1, HostRequest.environment(EnvironmentRequest(.create(title: "T"), request: id))),
+            try ProtocolLine.ok(id: 1, created),
+            try ProtocolLine.ok(id: 2, created),
+            ProtocolLine.error(id: 3, failed(RequestRefusal.clash(id, verb: "environment create").failure)),
+            ProtocolLine.error(id: 4, failed(RequestRefusal.inDoubt(id, phrase: EnvironmentCommand.moveCard(.up).actionName).failure)),
+            ProtocolLine.error(id: 5, failed(HostEnvironment.requestOnRead(.list))),
+            try ProtocolLine.request(id: 6, HostRequest.subscribe(.topic(TopicSubscription(id: "t")))),
+            try ProtocolLine.item(id: 6, try Self.topicItem()),
+            try ProtocolLine.item(id: 6, TopicDetailItem.none),
+            try ProtocolLine.request(id: 7, HostRequest.sessionPaths(SessionPathsRequest(.ranked(query: "gam")))),
+            try ProtocolLine.request(id: 8, HostRequest.sessionPaths(SessionPathsRequest(.topic(id.rawValue)))),
+            try ProtocolLine.request(id: 9, HostRequest.visitSessionPath(VisitSessionPath(folder: "/work/game/src"))),
+            try ProtocolLine.ok(id: 7, RankedSessionPathsAnswer(SessionPathRanking.rank(Self.sessionPathRows, query: "gam", visits: Self.visits,
+                                                                                         tiebreak: PaletteTiebreak.standard, home: "/home/me"))),
+            try ProtocolLine.ok(id: 8, TopicSessionPathsAnswer(TopicSessionPathChoices(topic: Self.topic, records: [Self.topic], windows: [],
+                                                                                       sessionPaths: Self.sessionPaths), visits: Self.visits)),
+            try ProtocolLine.ok(id: 9, ProtocolEmpty()),
+            try ProtocolLine.request(id: 10, HostRequest.browserTabs(BrowserTabsRequest(window: "@12"))),
+            try ProtocolLine.ok(id: 10, StoredBrowser(tabURLs: ["https://github.com/", "about:blank"], activeTab: 1).agentTabs(opening: ["example.com"])),
+            ProtocolLine.error(id: 11, ProtocolError(.failed, StoredBrowser.noWindow("@99"))),
+            try ProtocolLine.request(id: 12, HostRequest.subscribe(.snapshot)),
+            try ProtocolLine.item(id: 12, Self.snapshotItems.first),
+            try ProtocolLine.item(id: 12, Self.snapshotItems.later),
+        ]
+    }
+
+    /// A `topic` item: a Topic with one Session, one Window and a Pane where a Claude Agent waits, Unread.
+    private static func topicItem() throws -> TopicDetailItem {
+        let pane = try JSONDecoder().decode(PaneSummary.self, from: Data(#"""
+            {"active":true,"agent":{"conversation":null,"kind":"claude","status":"blocked","unread":true},"command":"claude","id":"%3",\#
+            "index":0,"label":"claude","path":"/work/game","window_id":"@2"}
+            """#.utf8))
+        let window = TopicDetail.Window(id: "@2", index: 1, name: "claude", active: true, mark: nil, panes: [pane])
+        let session = TopicDetail.Session(id: "$1", name: "game/ship", baseName: "game", directory: "/work/game", worktree: nil, windows: [window])
+        return .topic(TopicDetail(id: "t", label: "Ship", title: "Ship", slug: "ship", createdAt: "2026-11-16T10:00:00Z", state: .live,
+                                  tags: [], sessions: [session]))
+    }
+
+    private static let sessionPaths = [SessionPath(path: "/work/app", name: "app", alias: "App"), SessionPath(path: "/work/game", name: "game")]
+    private static var sessionPathRows: [SessionPathRow] { SessionPathRows.build(sessionPaths: sessionPaths, windows: [], records: []) }
+    private static let visits: [VisitKey: Date] = [.directory("/work/game"): Date(timeIntervalSince1970: 1_700_000_000)]
+    private static var topic: TopicRecord { TopicRecord(id: requestID.rawValue, title: "Ship") }
+
+    /// The first `snapshot` item of a Host with one Session and no Topic, and the one after a Topic took that Session.
+    private static var snapshotItems: (first: EnvironmentShown, later: EnvironmentShown) {
+        let window = TmuxWindow.fixture(id: "@1", sessionID: "$1", sessionName: "work", sessionActivity: 1763100000)
+        let tmux = TmuxSnapshot(windows: [window], clients: [], panes: [], serverRunning: true)
+        var record = TopicRecord(id: "t1", title: "Ship")
+        record.order = 1
+        var taken = window
+        taken.topicID = "t1"
+        let later = TmuxSnapshot(windows: [taken], clients: [], panes: [], serverRunning: true)
+        return (EnvironmentShown(contents: TopicContents(records: [], openPlaces: []), tmux: tmux, config: Config()),
+                EnvironmentShown(contents: TopicContents(records: [record], openPlaces: []), tmux: later, config: Config()))
+    }
+
+    /// The first server's messages, pinned in `1-first-server`.
+    private func firstServersFrames() throws -> [Data] {
         [
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, minProtocol: 1, build: Self.build)),
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, build: Self.build)),
@@ -217,6 +284,78 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertThrowsError(try ProtocolFrame.decode(Data(#"{"kind":"end"}"#.utf8)), "a line with no id is not a frame")
     }
 
+    func testTheRequestCapabilityIsPinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        XCTAssertEqual(HostProtocol.capabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs"])
+        let request = HostRequest.environment(EnvironmentRequest(.create(title: "T"), request: Self.requestID))
+        let line = text(try ProtocolLine.request(id: 1, request))
+        XCTAssertEqual(line, #"{"id":1,"kind":"request","request":{"environment":{"command":{"create":{"title":"T"}},"request":"3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c","version":2}}}"# + "\n")
+        XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(line.dropLast().utf8))).payload(HostRequest.self), request)
+        XCTAssertEqual(request.capability, .request)
+        XCTAssertNil(HostRequest.environment(EnvironmentRequest(.create(title: "T"))).capability, "an environment request with no id is protocol 1's base")
+        XCTAssertThrowsError(try JSONDecoder().decode(EnvironmentRequest.self, from: Data(#"{"version":2,"command":{"list":{}},"request":"x"}"#.utf8)),
+                             "a Request id is a UUID")
+
+        let same = PendingRequest(EnvironmentRequest(.create(title: "T"), request: Self.requestID))
+        XCTAssertEqual(same, PendingRequest(EnvironmentRequest(.create(title: "T"), request: Self.requestID)))
+        XCTAssertEqual(same?.verb, "environment create")
+        XCTAssertNotEqual(same?.arguments, PendingRequest(EnvironmentRequest(.create(title: "U"), request: Self.requestID))?.arguments)
+        XCTAssertNotEqual(same?.arguments, PendingRequest(EnvironmentRequest(.create(title: "T"), target: .topic(.id("t")), request: Self.requestID))?.arguments)
+        let panes: Set<PaneID> = [PaneID(rawValue: "%1")!, PaneID(rawValue: "%2")!, PaneID(rawValue: "%3")!]
+        XCTAssertEqual(PendingRequest(EnvironmentRequest(.killWindow, expectedPaneIDs: panes, request: Self.requestID))?.arguments,
+                       #"{"caller":null,"command":{"kill_window":{}},"expected_pane_ids":["%1","%2","%3"],"expected_session_ids":null,"target":null}"#,
+                       "a set of Panes is in one order")
+    }
+
+    func testTheTopicSubscriptionIsPinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        let request = HostRequest.subscribe(.topic(TopicSubscription(id: "t")))
+        let line = text(try ProtocolLine.request(id: 6, request))
+        XCTAssertEqual(line, #"{"id":6,"kind":"request","request":{"subscribe":{"topic":{"id":"t"}}}}"# + "\n")
+        XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(line.dropLast().utf8))).payload(HostRequest.self), request)
+        XCTAssertEqual(request.capability, .topicDetail)
+
+        let item = try Self.topicItem()
+        let itemLine = text(try ProtocolLine.item(id: 6, item))
+        XCTAssertEqual(itemLine, #"{"id":6,"item":{"topic":{"created_at":"2026-11-16T10:00:00Z","id":"t","label":"Ship","note":null,"#
+            + #""sessions":[{"base_name":"game","directory":"/work/game","id":"$1","name":"game/ship","windows":[{"active":true,"id":"@2","#
+            + #""index":1,"mark":null,"name":"claude","panes":[{"active":true,"agent":{"conversation":null,"kind":"claude","status":"blocked","#
+            + #""unread":true},"command":"claude","id":"%3","index":0,"label":"claude","path":"/work/game","window_id":"@2"}]}],"worktree":null}],"#
+            + #""slug":"ship","state":"live","tags":[],"title":"Ship"}},"kind":"item"}"# + "\n")
+        XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(itemLine.dropLast().utf8))).payload(TopicDetailItem.self), item)
+
+        let gone = text(try ProtocolLine.item(id: 6, TopicDetailItem.none))
+        XCTAssertEqual(gone, #"{"id":6,"item":null,"kind":"item"}"# + "\n")
+        XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(gone.dropLast().utf8))).payload(TopicDetailItem.self), .none)
+    }
+
+    /// Whether an `item` decodes as one of the protocol's items: a chunk, a `topic` subscription's detail or null, or a
+    /// `snapshot` item.
+    private static func decodesAsAnItem(_ frame: ProtocolFrame) -> Bool {
+        // `try?` would flatten a null item into a failure.
+        do { _ = try frame.payload(ProtocolChunk.self); return true } catch {}
+        do { _ = try frame.payload(TopicDetailItem.self); return true } catch {}
+        do { _ = try frame.payload(EnvironmentShown.self); return true } catch { return false }
+    }
+
+    func testTheSnapshotSubscriptionIsPinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        XCTAssertEqual(text(try ProtocolLine.request(id: 6, HostRequest.subscribe(.snapshot))),
+                       #"{"id":6,"kind":"request","request":{"subscribe":{"snapshot":{}}}}"# + "\n")
+        XCTAssertEqual(HostSubscription.snapshot.capability, .snapshot)
+        XCTAssertNil(HostSubscription.environment.capability)
+        let first = text(try ProtocolLine.item(id: 6, Self.snapshotItems.first))
+        XCTAssertFalse(first.contains("capabilities"), "a snapshot item carries no capabilities: \(first)")
+        XCTAssertTrue(first.contains(#""sidebar":{"sessions":true,"topics":true}"#), first)
+        for shown in [Self.snapshotItems.first, Self.snapshotItems.later] {
+            let line = try ProtocolLine.item(id: 6, shown)
+            XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(line.dropLast()))).payload(EnvironmentShown.self), shown)
+        }
+        var printed = Self.snapshotItems.first
+        printed.capabilities = ["request"]
+        XCTAssertTrue(text(try ProtocolLine.item(id: 6, printed)).contains(#""capabilities":["request"]"#), "the CLI adds its own")
+    }
+
     func testAnUnknownRequestCaseThrowsUnsupported() {
         XCTAssertThrowsError(try JSONDecoder().decode(HostRequest.self, from: Data(#"{"frob":{}}"#.utf8))) { error in
             XCTAssertEqual((error as? ProtocolError)?.code, .unsupported)
@@ -229,7 +368,7 @@ final class ProtocolWireTests: XCTestCase {
         let root = try XCTUnwrap(Bundle.module.url(forResource: "Protocol", withExtension: nil, subdirectory: "Fixtures"))
         let folders = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        XCTAssertEqual(folders.last?.lastPathComponent, "1-first-server")
+        XCTAssertEqual(folders.map(\.lastPathComponent).suffix(2), ["1-first-server", "2-phone"])
         for folder in folders {
             let text = try String(contentsOf: folder.appendingPathComponent("frames.jsonl"), encoding: .utf8)
             let lines = text.split(separator: "\n").map { Data($0.utf8) }
@@ -239,7 +378,7 @@ final class ProtocolWireTests: XCTestCase {
                 switch frame.kind {
                 case .hello: XCTAssertNoThrow(try frame.payload(ProtocolHello.self))
                 case .request: XCTAssertNoThrow(try frame.payload(HostRequest.self))
-                case .item: XCTAssertNoThrow(try frame.payload(ProtocolChunk.self))
+                case .item: XCTAssertTrue(Self.decodesAsAnItem(frame), String(decoding: line, as: UTF8.self))
                 case .end:
                     if case .failure(let error) = frame.outcome(ProtocolEmpty.self) { XCTAssertNotEqual(error.message, "", "\(error)") }
                 case .cancel: XCTAssertGreaterThan(frame.id, 0)
@@ -247,6 +386,9 @@ final class ProtocolWireTests: XCTestCase {
             }
             if folder == folders.last {
                 XCTAssertEqual(lines, try thisReleasesFrames().map { $0.dropLast() }, "the newest fixtures are this release's messages")
+            }
+            if folder.lastPathComponent == "1-first-server" {
+                XCTAssertEqual(lines, try firstServersFrames().map { $0.dropLast() }, "the first server's messages still encode as pinned")
             }
         }
     }

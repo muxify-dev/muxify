@@ -148,6 +148,278 @@ final class HostServerTests: XCTestCase {
         try await wait("the marker's Client was not pushed", seconds: 3) { recorder.server?.ownClient == attached }
     }
 
+    // MARK: - Capabilities and Request ids
+
+    func testTheServerDeclaresItsCapabilitiesAndAClientThatDeclaredNoneGetsNoneOfThem() async throws {
+        let client = try await connect()
+        let session = try await client.connect()
+        XCTAssertEqual(session.peerCapabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs"])
+        let recorder = subscribe(client)
+        try await wait("no first item") { !recorder.items.isEmpty }
+        let before = try windows(of: "work")
+
+        let request = EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"), request: RequestID(UUID().uuidString))
+        do {
+            _ = try await client.call(HostRequest.environment(request), as: EnvironmentResponse.self)
+            XCTFail("a Request id from a client that did not declare request must not run")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .unsupported)
+            XCTAssertTrue(error.message.contains("request"), error.message)
+        }
+        XCTAssertEqual(try windows(of: "work"), before, "the refused request changed the Host")
+
+        _ = try await client.call(HostRequest.environment(EnvironmentRequest(.create(title: "Plain"))), as: EnvironmentResponse.self)
+        try await wait("the created Topic's event did not come") { recorder.keys.contains { $0.hasPrefix("topic ") } }
+        let base = ["session ", "topic ", "open_places", "server"]
+        for key in recorder.keys {
+            XCTAssertTrue(base.contains { key.hasPrefix($0) }, "a client that declared no capability got the key \(key)")
+        }
+    }
+
+    func testAWriteWithARequestIDSentTwiceChangesTheHostOnceAndGivesTheFirstAnswerBothTimes() async throws {
+        let client = try await connect(capabilities: ["request"])
+        let before = try windows(of: "work")
+        let request = HostRequest.environment(EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"),
+                                                                 request: RequestID(UUID().uuidString)))
+
+        let first = try await client.call(request, as: EnvironmentResponse.self)
+        let second = try await client.call(request, as: EnvironmentResponse.self)
+
+        guard case .changed(let change) = first, let window = change.window else { return XCTFail("unexpected \(first)") }
+        XCTAssertEqual(second, first)
+        XCTAssertEqual(try windows(of: "work"), before + [window.rawValue])
+    }
+
+    func testAClashAReadAndARequestInDoubtEachFailWithAKindOfTheirOwn() async throws {
+        let client = try await connect(capabilities: ["request"])
+        let id = RequestID(UUID().uuidString)
+        _ = try await client.call(HostRequest.environment(EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"), request: id)),
+                                  as: EnvironmentResponse.self)
+        let before = try windows(of: "work")
+
+        let clash = try await failure(of: EnvironmentRequest(.create(title: "Other"), request: id), from: client)
+        XCTAssertEqual(clash?.kind, .requestClash)
+        XCTAssertEqual(clash?.phase, .nothingChanged)
+        XCTAssertEqual(try TopicStore(paths: paths).read().records.count, 0, "the clash made a Topic")
+
+        let read = try await failure(of: EnvironmentRequest(.list, request: RequestID(UUID().uuidString)), from: client)
+        XCTAssertEqual(read?.kind, .requestOnRead)
+
+        // A first send that wrote its records and never finished: the store writes the `started` row with them.
+        let started = EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"), request: RequestID(UUID().uuidString))
+        try TopicStore(paths: paths, request: PendingRequest(started)).write { try $0.create(TopicRecord(id: "t", title: "T")) }
+        let inDoubt = try await failure(of: started, from: client)
+        XCTAssertEqual(inDoubt?.kind, .requestInDoubt)
+        XCTAssertEqual(inDoubt?.phase, .recordSaved)
+        XCTAssertEqual(try windows(of: "work"), before, "a refused Request changed tmux")
+    }
+
+    func testTwoHostServersOnOneDatabaseApplyOneRequestIDOneTime() async throws {
+        let one = try await connect(context: HostServerContext(paths: paths, tmux: tmux, socketID: "one", temporaryDirectory: uploads.path),
+                                    capabilities: ["request"])
+        let two = try await connect(context: HostServerContext(paths: paths, tmux: tmux, socketID: "two", temporaryDirectory: uploads.path),
+                                    capabilities: ["request"])
+        let before = try windows(of: "work")
+        let request = HostRequest.environment(EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"),
+                                                                 request: RequestID(UUID().uuidString)))
+
+        async let first = one.call(request, as: EnvironmentResponse.self)
+        async let second = two.call(request, as: EnvironmentResponse.self)
+        let answers = try await [first, second]
+
+        XCTAssertEqual(answers[0], answers[1])
+        XCTAssertEqual(try windows(of: "work").count, before.count + 1)
+    }
+
+    // MARK: - The topic subscription
+
+    func testATopicSubscriptionPushesTheDetailFirstThenAfterASplitAndARenameAsShowAnswersIt() async throws {
+        try TopicStore(paths: paths).write { try $0.create(TopicRecord(id: "t", title: "Topic")) }
+        try tmux.run(["set-option", "-t", "=work:", "@muxify_topic", "t"])
+        let client = try await connect(capabilities: ["topic-detail"])
+        let recorder = subscribe(client, topic: "t")
+
+        try await wait("no first item") { !recorder.items.isEmpty }
+        let first = try XCTUnwrap(recorder.detail)
+        XCTAssertEqual(first.label, "Topic")
+        XCTAssertEqual(first.sessions.map(\.name), ["work"])
+        XCTAssertEqual(first.sessions.first?.windows.first?.panes.count, 1)
+        try await settle(recorder)
+        let show = HostRequest.environment(EnvironmentRequest(.show, target: .topic(.id("t"))))
+        let shown = try await client.call(show, as: EnvironmentResponse.self)
+        XCTAssertEqual(recorder.latest, .some(shown), "the item is not what show answers")
+
+        try tmux.run(["split-window", "-d", "-t", "=work:"])
+        try await wait("a split of the Topic's Session did not push its detail") { recorder.detail?.sessions.first?.windows.first?.panes.count == 2 }
+        try await settle(recorder)
+
+        _ = try await client.call(HostRequest.environment(EnvironmentRequest(.rename(title: "Renamed"), target: .topic(.id("t")))),
+                                  as: EnvironmentResponse.self)
+        // The server reads again before it answers, so the new detail came before the `end`.
+        try await wait("the rename's detail did not come before the answer", seconds: 0.15) { recorder.detail?.label == "Renamed" }
+        XCTAssertEqual(recorder.items.count, 1, "one change pushed more than one item")
+        let renamed = try await client.call(show, as: EnvironmentResponse.self)
+        XCTAssertEqual(recorder.latest, .some(renamed), "the item is not what show answers")
+    }
+
+    func testForgettingTheTopicPushesANullItem() async throws {
+        let client = try await connect(capabilities: ["topic-detail"])
+        let created = try await client.call(HostRequest.environment(EnvironmentRequest(.create(title: "Gone"))), as: EnvironmentResponse.self)
+        guard case .changed(let change) = created, let id = change.topicID else { return XCTFail("unexpected \(created)") }
+        let recorder = subscribe(client, topic: id)
+        try await wait("no first item") { recorder.detail?.label == "Gone" }
+
+        _ = try await client.call(HostRequest.environment(EnvironmentRequest(.forget(choices: [], worktrees: []), target: .topic(.id(id)))),
+                                  as: EnvironmentResponse.self)
+
+        try await wait("forgetting the Topic did not push null") { recorder.items.count == 2 }
+        XCTAssertEqual(recorder.items.last, .some(nil))
+    }
+
+    func testTwoTopicSubscriptionsOnOneChannelPushApartAndCancellingOneLeavesTheOther() async throws {
+        try TopicStore(paths: paths).write { transaction in
+            try transaction.create(TopicRecord(id: "a", title: "A"))
+            try transaction.create(TopicRecord(id: "b", title: "B"))
+        }
+        let client = try await connect(capabilities: ["topic-detail"])
+        let a = subscribe(client, topic: "a")
+        let b = subscribe(client, topic: "b")
+        try await wait("no first items") { a.detail?.label == "A" && b.detail?.label == "B" }
+        try await settle(a)
+        try await settle(b)
+
+        try await rename("a", to: "A2", on: client)
+        try await wait("the rename of a did not push a") { a.detail?.label == "A2" }
+        XCTAssertTrue(b.items.isEmpty, "the rename of a pushed b")
+
+        a.cancel()
+        try await wait("the cancel did not end the subscription") { a.ended }
+        try await rename("b", to: "B2", on: client)
+        try await wait("cancelling a ended b") { b.detail?.label == "B2" }
+    }
+
+    func testAClientThatDidNotDeclareTopicDetailGetsUnsupportedForATopicSubscription() async throws {
+        let client = try await connect()
+        let events = client.subscribe(HostRequest.subscribe(.topic(TopicSubscription(id: "t"))), as: TopicDetailItem.self)
+        do {
+            for try await item in events { XCTFail("an item came: \(String(describing: item))") }
+            XCTFail("the subscription ended ok")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .unsupported)
+            XCTAssertTrue(error.message.contains("topic-detail"), error.message)
+        }
+    }
+
+    private func rename(_ topic: String, to title: String, on client: ProtocolClient) async throws {
+        _ = try await client.call(HostRequest.environment(EnvironmentRequest(.rename(title: title), target: .topic(.id(topic)))),
+                                  as: EnvironmentResponse.self)
+    }
+
+    /// The `TopicFailure` that a request ends with; nil, with a failure of the test, when it ends otherwise.
+    private func failure(of request: EnvironmentRequest, from client: ProtocolClient) async throws -> TopicFailure? {
+        do {
+            let response = try await client.call(HostRequest.environment(request), as: EnvironmentResponse.self)
+            XCTFail("the request ended ok: \(response)")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+            XCTAssertEqual(error.message, error.topicFailure?.message)
+            return error.topicFailure
+        }
+        return nil
+    }
+
+    private func windows(of session: String) throws -> [String] {
+        try tmuxOutput(["list-windows", "-t", "=" + session + ":", "-F", "#{window_id}"]).split(separator: "\n").map(String.init)
+    }
+
+    // MARK: - The snapshot subscription
+
+    func testASnapshotSubscriberGetsTheViewWithItsSidebarFirstAndANewItemOnlyWhenAnotherProcessMakesATopic() async throws {
+        let client = try await connect(capabilities: ["snapshot"])
+        let recorder = subscribeSnapshot(client)
+
+        try await wait("no first snapshot item") { !recorder.items.isEmpty }
+        let first = try XCTUnwrap(recorder.items.first)
+        XCTAssertEqual(first.sidebar, EnvironmentShown.Sidebar(), "the Config's default sidebar")
+        XCTAssertNil(first.capabilities, "a snapshot item carries no capabilities")
+        XCTAssertEqual(first.snapshot.sessions.map(\.name), ["work"])
+        XCTAssertEqual(first.snapshot.cards, [])
+        // The shell names its Window as it starts, which is a change the view shows.
+        var seen = -1
+        try await wait("the snapshot subscription did not settle", seconds: 10) {
+            let now = recorder.items.count
+            defer { seen = now }
+            if now == seen { return true }
+            try await Task.sleep(nanoseconds: 1_200_000_000)
+            return false
+        }
+
+        // Several `data_version` ticks and the control Client's reads change nothing that the view shows.
+        let settled = recorder.items.count
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertEqual(recorder.items.count, settled, "an item came while nothing changed: \(recorder.items.dropFirst(settled))")
+
+        // As `topic new` makes it: another connection to the same muxify.db.
+        try TopicStore(paths: paths).write { try $0.create(TopicRecord(id: "made", title: "Made")) }
+        try await wait("a Topic made by another process pushed no snapshot item") { recorder.items.count > settled }
+        let ids = recorder.items.last?.snapshot.cards.compactMap { card -> String? in
+            if case .topic(let topic, _, _) = card { return topic.id }
+            return nil
+        }
+        XCTAssertEqual(ids, ["made"])
+    }
+
+    func testAConfigChangeOfTheSidebarPushesANewSnapshotItem() async throws {
+        let (context, home) = configContext()
+        let folder = home.appendingPathComponent(".config/muxify", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("config.yaml")
+        try "sidebar:\n  sessions: true\n".write(to: file, atomically: true, encoding: .utf8)
+        let client = try await connect(context: context, capabilities: ["snapshot"])
+        let recorder = subscribeSnapshot(client)
+        try await wait("no first snapshot item") { !recorder.items.isEmpty }
+        XCTAssertEqual(recorder.items.first?.sidebar.sessions, true)
+
+        try "sidebar:\n  sessions: false\n".write(to: file, atomically: true, encoding: .utf8)
+        try await wait("a change of the Config's sidebar pushed no snapshot item", seconds: 5) {
+            recorder.items.last?.sidebar.sessions == false
+        }
+        XCTAssertEqual(recorder.items.last?.sidebar.topics, true)
+        XCTAssertEqual(recorder.items.last?.snapshot.cards, recorder.items.first?.snapshot.cards, "only the sidebar changed")
+    }
+
+    func testAClientThatDidNotDeclareSnapshotGetsUnsupportedForTheSubscription() async throws {
+        let client = try await connect()
+        do {
+            for try await shown in client.subscribe(HostRequest.subscribe(.snapshot), as: EnvironmentShown.self) {
+                XCTFail("a client without snapshot got an item: \(shown)")
+            }
+            XCTFail("the subscription ended without an error")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .unsupported)
+            XCTAssertTrue(error.message.contains("snapshot"), error.message)
+        }
+    }
+
+    private func subscribeSnapshot(_ client: ProtocolClient) -> SnapshotRecorder {
+        let recorder = SnapshotRecorder()
+        let items = client.subscribe(HostRequest.subscribe(.snapshot), as: EnvironmentShown.self)
+        consumers.append(Task {
+            do {
+                for try await shown in items { recorder.add(shown) }
+            } catch {}
+        })
+        return recorder
+    }
+
+    private final class SnapshotRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [EnvironmentShown] = []
+
+        func add(_ shown: EnvironmentShown) { lock.lock(); log.append(shown); lock.unlock() }
+        var items: [EnvironmentShown] { lock.lock(); defer { lock.unlock() }; return log }
+    }
+
     // MARK: - View commands
 
     func testAViewCommandRunsOnTheServersTmux() async throws {
@@ -313,6 +585,105 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(deep, ["alpha", "beta", "beta/inner"].map { projects.appendingPathComponent($0).path })
     }
 
+    func testRankedSessionPathsATopicsRowsAndAVisitNeedTheCapabilityAndRootsAnswerWithoutIt() async throws {
+        let projects = directory.appendingPathComponent("projects")
+        try FileManager.default.createDirectory(at: projects.appendingPathComponent("alpha"), withIntermediateDirectories: true)
+        let client = try await connect()
+        let refused: [HostRequest] = [
+            .sessionPaths(SessionPathsRequest(.ranked(query: "alp"))),
+            .sessionPaths(SessionPathsRequest(.ranked(query: ""))),
+            .sessionPaths(try JSONDecoder().decode(SessionPathsRequest.self, from: Data("{}".utf8))),
+            .sessionPaths(SessionPathsRequest(.topic("t"))),
+            .visitSessionPath(VisitSessionPath(folder: projects.path)),
+        ]
+        for request in refused {
+            do {
+                _ = try await client.call(request, as: ProtocolEmpty.self)
+                XCTFail("\(request) ran for a client that did not declare ranked-session-paths")
+            } catch let error as ProtocolError {
+                XCTAssertEqual(error.code, .unsupported, "\(request)")
+                XCTAssertTrue(error.message.contains("ranked-session-paths"), error.message)
+            }
+        }
+        XCTAssertEqual(try VisitStore(paths: paths).times(), [:], "the refused visit was recorded")
+        let roots = [SessionPathRoot(path: projects.path, depth: 1)]
+        let answer = try await client.call(HostRequest.sessionPaths(SessionPathsRequest(roots: roots)), as: SessionPathsOutput.self)
+        XCTAssertEqual(SessionPathDiscovery.sessionPaths(in: try XCTUnwrap(answer.output), roots: roots, aliases: [:]).map(\.folder.path),
+                       [projects.appendingPathComponent("alpha").path])
+    }
+
+    func testSessionPathsRankByTheLastVisitAndTheQueryAndATopicGetsItsAddASessionRows() async throws {
+        let projects = directory.appendingPathComponent("projects")
+        for folder in ["alpha", "beta/src"] {
+            try FileManager.default.createDirectory(at: projects.appendingPathComponent(folder), withIntermediateDirectories: true)
+        }
+        let config = directory.appendingPathComponent("config.yml")
+        try "sessions:\n  paths:\n    - path: \(projects.path)/*\n".write(to: config, atomically: true, encoding: .utf8)
+        let hostPaths = MuxifyPaths(environment: ["XDG_STATE_HOME": directory.appendingPathComponent("state").path, "MUXIFY_CONFIG": config.path],
+                                    home: "/nonexistent")
+        let client = try await connect(context: HostServerContext(paths: hostPaths, tmux: tmux, temporaryDirectory: uploads.path),
+                                       capabilities: ["ranked-session-paths"])
+        func names(_ ask: SessionPathsRequest.Ask) async throws -> [String] {
+            try await client.call(HostRequest.sessionPaths(SessionPathsRequest(ask)), as: RankedSessionPathsAnswer.self).rows.map(\.name)
+        }
+
+        let unvisited = try await names(.ranked(query: ""))
+        XCTAssertEqual(unvisited, ["alpha", "beta"], "with no visit, the order of the Config")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: hostPaths.sessionPathCache(remote: nil).path), "the first answer saves the discovery")
+
+        _ = try await client.call(HostRequest.visitSessionPath(VisitSessionPath(folder: projects.appendingPathComponent("beta/src").path)),
+                                  as: ProtocolEmpty.self)
+        let beta = Folder.local(projects.appendingPathComponent("beta").path)
+        XCTAssertNotNil(try VisitStore(paths: hostPaths).times()[.directory(beta.real)], "the visit is to the Session Path that holds the folder")
+        let visited = try await names(.ranked(query: ""))
+        XCTAssertEqual(visited, ["beta", "alpha"], "the last visited first")
+        let matched = try await names(.ranked(query: "alp"))
+        XCTAssertEqual(matched, ["alpha"])
+
+        let created = try await client.call(HostRequest.environment(EnvironmentRequest(.create(title: "Ship"))), as: EnvironmentResponse.self)
+        guard case .changed(let change) = created, let id = change.topicID else { return XCTFail("unexpected \(created)") }
+        let topic = try await client.call(HostRequest.sessionPaths(SessionPathsRequest(.topic(id))), as: TopicSessionPathsAnswer.self)
+        XCTAssertEqual(topic.topic.id, id)
+        XCTAssertEqual(topic.rows.map(\.name), ["alpha", "beta"])
+        XCTAssertEqual(topic.rows.map(\.inThisTopic), [false, false])
+        XCTAssertEqual(topic.rows.map { $0.lastVisit != nil }, [false, true])
+    }
+
+    // MARK: - Browser Tabs
+
+    /// `browser_tabs` answers the Window's stored Tabs, then its queued opens, as the app will show them; an unknown
+    /// Window fails with the CLI's words, and a client that did not declare `browser-tabs` gets `unsupported`.
+    func testBrowserTabsAnswersTheWindowsStoredTabsOnlyToAClientThatDeclaredIt() async throws {
+        let window = try tmuxOutput(["display-message", "-p", "-t", "=work:", "#{window_id}"])
+        try tmux.run(["set-option", "-w", "-t", window, Tmux.tabsOption, "https://github.com/ about:blank"])
+        try tmux.run(["set-option", "-w", "-t", window, Tmux.activeTabOption, "1"])
+        try tmux.run(["set-option", "-w", "-t", window, Tmux.openOption, "example.com"])
+        let request = HostRequest.browserTabs(BrowserTabsRequest(window: window))
+
+        let plain = try await connect()
+        do {
+            _ = try await plain.call(request, as: [BrowserAgentTab].self)
+            XCTFail("browser_tabs from a client that did not declare browser-tabs must not be answered")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .unsupported)
+            XCTAssertTrue(error.message.contains("browser-tabs"), error.message)
+        }
+
+        let client = try await connect(capabilities: [HostCapability.browserTabs.rawValue])
+        let tabs = try await client.call(request, as: [BrowserAgentTab].self)
+        XCTAssertEqual(tabs.map(\.url), ["https://github.com/", "https://example.com"], "the blank active Tab loads the queued page")
+        XCTAssertEqual(tabs.map(\.active), [false, true])
+        XCTAssertEqual(try tmuxOutput(["show-options", "-wqv", "-t", window, Tmux.openOption]), "example.com", "a read leaves the queue for the app")
+
+        do {
+            _ = try await client.call(HostRequest.browserTabs(BrowserTabsRequest(window: "@999")), as: [BrowserAgentTab].self)
+            XCTFail("an unknown Window must not end ok")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+            XCTAssertEqual(error.message, "no tmux Window or Pane '@999'")
+        }
+    }
+
     // MARK: - Upload
 
     func testA200KiBUploadArrivesIntactInChunksOfAtMost64KiB() async throws {
@@ -398,6 +769,28 @@ final class HostServerTests: XCTestCase {
         func clear() { lock.lock(); log = []; lock.unlock() }
     }
 
+    private final class TopicRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [TopicDetailItem] = []
+        private var last: TopicDetailItem??
+        private var done = false
+        var task: Task<Void, Never>?
+
+        func add(_ item: TopicDetailItem) { lock.lock(); log.append(item); last = item; lock.unlock() }
+        func end() { lock.lock(); done = true; lock.unlock() }
+        var items: [TopicDetailItem] { lock.lock(); defer { lock.unlock() }; return log }
+        var ended: Bool { lock.lock(); defer { lock.unlock() }; return done }
+        /// The latest item, also after `clear`.
+        var latest: TopicDetailItem? { lock.lock(); defer { lock.unlock() }; return last ?? nil }
+        /// The detail of the latest item, nil before the first and when it is null.
+        var detail: TopicDetail? {
+            guard case .topic(let detail)?? = latest else { return nil }
+            return detail
+        }
+        func clear() { lock.lock(); log = []; lock.unlock() }
+        func cancel() { task?.cancel() }
+    }
+
     private final class ConfigRecorder: @unchecked Sendable {
         private let lock = NSLock()
         private var log: [HostConfig] = []
@@ -406,14 +799,14 @@ final class HostServerTests: XCTestCase {
         var items: [HostConfig] { lock.lock(); defer { lock.unlock() }; return log }
     }
 
-    private func connect(nonce: String? = nil, context: HostServerContext? = nil) async throws -> ProtocolClient {
+    private func connect(nonce: String? = nil, context: HostServerContext? = nil, capabilities: [String] = []) async throws -> ProtocolClient {
         let up = Pipe(), down = Pipe()
         let server = HostServer.make(input: up.fileHandleForReading, output: down.fileHandleForWriting, build: "server",
                                      context: context ?? HostServerContext(paths: paths, tmux: tmux, temporaryDirectory: uploads.path))
         server.start()
         servers.append(server)
         let client = ProtocolClient(input: down.fileHandleForReading, output: up.fileHandleForWriting, build: "client",
-                                    helloTimeout: 5, nonce: nonce)
+                                    capabilities: capabilities, helloTimeout: 5, nonce: nonce)
         clients.append(client)
         try await client.connect()
         return client
@@ -428,6 +821,33 @@ final class HostServerTests: XCTestCase {
             } catch {}
         })
         return recorder
+    }
+
+    private func subscribe(_ client: ProtocolClient, topic: String) -> TopicRecorder {
+        let recorder = TopicRecorder()
+        let events = client.subscribe(HostRequest.subscribe(.topic(TopicSubscription(id: topic))), as: TopicDetailItem.self)
+        let task = Task {
+            do {
+                for try await item in events { recorder.add(item) }
+            } catch {}
+            recorder.end()
+        }
+        recorder.task = task
+        consumers.append(task)
+        return recorder
+    }
+
+    /// Waits until no item has come for a moment, and forgets what came before.
+    private func settle(_ recorder: TopicRecorder) async throws {
+        var seen = -1
+        try await wait("the subscription did not settle", seconds: 10) {
+            let now = recorder.items.count
+            defer { seen = now }
+            if now == seen { return true }
+            try await Task.sleep(nanoseconds: 1_200_000_000)
+            return false
+        }
+        recorder.clear()
     }
 
     /// Waits until no item has come for a moment, and forgets what came before.
