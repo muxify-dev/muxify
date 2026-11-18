@@ -35,8 +35,7 @@ final class TmuxEvents {
     /// Call on the main thread.
     func start(invocation: ([String]) throws -> CommandInvocation) {
         guard !isRunning, Date() >= nextStart,
-              let invocation = try? invocation(["-C", "new-session", "-A", "-s", Tmux.watchSessionName,
-                                                "-f", "no-output,ignore-size", "cat"])
+              let invocation = try? invocation(Tmux.watchClientArguments)
         else { return }
         stop()
         let token = UUID()

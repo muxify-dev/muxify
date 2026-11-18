@@ -343,8 +343,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         environment["TMUX"] = nil
         environment["TMUX_PANE"] = nil
         do {
-            let invocation = try server.invocation(["-C", "new-session", "-A", "-s", Tmux.watchSessionName,
-                                                    "-f", "no-output,ignore-size", "cat"])
+            let invocation = try server.invocation(Tmux.watchClientArguments)
             let client = try startControlClient(invocation, environment, { [weak self] lines in
                 if lines.contains(where: Self.isChange) { self?.heardChange() }
             }, { [weak self] in

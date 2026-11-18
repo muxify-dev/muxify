@@ -206,8 +206,7 @@ final class RemoteTmuxTests: XCTestCase {
         // The listener stays attached to the Watch Session, so it ends itself once the bootstrap clears the marker.
         // Over real SSH the master, and so the Terminal, waits for it.
         let listener = Process()
-        let listenerCommand = second.command(["-C", "new-session", "-A", "-s", Tmux.watchSessionName,
-                                              "-f", "no-output,ignore-size", "cat"])
+        let listenerCommand = second.command(Tmux.watchClientArguments)
         listener.executableURL = URL(fileURLWithPath: listenerCommand.executable)
         listener.arguments = listenerCommand.arguments
         listener.environment = host.environment
