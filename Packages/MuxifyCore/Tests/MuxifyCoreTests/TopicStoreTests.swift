@@ -215,7 +215,7 @@ final class TopicStoreTests: XCTestCase {
         try store.write { try $0.pin("e", true) }
         XCTAssertEqual(try shown(store), ["c", "e", "a", "b", "d"], "a new Pin goes below the Topics already Pinned")
         try store.write { try $0.pin("c", false) }
-        XCTAssertEqual(try shown(store), ["e", "a", "b", "c", "d"], "Unpin puts the Topic at the top of the Bench, where a new Topic goes")
+        XCTAssertEqual(try shown(store), ["e", "a", "b", "c", "d"], "Unpin puts the Topic at the top of the Bench, where a returning Topic goes")
         XCTAssertEqual(try records(store).filter(\.isPinned).map(\.id), ["e"])
         XCTAssertThrowsError(try store.write { try $0.pin("missing", true) })
     }

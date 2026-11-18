@@ -118,8 +118,8 @@ public struct TopicTransaction {
         records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) + openPlaces.map(TopicListEntry.openPlace)
     }
 
-    /// Adds a new Topic at the top of the Bench, or in the place of the Lock of `lockedSessionID`, which then ends. That
-    /// Lock is a Guest, so the Topic gets the Guest mark. An id that a record has is taken. The plan that makes the Topic ends the Lock in tmux, so the result leaves it out.
+    /// Adds a new Topic as a Guest: at the end of the Guests, or in the place of the Lock of `lockedSessionID`, which then
+    /// ends. A Pinned record goes last among the Pinned Topics. An id that a record has is taken. The plan that makes the Topic ends the Lock in tmux, so the result leaves it out.
     @discardableResult
     public mutating func create(_ record: TopicRecord, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLockChange] {
         try TopicStore.check(record)
@@ -132,7 +132,8 @@ public struct TopicTransaction {
             placed.isGuest = true
             return put(TopicListChange([.topic(placed)], endedLocks: [lock.sessionID])).filter { $0 != .end(sessionID: lock.sessionID) }
         }
-        return put(TopicOrder.inserting(record, inPlay: inPlay, in: entries))
+        if record.isPinned { return put(TopicOrder.inserting(record, inPlay: inPlay, in: entries)) }
+        return put(TopicOrder.insertingGuest(record, inPlay: inPlay, in: entries))
     }
 
     public mutating func update(_ id: String, _ mutate: (inout TopicRecord) throws -> Void) throws {

@@ -850,7 +850,7 @@ private struct ConfigReader {
         for (name, key, value) in entries(of: node, "topics") {
             switch name {
             case "insert_position":
-                problem(at: key, "topics.insert_position is gone: a new or returning Topic always goes to the top of the Bench")
+                problem(at: key, "topics.insert_position is gone: a new Topic is a Guest, and a returning Topic goes to the top of the Bench")
             case "session_order":
                 guard value.tag == Yams.Tag(.str), let order = value.string.flatMap(SessionOrder.init(rawValue:)) else {
                     problem(at: value, "topics.session_order: expected oldest_first or newest_first")

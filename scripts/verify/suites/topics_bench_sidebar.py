@@ -203,15 +203,16 @@ class TopicsBenchSidebar(TopicsSidebar):
             self.s.act(command, LINE)
         self.s.wait_rows(lambda rs: self.line(rs) == 'Hide Bench', 'the Bench did not show')
 
-    def test_a_new_topic_goes_to_the_top_of_the_bench(self):
+    def test_a_new_topic_is_the_last_guest(self):
         s = self.s
         self.bench_topics('bench-new')
         s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.show_bench()
         key = 'topic-' + self.create_topic('Bench new')['id']
-        expected = ['topic-bench-new-a', LINE, key, 'topic-bench-new-b', 'topic-bench-new-c']
+        expected = ['topic-bench-new-a', GUESTS, key, LINE, 'topic-bench-new-b', 'topic-bench-new-c']
         shown = lambda rs: [k for k in s.ids(rs) if k in expected]
-        s.wait_rows(lambda rs: shown(rs) == expected, 'the new Topic is not first on the Bench: %s' % shown(s.rows()))
+        s.wait_rows(lambda rs: shown(rs) == expected and 'Guest' in s.row(key, rs).get('accessibilityValue', ''),
+                    lambda: 'the new Topic is not a Guest above the Bench line: %s' % shown(s.rows()))
 
     def test_settling_a_card_in_play_leaves_an_open_place_that_its_hint_key_fills_from_the_bench(self):
         s = self.s

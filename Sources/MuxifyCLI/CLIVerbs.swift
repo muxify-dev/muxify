@@ -492,8 +492,10 @@ enum CLIVerbs {
         },
         topicVerb(.topicNew, synopsis: "\"title\" [--tag <tag>]... [--json]", options: [.value("--tag")], removed: removedTopicNew,
                   help: """
-                  Makes an Empty Topic with this title, as New Topic does. It starts no Session,
-                  so it also works outside tmux. Add a Session with topic add-session.
+                  Makes an Empty Topic with this title, as New Topic does. It is a Guest: its card
+                  goes to the end of the Guests. Move it In Play or to the Bench with topic move,
+                  topic fill-place or topic bench. It starts no Session, so it also works outside
+                  tmux. Add a Session with topic add-session.
                     --tag <tag>     give the Topic this Tag; give --tag again for more Tags
                   """) { parsed in
             guard parsed.operands.count == 1, !parsed.operands[0].allSatisfy(\.isWhitespace) else { throw CLIError.usage }
