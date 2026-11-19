@@ -910,6 +910,35 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         XCTAssertTrue(try server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
     }
 
+    func testANewTopicFromTheLastWindowOrPaneOfAGuestSessionTakesItsPlace() throws {
+        for name in ["notes", "chores", "misc"] { try server.run(["new-session", "-d", "-s", name, "-c", sessionPath.folder.path]) }
+        try regularTopic("First", using: service())
+        for name in ["notes", "chores", "misc"] { _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName(name)))) }
+        XCTAssertEqual(try topicList(), ["First", "lock:notes", "lock:chores", "lock:misc"])
+
+        let window = try XCTUnwrap(WindowID(rawValue: try server.snapshot().windows.first { $0.sessionName == "chores" }!.id))
+        _ = try change(service().handle(EnvironmentRequest(.move(to: .newTopic(title: "Window")), target: .window(window))))
+        XCTAssertEqual(try topicList(), ["First", "lock:notes", "Window", "lock:misc"], "the new Topic takes the place of the ended Guest Session")
+        XCTAssertEqual(try guests(), ["Window"])
+
+        let pane = try XCTUnwrap(PaneID(rawValue: try server.run(["display", "-p", "-t", "notes", "#{pane_id}"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)))
+        _ = try change(service().handle(EnvironmentRequest(.move(to: .newTopic(title: "Pane")), target: .pane(pane))))
+        XCTAssertEqual(try topicList(), ["First", "Pane", "Window", "lock:misc"], "the last Pane takes the place too")
+        XCTAssertEqual(try guests(), ["Window", "Pane"])
+    }
+
+    func testANewTopicFromOneOfTwoWindowsOfAGuestSessionIsTheLastGuest() throws {
+        for name in ["notes", "chores", "misc"] { try server.run(["new-session", "-d", "-s", name, "-c", sessionPath.folder.path]) }
+        try server.run(["new-window", "-d", "-t", "chores:"])
+        try regularTopic("First", using: service())
+        for name in ["notes", "chores", "misc"] { _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName(name)))) }
+
+        let window = try XCTUnwrap(WindowID(rawValue: try server.snapshot().windows.first { $0.sessionName == "chores" }!.id))
+        _ = try change(service().handle(EnvironmentRequest(.move(to: .newTopic(title: "Window")), target: .window(window))))
+        XCTAssertEqual(try topicList(), ["First", "lock:notes", "lock:chores", "lock:misc", "Window"], "the Guest Session stays, so it keeps its place")
+    }
+
     func testAReturningTopicGoesAfterAGuestSessionAndSavesNormalizedLockRanks() throws {
         let one = service(inPlay: 1)
         try regularTopic("First", using: one)

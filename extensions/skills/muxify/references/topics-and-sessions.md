@@ -18,6 +18,7 @@ A Topic is one thing the user wants to get done. It groups Sessions, and its Ses
 - `muxify window new -- <command>` makes a Window in your Session and runs the command there. Use it for a process that must keep running, such as a dev server or a watcher, so the user can see it and stop it. It prints the new Window's id.
 - `muxify topic add-session <dir>` makes a Session in another folder for this Topic. `--worktree` makes a new Worktree on a new branch named from the Topic, so your work does not change the user's checkout.
 - `muxify window move` moves a Window to another Session or Topic.
+- `muxify session move --topic <id|label>` moves a whole Session into an open Topic. `muxify session move --new-topic ["title"]` moves it into a new Topic, which is a Guest. A new Topic from a Guest Session takes the Guest Session's place. `--session <name|id>` names the Session, else your own Session moves.
 
 ## Worktrees outside a Topic
 

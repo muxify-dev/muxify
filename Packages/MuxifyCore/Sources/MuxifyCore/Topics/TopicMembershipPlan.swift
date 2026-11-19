@@ -66,7 +66,7 @@ public struct TopicMembershipPlan: Sendable {
             commands.append(.tmux(["set-option", "-t", window.sessionID, "@muxify_session_id", window.sessionRecordID]))
             if let destination { commands.append(.tmux(["set-option", "-t", window.sessionID, "@muxify_topic", destination.id])) }
             else { commands.append(.tmux(["set-option", "-u", "-t", window.sessionID, "@muxify_topic"])) }
-            if window.lockOrder != nil { commands.append(.tmux(SessionLock.unsetOption(window.sessionID))); endedLockOf = window.sessionID }
+            if window.lockOrder != nil { commands.append(.tmux(SessionLock.unsetOption(window.sessionID))) }
             var fields = sourceTopic?.session(of: window)?.object ?? [:]
             fields["id"] = .string(window.sessionRecordID)
             fields["name"] = .string(name)
@@ -107,7 +107,11 @@ public struct TopicMembershipPlan: Sendable {
                 commands.append(.tmux(["switch-client", "-c", clientTTY, "-t", moved]))
             }
         }
-        if Self.ends(source, windows: windows), let sourceTopic,
+        let ends = Self.ends(source, windows: windows)
+        // A new Topic takes the place of the Guest Session that the move ends. A Window or Pane source needs no unset
+        // of the Lock: tmux ends the Session with its last Window, and the Lock with it.
+        if ends, window.lockOrder != nil { endedLockOf = window.sessionID }
+        if ends, let sourceTopic,
            let left = sourceTopic.forgetting(window) {
             if left.id == saved?.id { saved = saved?.forgetting(window) ?? saved }
             else { leftTopic = left }

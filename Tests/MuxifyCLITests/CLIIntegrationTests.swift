@@ -767,6 +767,39 @@ final class CLIWindowAndSessionIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(try sandbox.session(of: caller), "main", "the caller Pane stays")
     }
 
+    func testSessionMoveTakesAWholeSessionIntoANewTopicOrAnOpenTopic() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        try sandbox.tmux(["new-session", "-d", "-s", "notes", "-c", sandbox.game.path])
+        try sandbox.tmux(["new-window", "-d", "-t", "=notes:", "-c", sandbox.game.path])
+        let guest = try await run(cli, arguments: ["topic", "make-guest", "--session", "notes"], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(guest.status, 0, guest.output)
+        let pane = try sandbox.pane(of: "notes")
+
+        let created = try await run(cli, arguments: ["session", "move", "--new-topic", "Notes work", "--session", "notes"],
+                                    environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(created.status, 0, created.output)
+        let record = try XCTUnwrap(sandbox.records().only)
+        XCTAssertEqual(created.stdout, record.id + "\n")
+        XCTAssertEqual(record.title, "Notes work")
+        XCTAssertTrue(record.isGuest, "a new Topic is a Guest")
+        let session = try sandbox.session(of: pane)
+        XCTAssertEqual(try sandbox.topicOption(of: session), record.id)
+        XCTAssertEqual(try sandbox.tmux(["list-windows", "-t", "=" + session + ":", "-F", "#{window_id}"]).split(separator: "\n").count, 2,
+                       "both Windows move with the Session")
+        XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "=" + session + ":", SessionLock.option]).trimmingCharacters(in: .whitespacesAndNewlines), "",
+                       "the Lock ends")
+
+        let id = try await newTopic("Ship", in: sandbox.tools, sandbox: sandbox)
+        let moved = try await run(cli, arguments: ["session", "move", "--topic", id], environment: sandbox.cliEnvironment(pane: pane))
+        XCTAssertEqual(moved.status, 0, moved.output)
+        XCTAssertEqual(try sandbox.topicOption(of: try sandbox.session(of: pane)), id, "the caller Pane's whole Session moves")
+
+        let missing = try await run(cli, arguments: ["session", "move", "--new-topic", "--session", "gone"], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(missing.status, 1, missing.output)
+        XCTAssertEqual(missing.stderr, "muxify: No tmux Session has the name gone.\n")
+    }
+
     func testTopicStatusGivesTheGitStatusOfEachSessionAndNullForAFolderInNoRepository() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
