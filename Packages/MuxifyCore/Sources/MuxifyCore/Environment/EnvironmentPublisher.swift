@@ -16,6 +16,9 @@ import Foundation
 /// The Host Server's publisher also reads its Mac's Client marker, so its `server` event names that Mac's own Client,
 /// and writes the Sessions that each read gives the Topics onto their records, so the Mac writes no record itself.
 ///
+/// In the app it also writes the Colour Reports of ADR 0095 through its control Client: to each Session that one of
+/// Muxify's Clients shows, before each switch that Muxify starts, and before Muxify types into a Session that it made.
+///
 /// It installs no tmux hook. It keeps the Watch Session's rule: with no user Session left it kills the Watch Session,
 /// so the server can exit, and it joins or makes it again once a user Session appears.
 ///
@@ -56,12 +59,17 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     private var ownClient: ViewCommandExecutor.Client?
     private var rememberedServerID: String?
     private var rememberedWindows: [TmuxWindow] = []
+    private var colourReports = ColourReportState()
+    /// The next read reports to every shown Session, not only to those that it newly finds shown.
+    private var reportsAllSessions = true
+    private let listener = ListenerCommands()
 
     private let lock = NSLock()
     // `lock` guards these.
     private var running = false
     private var readQueued = false
     private var news: ((News) -> Void)?
+    private var colours: TerminalColours?
 
     /// The tick of the `data_version` check, and how many ticks make the whole read and, without a control Client,
     /// the look for a server to attach to.
@@ -70,6 +78,8 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     static let ticksPerAttachCheck = 4
     static let notificationDelay: TimeInterval = 0.05
     static let readTimeout: TimeInterval = 5
+    /// How long a Colour Report before a switch or a typed command waits for tmux, at most.
+    static let colourReportTimeout: TimeInterval = 1
 
     /// `startControlClient` starts the control Client; the app passes one on a pty. Events go to the handler on
     /// `delivery`. `clientMarker` names the server option of the subscriber's Client marker, whose Client the
@@ -192,6 +202,73 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         }
     }
 
+    // MARK: - Colour Reports (ADR 0095)
+
+    /// Sets the colours of Muxify's Terminal, and reports them to every Pane of each Session that Muxify's Clients
+    /// show. Nil reports nothing, as on a Host. The App Window calls it when it becomes key and when Ghostty's colours
+    /// change, so the screen in use writes the report last.
+    public func reportColours(_ colours: TerminalColours?) {
+        lock.lock()
+        self.colours = colours
+        lock.unlock()
+        queue.async { [self] in
+            reportsAllSessions = true
+            if handler != nil { readSessions() }
+        }
+    }
+
+    /// Runs before tmux runs `arguments`: reports the colours to every Pane of the Session that each `switch-client`
+    /// in them goes to, and returns once tmux has the reports. So a program there that asks at once on the switch's
+    /// notice gets Muxify's answer, not the report that another screen left.
+    public func reportColours(beforeRunning arguments: [String]) {
+        for target in ColourReport.switchTargets(in: arguments) {
+            reportColours(toPanesIn: ["list-panes", "-s", "-t", target, "-F", "#{pane_id}"])
+        }
+    }
+
+    /// Runs before Muxify types a command into `target`, a Pane of a Session that it just made: reports the colours
+    /// to the Pane, and returns once tmux has the report. No Client shows such a Session yet, so tmux has no other
+    /// answer for a program that starts there.
+    public func reportColours(beforeTypingInto target: String) {
+        reportColours(toPanesIn: ["display-message", "-p", "-t", target, "#{pane_id}"])
+    }
+
+    /// `listing` prints one Pane id on each line. Off `queue`, so a read in progress does not hold the report up.
+    private func reportColours(toPanesIn listing: [String]) {
+        lock.lock()
+        let colours = self.colours
+        lock.unlock()
+        guard let colours, let panes = try? run(listing) else { return }
+        // A Session that Muxify just made can be the first user Session, before the control Client joins the Watch
+        // Session.
+        queue.async { [self] in
+            if client == nil, handler != nil { attach() }
+        }
+        guard listener.waitForClient(timeout: Self.colourReportTimeout) else {
+            return report("colour report: no control Client")
+        }
+        let lines = ColourReport.commands(panes: panes.split(separator: "\n").map(String.init), colours: colours)
+        if !listener.sendAndWait(lines, timeout: Self.colourReportTimeout) {
+            report("colour report: tmux did not answer within \(Self.colourReportTimeout) s")
+        }
+    }
+
+    /// Reports the colours to the Sessions that Muxify's Clients show in `snapshot` and that the last read did not
+    /// find shown, or to all of them after `reportColours(_:)` or a new control Client.
+    private func reportShownSessions(_ snapshot: TmuxSnapshot) {
+        lock.lock()
+        let colours = self.colours
+        lock.unlock()
+        guard let colours, snapshot.serverRunning else { return }
+        let options = snapshot.clients.contains { !$0.isControl } ? (try? run(["show-options", "-s"])) ?? "" : ""
+        let shown = ColourReport.shownSessions(clients: snapshot.clients, serverOptions: options)
+        let sessions = colourReports.sessionsToReport(shown: shown, all: reportsAllSessions)
+        let windows = Set(snapshot.windows.filter { sessions.contains($0.sessionID) }.map(\.id))
+        let panes = snapshot.panes.filter { windows.contains($0.windowID) }.map(\.id)
+        // Without a control Client the reports are lost, so the next read sends them all.
+        reportsAllSessions = !listener.send(ColourReport.commands(panes: panes, colours: colours))
+    }
+
     // MARK: - Reads, on `queue`
 
     private func readWhole(then done: (() -> Void)? = nil) {
@@ -232,6 +309,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         sentSessions = true
         sent.apply(changes)
         keepWatchSession(snapshot)
+        reportShownSessions(snapshot)
         return changes + (remember(snapshot) ? topicChanges() : [])
     }
 
@@ -345,13 +423,17 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         do {
             let invocation = try server.invocation(["-C", "new-session", "-A", "-s", Tmux.watchSessionName,
                                                     "-f", "no-output,ignore-size", "cat"])
+            let listener = self.listener
             let client = try startControlClient(invocation, environment, { [weak self] lines in
+                listener.heard(lines, number: number)
                 if lines.contains(where: Self.isChange) { self?.heardChange() }
             }, { [weak self] in
                 self?.queue.async { self?.clientExited(number) }
             })
             self.client = client
-            client.send("refresh-client -B '\(Self.subscriptionName)::\(Self.subscriptionFormat)'")
+            listener.attach(client, number: number)
+            reportsAllSessions = true
+            listener.send(["refresh-client -B '\(Self.subscriptionName)::\(Self.subscriptionFormat)'"])
         } catch {
             report("tmux control client failed to start: \(error)")
             nextAttach = Date().addingTimeInterval(1)
@@ -360,12 +442,14 @@ public final class EnvironmentPublisher: @unchecked Sendable {
 
     private func detach() {
         clientNumber += 1
+        listener.detach()
         client?.stop()
         client = nil
     }
 
     private func clientExited(_ number: Int) {
         guard number == clientNumber else { return }
+        listener.detach()
         client = nil
         // A Client that ends on its own (Watch Session killed, server gone) waits a moment before the next start.
         nextAttach = Date().addingTimeInterval(1)

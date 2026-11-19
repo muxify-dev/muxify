@@ -1491,6 +1491,7 @@ final class WorkspaceStore {
     /// Every event belongs to the link that sent it, never to one that replaced it.
     private func subscribeToLink() {
         let current = generation
+        reportColours()
         linkSubscription = link.subscribe { [weak self] event in
             guard let self, self.generation == current else { return }
             self.receive(event)
@@ -3351,6 +3352,13 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
 
     func ghosttyThemeChanged(_ theme: TerminalTheme) {
         self.theme = theme
+        reportColours()
+    }
+
+    /// Tells the link the Terminal's colours, so programs in the Sessions that Muxify shows get them as the answer to a
+    /// colour question (ADR 0095). The App Window calls it again when it becomes key: the screen in use writes last.
+    func reportColours() {
+        link.reportColours(theme?.colours)
     }
 
     func ghosttyReloadConfig() {
