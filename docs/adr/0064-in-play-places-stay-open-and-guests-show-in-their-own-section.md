@@ -1,5 +1,7 @@
 # In Play places stay open, and the Guests show in their own section
 
+> **Partly superseded by [ADR-0095](0095-picking-an-open-place-goes-to-the-open-place-page.md):** a click on an Open Place goes to its Open Place page, not to a choose-a-row step.
+
 > **Partly superseded by [ADR-0094](0094-a-new-topic-is-a-guest.md):** a new Topic is a Guest, at the end of the Guests.
 
 > **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** `topics.in_play` is always set. `muxify topic bench --session` ends a Guest Session, and `muxify session unlock` is gone.

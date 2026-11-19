@@ -214,9 +214,35 @@ class TopicsBenchSidebar(TopicsSidebar):
         s.wait_rows(lambda rs: shown(rs) == expected and 'Guest' in s.row(key, rs).get('accessibilityValue', ''),
                     lambda: 'the new Topic is not a Guest above the Bench line: %s' % shown(s.rows()))
 
-    def test_settling_a_card_in_play_leaves_an_open_place_that_its_hint_key_fills_from_the_bench(self):
+    def card_key(self, key):
+        """The Select Card key of the card whose Hint is `key`, for the `quick-switch-input` action. Each key goes
+        through HintVerification, as `quick_switch_hints` presses keys, so the check takes no focus."""
         s = self.s
-        windows = self.bench_topics('bench-settle')
+        rs = s.wait_rows(lambda rs: s.has(key, rs), 'the card %s shows no Hint' % key)
+        number = s.row(key, rs).get('accessibilityValue')
+        self.assertRegex(number or '', r'^[1-9]$', 'the Hint of %s is not a card number' % key)
+        return 'Press ⌃' + number
+
+    def open_place_page(self, prefix, guests=()):
+        """Topics <prefix>-a, -b and -c, with -a and then an Open Place In Play, and the Location on that Open Place's
+        page. `guests` are Guest Topics <prefix>-<name> after the Open Place."""
+        s = self.s
+        windows = self.bench_topics(prefix, in_play=2)
+        s.show(windows['topic-%s-a' % prefix])
+        for index, name in enumerate(guests):
+            self.write_topic('%s-%s' % (prefix, name), '%s-%s' % (prefix.capitalize(), name), order=0.6 + index / 10,
+                             guest=True)
+        self.store.set_open_places([{'id': prefix + '-place', 'order': 0.5}])
+        s.act('action', 'quick-switch-input', self.card_key('hint-open-place-2'))
+        s.wait_rows(lambda rs: s.has('open-place-page', rs) and s.row('open-place-2', rs).get('accessibilityValue') == 'selected',
+                    lambda: 'the Open Place key did not show its page as the Location: %s' % s.ids())
+
+    def search_field_has_focus(self):
+        return any(name.endswith('FieldEditor') for name in self.s.driver('responder')['responders'])
+
+    def test_settling_a_card_in_play_leaves_an_open_place_whose_page_its_hint_key_shows_and_return_fills(self):
+        s = self.s
+        windows = self.bench_topics('bench-settle', in_play=2)
         s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.hide_bench()
         s.show(windows['topic-bench-settle-a'])
@@ -240,20 +266,106 @@ class TopicsBenchSidebar(TopicsSidebar):
         wait(settled, 'Settle did not close the palette')
         wait(lambda: self.layout('bench-settle') == '_ b c',
              'Settle did not leave an Open Place, or a Benched card moved up: %s' % self.layout('bench-settle'))
-        s.wait_rows(lambda rs: s.has('open-place-1', rs), 'the Sidebar shows no Open Place')
 
-        # The Open Place keeps its card number, and the Hint shows it. Its Select Card key goes through HintVerification,
-        # as `quick_switch_hints` presses keys, so the check takes no focus.
-        rs = s.wait_rows(lambda rs: s.has('hint-open-place-1', rs), 'the Open Place shows no Hint')
-        key = s.row('hint-open-place-1', rs).get('accessibilityValue')
-        self.assertRegex(key or '', r'^[1-9]$', 'the Open Place Hint is not a card number')
-        s.act('action', 'quick-switch-input', 'Press ⌃' + key)
-        s.wait_rows(lambda rs: 'Open Place 1' in self.describe('palette-breadcrumb', rs)
-                    and s.has('palette-row-topic-bench-settle-c', rs), 'the Open Place key did not list the Bench')
-        s.act('press', 'palette-row-topic-bench-settle-c')
-        wait(lambda: self.layout('bench-settle') == 'c b',
-             'the chosen Topic did not fill the Open Place: %s' % self.layout('bench-settle'))
-        s.wait_rows(lambda rs: not s.has('open-place-1', rs), 'the filled Open Place still shows')
+        def page_shows(rs):
+            return (s.has('open-place-page', rs) and s.row('open-place-1', rs).get('accessibilityValue') == 'selected'
+                    and s.has('open-place-row-topic-bench-settle-c', rs))
+
+        open_place = self.card_key('hint-open-place-1')
+        s.act('action', 'quick-switch-input', open_place)
+        rs = s.wait_rows(page_shows, lambda: 'the Open Place key did not show its page as the Location: %s' % s.ids())
+        self.assertFalse(s.has('palette-search', rs), 'the Open Place opened a palette')
+        self.assertIn('Open Place 1', self.describe('open-place-title', rs))
+        self.assertEqual([k for k in s.ids(rs) if k.startswith('open-place-row-')], ['open-place-row-topic-bench-settle-c'],
+                         'the page does not list the hidden Bench alone, without the In Play card')
+
+        s.act('action', 'quick-switch-input', self.card_key('hint-topic-bench-settle-b'))
+        s.wait_shown(windows['topic-bench-settle-b'])
+        s.wait_rows(lambda rs: not s.has('open-place-page', rs), 'Select Card did not leave the Open Place page')
+        self.assertEqual(self.layout('bench-settle'), '_ b c', 'leaving the page filled the Open Place')
+
+        s.act('action', 'quick-switch-input', open_place)
+        s.wait_rows(page_shows, 'the Open Place key did not come back to its page')
+        s.act('set', 'open-place-search', 'settle-c')
+        s.wait_rows(lambda rs: s.row('open-place-row-topic-bench-settle-c', rs).get('accessibilityValue') == 'selected',
+                    'the search did not keep and select the Bench row')
+
+        def filled():
+            if self.layout('bench-settle') == 'c b':
+                return True
+            # ↩ goes to the page while its field has Focus, which the app gives it a turn after the page shows.
+            s.act('action', 'quick-switch-input', 'Send Return')
+            return False
+        wait(filled, lambda: 'Return did not fill the Open Place: %s' % self.layout('bench-settle'))
+        s.wait_shown(windows['topic-bench-settle-c'])
+        s.wait_rows(lambda rs: not s.has('open-place-1', rs) and not s.has('open-place-page', rs),
+                    'the filled Open Place or its page still shows')
+
+    def test_the_open_place_page_takes_focus_and_keeps_its_location_through_hints_and_escape_until_its_place_closes(self):
+        s = self.s
+        self.open_place_page('open-page-keys')
+        wait(self.search_field_has_focus,
+             lambda: 'the search field did not take Focus on arrival: %s' % s.driver('responder')['responders'])
+
+        def on_page(rs):
+            return s.has('open-place-page', rs) and s.row('open-place-2', rs).get('accessibilityValue') == 'selected'
+
+        # `Send Return` and `Send Escape` deliver a key down with no key up, and a key still down keeps the Hints hidden.
+        s.act('action', 'quick-switch-input', 'Reset Hints')
+        s.act('action', 'quick-switch-input', 'Hold Control')
+        try:
+            rs = s.wait_rows(lambda rs: s.row('hint-topic-open-page-keys-a', rs).get('accessibilityValue', '').startswith('⌃'),
+                             lambda: 'holding ⌃ on the page did not show the Hints: %s' % self.describe('hint-topic-open-page-keys-a', s.rows()))
+            self.assertTrue(on_page(rs), 'holding ⌃ left the Open Place page')
+        finally:
+            s.act('action', 'quick-switch-input', 'Release modifiers')
+
+        s.act('action', 'quick-switch-input', 'Send Escape')
+        time.sleep(2)
+        self.assertTrue(on_page(s.rows()), '⎋ with no query left the Open Place page or its Location')
+
+        s.act('set', 'open-place-search', 'zzqq')
+        rs = s.wait_rows(lambda rs: s.has('open-place-no-match', rs),
+                         lambda: 'a query with no match shows no No Topic matches text: %s' % s.ids())
+        texts = [r.get('accessibilityLabel', '') + r.get('accessibilityValue', '') for r in rs]
+        self.assertTrue(any('No Topic matches ‘zzqq’' in text for text in texts),
+                        'the page does not name the query that matches no Topic: %s' % self.describe('open-place-no-match', rs))
+        s.act('action', 'quick-switch-input', 'Send Escape')
+        rs = s.wait_rows(lambda rs: not s.has('open-place-no-match', rs) and not s.row('open-place-search', rs).get('accessibilityValue'),
+                         lambda: '⎋ did not clear the query: %s' % self.describe('open-place-search', s.rows()))
+        self.assertTrue(on_page(rs), '⎋ with a query left the Open Place page')
+
+        self.store.set_open_places([])
+        s.wait_rows(lambda rs: not s.has('open-place-page', rs),
+                    lambda: 'the page still shows after its place closed elsewhere: %s' % s.ids())
+
+    def test_the_open_place_page_lists_guests_then_the_bench_and_a_click_on_a_guest_fills_the_place(self):
+        s = self.s
+        prefix = 'open-page-list'
+        self.open_place_page(prefix, guests=['g1', 'g2'])
+        expected = ['open-place-section-guests', 'open-place-row-topic-%s-g1' % prefix, 'open-place-row-topic-%s-g2' % prefix,
+                    'open-place-section-bench', 'open-place-row-topic-%s-b' % prefix, 'open-place-row-topic-%s-c' % prefix]
+        listed = lambda rs: [k for k in s.ids(rs) if k.startswith(('open-place-section-', 'open-place-row-'))]
+        s.wait_rows(lambda rs: listed(rs) == expected,
+                    lambda: 'the page does not list the Guests, then the Bench, in list order: %s' % listed(s.rows()))
+
+        s.act('click', 'open-place-row-topic-%s-g2' % prefix)
+        wait(lambda: not self.records()[prefix + '-g2'].get('guest') and not self.store.open_places(),
+             lambda: 'a click on the Guest did not fill the place or left its Guest mark: %s' % self.layout(prefix))
+
+    def test_the_open_place_page_with_no_guest_or_benched_topic_shows_its_empty_state_and_the_new_topic_key(self):
+        s = self.s
+        windows = self.bench_topics('open-page-empty', in_play=3)
+        s.show(windows['topic-open-page-empty-a'])
+        self.config.write_text(self.config_text + 'topics:\n  in_play: 4\n')
+        self.store.set_open_places([{'id': 'open-page-empty-place', 'order': 0.5}])
+        s.act('action', 'quick-switch-input', self.card_key('hint-open-place-2'))
+        rs = s.wait_rows(lambda rs: s.has('open-place-empty', rs),
+                         lambda: 'the page shows no empty state: %s' % [k for k in s.ids() if k.startswith('open-place')])
+        texts = [r.get('accessibilityLabel', '') + r.get('accessibilityValue', '') for r in rs]
+        self.assertIn('No Guest Topics or Benched Topics', texts, 'the empty state does not say why the page is empty')
+        self.assertRegex(s.row('open-place-new-topic', rs).get('accessibilityLabel', ''), r'^New Topic \(.+\)$',
+                         'the empty state does not show the New Topic key')
 
     def test_settle_of_the_last_card_in_play_opens_the_first_card_in_play_not_the_hidden_bench(self):
         s = self.s

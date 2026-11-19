@@ -1,5 +1,7 @@
 # Every Action runs in the palette's view, and Commands are a Source
 
+> **Update 2026-11-18:** Fill an Open Place runs in the Open Place page, a Location that takes input, not in the palette ([ADR 0095](0095-picking-an-open-place-goes-to-the-open-place-page.md)).
+
 > **Update 2026-10-20:** Move Topic Up and Move Topic Down are now palette Commands that run at once, with the keybindings `move_topic_up` and `move_topic_down`. The Sidebar's Move Up / Move Down stay as well. Sort Sessions by Creation still stays outside the palette.
 
 > **Update 2026-10-27:** ⎋ first hides the ⌘K actions menu when it shows, and then closes the palette. ⌫ in the empty field of the first step does nothing, so a typo never closes the palette.

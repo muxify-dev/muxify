@@ -28,6 +28,8 @@ public struct Router: Equatable {
         case settled(next: TopicGroupID?)
         case commandFinished(IntentID, CommandResult, lastStartedRead: ReadNumber)
         case read(ReadNumber)
+        /// The Topic records or the Open Places changed, with no change in tmux and so no read.
+        case topicsChanged
         case serverChanged
     }
 
@@ -47,6 +49,8 @@ public struct Router: Equatable {
         public var ownClientWindow: WindowID?
         public var records: [TopicRecord]
         public var entryWindows: [TopicGroupID: WindowID]
+        /// The ids of the Open Places that hold an In Play place.
+        public var openPlaces: Set<String>
         public var hasTerminal: Bool
         public var allowAttach: Bool
         public var rememberedWindow: WindowID?
@@ -55,13 +59,14 @@ public struct Router: Equatable {
 
         public init(windows: [TmuxWindow] = [], ownClientWindow: WindowID? = nil,
                     records: [TopicRecord] = [], entryWindows: [TopicGroupID: WindowID] = [:],
-                    hasTerminal: Bool = true, allowAttach: Bool = false,
+                    openPlaces: Set<String> = [], hasTerminal: Bool = true, allowAttach: Bool = false,
                     rememberedWindow: WindowID? = nil, initialWindow: WindowID? = nil,
                     now: Date = Date()) {
             self.windows = windows
             self.ownClientWindow = ownClientWindow
             self.records = records
             self.entryWindows = entryWindows
+            self.openPlaces = openPlaces
             self.hasTerminal = hasTerminal
             self.allowAttach = allowAttach
             self.rememberedWindow = rememberedWindow
@@ -137,6 +142,8 @@ public struct Router: Equatable {
             return effects
         case .read(let number):
             return read(number, facts)
+        case .topicsChanged:
+            return leaveGonePage(facts) ?? []
         case .serverChanged:
             let serial = nextIntentID
             self = Router()
@@ -177,16 +184,10 @@ public struct Router: Equatable {
             }
             location = nil
         }
-        if case .emptyTopic(.topic(let topic)) = location, intent == nil {
-            if let target = facts.entryWindows[.topic(topic)] {
-                return go(.window(target), readsOnArrival: true, facts)
-            }
-            if !facts.records.contains(where: { $0.id == topic }) {
-                let destination = facts.ownClientWindow.map(Location.window)
-                location = destination
-                return destination.map { [.visit($0)] } ?? []
-            }
+        if case .emptyTopic(.topic(let topic)) = location, intent == nil, let target = facts.entryWindows[.topic(topic)] {
+            return go(.window(target), readsOnArrival: true, facts)
         }
+        if let effects = leaveGonePage(facts) { return effects }
         if case .window = intent { intent = nil }
         var effects: [Effect] = []
         if intent == nil, !waitingForCommand, let client = facts.ownClientWindow,
@@ -199,6 +200,20 @@ public struct Router: Equatable {
             }
         }
         return effects + attachIfNeeded(facts)
+    }
+
+    /// The page's Topic is gone, or its Open Place closed (a fill from elsewhere, or a lower `topics.in_play`): the
+    /// Location goes to the Window that the Client shows, or to none. Nil while the page stays.
+    private mutating func leaveGonePage(_ facts: Facts) -> [Effect]? {
+        guard intent == nil else { return nil }
+        switch location {
+        case .emptyTopic(.topic(let topic))? where !facts.records.contains(where: { $0.id == topic }): break
+        case .openPlace(let place)? where !facts.openPlaces.contains(place): break
+        default: return nil
+        }
+        let destination = facts.ownClientWindow.map(Location.window)
+        location = destination
+        return destination.map { [.visit($0)] } ?? []
     }
 
     private mutating func go(_ destination: Location, readsOnArrival: Bool, _ facts: Facts) -> [Effect] {
@@ -233,7 +248,8 @@ public struct Router: Equatable {
 
     private mutating func attachIfNeeded(_ facts: Facts) -> [Effect] {
         guard !facts.hasTerminal, facts.allowAttach else { return [] }
-        if case .emptyTopic = location { return [] }
+        // A page shows in the Terminal's place, so it needs no Client.
+        if let location, location.windowID == nil { return [] }
         if case .window(var pending) = intent {
             guard facts.windows.contains(where: { $0.id == pending.target.rawValue }) else { return [] }
             if pending.finishedBefore != nil {

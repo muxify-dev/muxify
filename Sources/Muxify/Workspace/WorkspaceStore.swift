@@ -315,11 +315,7 @@ final class WorkspaceStore {
     /// the Sidebar folds it in.
     func tradeCard(_ id: TopicListID, with other: TopicListID) {
         let cut = topics.cut
-        if case .openPlace(let place) = other, case .topic(let topic) = id {
-            let places = cut.places
-            guard let index = places.firstIndex(where: { if case .openPlace(place) = $0 { return true } else { return false } }) else { return }
-            return fillOpenPlace(index + 1, with: topic)
-        }
+        if case .openPlace(let place) = other, case .topic(let topic) = id { return fillOpenPlace(place, with: topic) }
         guard let target = Self.target(of: id), let ref = Self.ref(of: other) else { return }
         let rows = cut.compactMap(\.row)
         if !benchShown, benchPeek != .all, rows.bench.contains(where: { $0.id.listID == id || $0.id.listID == other }) {
@@ -329,15 +325,40 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.moveCard(.trade(ref)), target: target))
     }
 
-    /// Fill an Open Place goes through the Topic service, as `muxify topic fill-place` does.
-    func fillOpenPlace(_ place: Int, with topic: String) {
-        perform(EnvironmentRequest(.fillOpenPlace(place: place), target: .topic(.id(topic))))
+    /// Fill an Open Place goes through the Topic service, as `muxify topic fill-place` does. With `opening`, the
+    /// Location then goes to the Topic, as a fill from the Open Place page does.
+    func fillOpenPlace(_ placeID: String, with topic: String, opening: Bool = false) {
+        guard let place = topics.place(ofOpenPlace: placeID) else { return }
+        perform(EnvironmentRequest(.fillOpenPlace(place: place), target: .topic(.id(topic))),
+                presenting: opening ? .goTo(.topic(topic)) : .edit)
     }
 
-    /// The step that asks what fills the Open Place at In Play place `place`.
-    func presentFillOpenPlace(_ place: Int) {
-        guard link.features.contains(.topics), !changingTopic else { return }
-        palette.begin(.fillOpenPlace(place))
+    /// Goes to the Open Place page (ADR 0095): the Open Place becomes the Location, and the page's search field takes
+    /// Focus. Nothing modal opens, so every App Window keybind still acts.
+    func goToOpenPlace(_ placeID: String) {
+        guard link.features.contains(.topics), topics.place(ofOpenPlace: placeID) != nil else { return }
+        route(.go(.openPlace(placeID)))
+        sidebarMode = .topics
+        focusOpenPlaceField()
+    }
+
+    /// The page's search field takes Focus, unless a palette has it: the palette gives it back when it closes.
+    private func focusOpenPlaceField() {
+        guard !palette.isOpen else { return }
+        openPlacePage.fieldFocusRequested = true
+    }
+
+    /// The Open Place page's rows, with the titles that the Sidebar cards show.
+    var openPlaceChoices: OpenPlaceChoices {
+        OpenPlaceChoices(topics.split, query: openPlacePage.query) { row in
+            sidebarText(.topic, context: sidebarFormatContexts.topics[row.id]).title
+        }
+    }
+
+    /// ↩ on the Open Place page: the selected Topic fills the place and opens.
+    func fillOpenPlaceFromPage(with topic: String) {
+        guard case .openPlace(let place) = location else { return }
+        fillOpenPlace(place, with: topic, opening: true)
     }
 
     /// Move Up and Move Down: MuxifyCore decides the step (`TopicCards.step`) with the Bench as the Sidebar shows it.
@@ -903,7 +924,8 @@ final class WorkspaceStore {
                             }
                         } catch { showTopicFailure(error) }
                     }
-                case .emptyTopic?, nil:
+                // No request shows an Open Place: only the Mac goes to its page.
+                case .emptyTopic?, .openPlace?, nil:
                     break
                 }
             }
@@ -1102,12 +1124,30 @@ final class WorkspaceStore {
     private var router = Router()
     var location: Location? { router.location }
     var selectedWindowID: String? { location?.windowID?.rawValue }
-    var showsEmptyPage: Bool {
-        if case .emptyTopic = location { return true }
+    /// A page shows in the Terminal's place: an Empty Topic page or an Open Place page.
+    var showsPage: Bool {
+        guard let location else { return false }
+        return location.windowID == nil
+    }
+
+    var showsOpenPlacePage: Bool {
+        if case .openPlace = location { return true }
         return false
     }
 
+    let openPlacePage = OpenPlacePage()
+
+    /// What the window title names: the Location's Session, or the Open Place of its page.
+    var locationTitle: String? {
+        if case .openPlace(let id) = location { return topics.place(ofOpenPlace: id).map { "Open Place \($0)" } }
+        return selectedWindow?.sessionName
+    }
+
     private func locationChanged(from old: Location?) {
+        if case .openPlace = location {
+            openPlacePage.arrive()
+            focusOpenPlaceField()
+        }
         rememberSelection()
         recordVisit()
         updateTopicSelection()
@@ -1673,8 +1713,11 @@ final class WorkspaceStore {
     private func receive(_ event: EnvironmentEvent) {
         switch event {
         case .topics(let contents):
+            guard records != contents.records || openPlaces != contents.openPlaces else { return }
             if records != contents.records { records = contents.records }
             if openPlaces != contents.openPlaces { openPlaces = contents.openPlaces }
+            // A page whose Topic or Open Place is gone leaves now, not at the next change in tmux.
+            route(.topicsChanged)
         case .snapshot(let snapshot):
             lastStartedRead += 1
             accept(snapshot, readNumber: lastStartedRead, attachIfNeeded: false, branches: topicBranches)
@@ -2134,7 +2177,7 @@ final class WorkspaceStore {
     }
 
     private var shownReadScope: AgentReadScope? {
-        guard !showsEmptyPage, panelLayout.shows(.terminal), currentGitView?.isOpen != true,
+        guard !showsPage, panelLayout.shows(.terminal), currentGitView?.isOpen != true,
               router.intent == nil, pendingReadNavigations.isEmpty,
               selectedWindowID == readWindowID else { return nil }
         return selectedWindow.map(AgentReadScope.init)
@@ -2186,7 +2229,7 @@ final class WorkspaceStore {
         let tty = clientTTY ?? (link.isOnThisMac ? surface?.ttyName : nil)
         let client = snapshot?.clients.first { $0.tty == tty && !$0.isControl }
         return Router.Facts(windows: windows, ownClientWindow: client.flatMap { WindowID(rawValue: $0.windowID) },
-                            records: records, entryWindows: entries,
+                            records: records, entryWindows: entries, openPlaces: topics.openPlaceIDs,
                             hasTerminal: surface != nil && surface?.processExited == false,
                             allowAttach: allowAttach, rememberedWindow: snapshot?.lastWindowID.flatMap(WindowID.init(rawValue:)),
                             initialWindow: Self.initialWindow(in: windows).flatMap { WindowID(rawValue: $0.id) }, now: Date())
@@ -2312,7 +2355,8 @@ final class WorkspaceStore {
     /// The holder that has Focus now, nil while a palette's field or another view has it.
     private var focusHolder: FocusHolder? {
         guard !palette.isOpen else { return nil }
-        if terminalSideHasFocus { return .terminal }
+        // The Open Place page stands in the Terminal's place, so Focus comes back to its field as to the Terminal.
+        if terminalSideHasFocus || openPlacePage.fieldHasFocus { return .terminal }
         if currentGitView?.hasKeyFocus == true { return .gitView }
         return browserHasFocus ? .browser : nil
     }
@@ -2323,7 +2367,7 @@ final class WorkspaceStore {
         guard let window = terminalHost.window else { return }
         let gap = FocusGap(firstResponderIsView: window.firstResponder is NSView, paletteIsOpen: palette.isOpen,
                            sheetIsOpen: window.attachedSheet != nil || NSApp.modalWindow != nil,
-                           showsEmptyPage: showsEmptyPage, gitViewIsOpen: currentGitView?.isOpen == true,
+                           showsEmptyPage: showsPage && !showsOpenPlacePage, gitViewIsOpen: currentGitView?.isOpen == true,
                            layout: panelLayout, lastFocus: lastFocus)
         switch gap.focusToRestore {
         case .terminal?: moveFocus(into: .terminal)
@@ -2351,7 +2395,7 @@ final class WorkspaceStore {
 
     /// The current Window's Browser has Focus (its page or omnibox).
     var browserHasFocus: Bool {
-        !terminalSideHasFocus && currentGitView?.hasKeyFocus != true && panelLayout.shows(.browser)
+        !terminalSideHasFocus && !openPlacePage.fieldHasFocus && currentGitView?.hasKeyFocus != true && panelLayout.shows(.browser)
     }
 
     private var focusedSide: PanelLayout.Side { browserHasFocus ? .browser : .terminal }
@@ -2386,10 +2430,13 @@ final class WorkspaceStore {
         }
     }
 
-    /// Makes the Terminal the first responder. A hidden Terminal never takes Focus.
+    /// Makes the Terminal the first responder. A hidden Terminal never takes Focus. The Open Place page's search field
+    /// takes it in the Terminal's place.
     func focusTerminal() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let surface, panelLayout.shows(.terminal), !showsEmptyPage, !palette.isOpen else { return }
+            guard let self, panelLayout.shows(.terminal), !palette.isOpen else { return }
+            if showsOpenPlacePage { return focusOpenPlaceField() }
+            guard let surface, !showsPage else { return }
             expectFocus(in: .terminal)
             surface.window?.makeFirstResponder(surface)
         }
@@ -3137,7 +3184,7 @@ final class WorkspaceStore {
 
     /// Opens Find in Pane over the Terminal, or selects its query while it is open.
     func showFindInPane() {
-        guard selectedWindow != nil, surface != nil, !showsEmptyPage, panelLayout.shows(.terminal) else { return }
+        guard selectedWindow != nil, surface != nil, !showsPage, panelLayout.shows(.terminal) else { return }
         paneFinder.show()
     }
 
@@ -3232,6 +3279,32 @@ final class WorkspaceStore {
     }
     #endif
 
+    /// The Open Place page's keys while its search field has Focus: the palette's select keys move the selection, its
+    /// accept key fills the place with the selected Topic, and ⎋ clears the query. A key that composes text in an input
+    /// method stays with the field.
+    private func handleOpenPlacePageKey(_ trigger: KeyTrigger, in event: NSEvent) -> Bool {
+        guard showsOpenPlacePage, openPlacePage.fieldHasFocus,
+              (event.window?.firstResponder as? NSTextView)?.hasMarkedText() != true else { return false }
+        if trigger == KeyTrigger(modifiers: [], key: .special(.escape)) {
+            // With no query ⎋ does nothing: the page is a Location, and only a move leaves it.
+            openPlacePage.query = ""
+            return true
+        }
+        let choices = openPlaceChoices
+        let action = config.paletteKeybinds.action(for: trigger)
+        switch action {
+        case .selectNext?, .selectPrev?:
+            let delta = action == .selectNext ? 1 : -1
+            openPlacePage.selectedID = choices.moving(from: choices.selected(openPlacePage.selectedID)?.id, by: delta)?.id
+            return true
+        case .jumpTo?:
+            if let choice = choices.selected(openPlacePage.selectedID) { fillOpenPlaceFromPage(with: choice.topicID) }
+            return true
+        default:
+            return false
+        }
+    }
+
     func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
         guard !isShuttingDown, let window = terminalHost.window, event.window === window else { return event }
         if event.type == .flagsChanged {
@@ -3247,6 +3320,7 @@ final class WorkspaceStore {
         if let trigger = KeyTrigger(event) {
             if palette.handle(trigger, in: event) { return nil }
             if currentGitView?.handle(trigger, in: event) == true { return nil }
+            if handleOpenPlacePageKey(trigger, in: event) { return nil }
             let config = self.config
             // A key that composes text in an input method stays with the field.
             if let action = config.findKeybinds.action(for: trigger),

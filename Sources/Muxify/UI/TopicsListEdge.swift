@@ -69,10 +69,11 @@ struct GuestsLine: View {
     }
 }
 
-/// An In Play place that no card fills. A click or its Hint's key asks which Guest Topic or Benched Topic takes it, and
-/// a Guest or a Benched card dropped on it takes it.
+/// An In Play place that no card fills. A click or its Hint's key goes to its Open Place page, where the card then
+/// shows as the Location, and a Guest or a Benched card dropped on it takes it.
 struct OpenPlaceCard: View {
     let place: Int
+    let isLocation: Bool
     let action: () -> Void
     @Environment(\.interfaceFontSize) private var fontSize
 
@@ -85,14 +86,21 @@ struct OpenPlaceCard: View {
                 CardHintSlot(target: .openPlace(place))
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(isLocation ? .primary : .secondary)
             .padding(.horizontal, 10).frame(height: fontSize(32))
             .contentShape(shape)
-            .overlay { shape.strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [5, 4])) }
+            .overlay {
+                if isLocation {
+                    BalatroBorder(angle: 0, shape: shape)
+                } else {
+                    shape.strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                }
+            }
         }
         .buttonStyle(.plain)
         .takesFirstClick()
         .accessibilityLabel("Open Place \(place)")
+        .accessibilityValue(isLocation ? "selected" : "")
         .accessibilityIdentifier("open-place-\(place)")
         // Outside the button's element, so the Hint is its own accessibility element, as on a Topic card.
         .cardHints()

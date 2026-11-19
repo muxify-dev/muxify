@@ -16,6 +16,8 @@ public enum TopicGroupID: Hashable, Sendable {
 public enum Location: Hashable, Codable, Sendable {
     case window(WindowID)
     case emptyTopic(TopicGroupID)
+    /// The Open Place page of the Open Place with this id.
+    case openPlace(String)
 
     public var windowID: WindowID? {
         if case .window(let id) = self { return id }
@@ -25,6 +27,7 @@ public enum Location: Hashable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case window
         case emptyTopic = "empty_topic"
+        case openPlace = "open_place"
     }
 
     private enum ValueKeys: String, CodingKey {
@@ -40,6 +43,9 @@ public enum Location: Hashable, Codable, Sendable {
         if values.contains(.window) {
             let window = try values.nestedContainer(keyedBy: ValueKeys.self, forKey: .window)
             self = .window(try window.decode(WindowID.self, forKey: .id))
+        } else if values.contains(.openPlace) {
+            let place = try values.nestedContainer(keyedBy: ValueKeys.self, forKey: .openPlace)
+            self = .openPlace(try place.decode(String.self, forKey: .id))
         } else {
             let page = try values.nestedContainer(keyedBy: ValueKeys.self, forKey: .emptyTopic)
             if page.contains(.id) {
@@ -66,6 +72,9 @@ public enum Location: Hashable, Codable, Sendable {
                 throw EncodingError.invalidValue(group, .init(codingPath: encoder.codingPath, debugDescription: "A Locked Session has no Empty Topic page."))
             case .noTopic: try page.encode(true, forKey: .noTopic)
             }
+        case .openPlace(let id):
+            var place = values.nestedContainer(keyedBy: ValueKeys.self, forKey: .openPlace)
+            try place.encode(id, forKey: .id)
         }
     }
 }

@@ -97,8 +97,8 @@ struct ContentView: View {
         .ignoresSafeArea()
         // Names the window for the Window menu and Mission Control.
         .navigationTitle(store.isRemote
-                         ? "\(store.environmentName) — \(store.selectedWindow?.sessionName ?? "Muxify")"
-                         : store.selectedWindow?.sessionName ?? "Muxify")
+                         ? "\(store.environmentName) — \(store.locationTitle ?? "Muxify")"
+                         : store.locationTitle ?? "Muxify")
         .onAppear { store.start() }
         .onChange(of: store.config.hints.holdDelay, initial: true) { _, delay in
             store.hintHold.configure(delay: delay)
@@ -153,7 +153,7 @@ private struct HeaderBar: View {
     var body: some View {
         HStack(spacing: spacing) {
             if store.config.statusLine.enabled, let window = store.selectedWindow,
-               !store.showsEmptyPage {
+               !store.showsPage {
                 let overSidebar = max(0, panelsLeading - TitlebarMetrics.trafficLightsWidth - spacing)
                 Text(window.sessionName)
                     .font(fontSize.font(13, weight: .medium))
@@ -182,7 +182,7 @@ private struct HeaderBar: View {
                 UpdateButton(model: updates)
                     .layoutPriority(2)
             }
-            if let window = store.selectedWindow, !store.showsEmptyPage {
+            if let window = store.selectedWindow, !store.showsPage {
                 HeaderGitButton(store: store, window: window,
                                 help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView))
                     .id("\(window.sourceID):\(window.path)")
@@ -390,6 +390,7 @@ private struct TerminalArea: View {
             TerminalHostRepresentable(host: store.terminalHost)
             if store.surface == nil { placeholder }
             if let topic = store.topics.emptyTopic { emptyTopic(topic) }
+            if store.showsOpenPlacePage { OpenPlacePageView(store: store, page: store.openPlacePage) }
             if store.location == .emptyTopic(.noTopic) {
                 VStack(spacing: 12) {
                     Text("No Topic").font(fontSize.font(.title2))
@@ -402,7 +403,7 @@ private struct TerminalArea: View {
                 .background(Color(nsColor: .windowBackgroundColor))
                 .accessibilityIdentifier("empty-no-topic")
             }
-            if store.paneFinder.isShown, store.surface != nil, !store.showsEmptyPage { findBar }
+            if store.paneFinder.isShown, store.surface != nil, !store.showsPage { findBar }
             if let gitView = store.currentGitView {
                 GitViewOverlay(gitView: gitView, config: store.config.gitView, placement: .terminal)
             }
