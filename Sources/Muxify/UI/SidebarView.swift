@@ -258,7 +258,7 @@ private struct TopicsSection: View {
                                                    isBenchShown: model.isBenchShown == true, hasCardsAbove: hasCardsAbove(topic.id),
                                                    indicatorHeight: geometry.indicatorHeight, driver: driver))
         case .openPlace(let id, let place):
-            OpenPlaceCard(place: place) { store.presentFillOpenPlace(place) }
+            OpenPlaceCard(place: place, isLocation: store.location == .openPlace(id)) { store.goToOpenPlace(id) }
                 .listDragItem(TopicListID.openPlace(id), drag: drag, shown: model.dragSlots(around: item.id), cornerRadius: 9)
         case .guestsLine:
             GuestsLine().listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))

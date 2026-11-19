@@ -64,7 +64,7 @@ enum StepDirection {
 
 enum QuickSwitchTarget: Hashable {
     /// `locked` is a Locked Session's card in Topics mode, by Session ID. `openPlace` is an Open Place, by its In Play
-    /// place counted from 1: going there asks what fills it.
+    /// place counted from 1: going there shows its Open Place page.
     case topic(String), locked(String), openPlace(Int), session(String), window(String), tab(UUID), terminal
 
     var accessibilityID: String {
@@ -116,6 +116,12 @@ struct QuickSwitchTargets {
         }
         guard !targets.isEmpty else { return nil }
         guard let index = current.flatMap(targets.firstIndex(of:)) else {
+            // No step stops on an Open Place, so from its page a Topic step goes to the card beside it.
+            if level == .topic, let current, let position = cards.firstIndex(of: current) {
+                let beside = direction == .next ? cards[(position + 1)...].first(where: targets.contains)
+                    : cards[..<position].last(where: targets.contains)
+                if let beside { return beside }
+            }
             return direction == .next ? targets.first : targets.last
         }
         let offset = direction == .next ? 1 : -1
@@ -185,7 +191,7 @@ extension WorkspaceStore {
                          keybinds: config.keybinds, targets: quickSwitchTargets,
                          sidebar: sidebarShown && sessionsVisible,
                          browser: panelLayout.shows(.browser), terminal: surface != nil && panelLayout.shows(.terminal)
-                            && !showsEmptyPage, config: config.hints)
+                            && !showsPage, config: config.hints)
     }
 
     func receiveHintInput(_ event: HintHoldState.Event) {
@@ -202,7 +208,9 @@ extension WorkspaceStore {
         let current: QuickSwitchTarget? = switch level {
         case .window, .topicWindow: selectedWindow.map { .window($0.id) }
         case .session: selectedWindow.map { .session($0.sessionID) }
-        case .topic: topics.activeTopic?.quickSwitchTarget
+        case .topic:
+            if case .openPlace(let id) = location { topics.place(ofOpenPlace: id).map(QuickSwitchTarget.openPlace) }
+            else { topics.activeTopic?.quickSwitchTarget }
         }
         return quickSwitchTargets.step(level, direction, from: current)
     }
@@ -215,7 +223,8 @@ extension WorkspaceStore {
         switch target {
         case .topic(let id): goToTopic(.topic(id))
         case .locked(let id): goToTopic(.locked(id))
-        case .openPlace(let place): presentFillOpenPlace(place)
+        case .openPlace(let place):
+            if let id = topics.openPlaceID(at: place) { goToOpenPlace(id) }
         case .session(let id): goToSession(id)
         case .window(let id):
             if let window = windows.first(where: { $0.id == id }) { select(window) }

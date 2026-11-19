@@ -125,10 +125,11 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 9, style: .continuous) }
 }
 
-/// The border of the card that holds the selected Window: the colours of a Balatro card's edge, around the card.
-/// SwiftUI animates `angle`, so a change of it turns the colours. Metal draws it: drawn into the layer, the angular
-/// gradient is painted by the CPU on each frame of the turn, which lasts most of a second after each switch.
-private struct BalatroBorder: View, Animatable {
+/// The border of the card that holds the selected Window, or of the Open Place whose page shows: the colours of a
+/// Balatro card's edge, around the card. SwiftUI animates `angle`, so a change of it turns the colours. Metal draws it:
+/// drawn into the layer, the angular gradient is painted by the CPU on each frame of the turn, which lasts most of a
+/// second after each switch.
+struct BalatroBorder: View, Animatable {
     var angle: Double
     let shape: RoundedRectangle
 
@@ -202,6 +203,9 @@ struct CardHeader<Details: View>: View {
     var tags: CardTags? = nil
     /// The Topic Note. Every card shows it whole on its own line, softer on a closed card.
     var note: String? = nil
+    /// The characters of the title and of the Note that a search matched, as the Open Place page marks them.
+    var titleMarks: [Int] = []
+    var noteMarks: [Int] = []
     /// A word in the top-right corner, on the title's first line, such as how long ago a Topic was Settled. The
     /// bottom-right action then goes on a line under the title.
     var cornerLabel: CardCornerLabel? = nil
@@ -240,7 +244,12 @@ struct CardHeader<Details: View>: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .titleLine, spacing: 5) {
                 ZStack(alignment: .topLeading) {
-                    if let titleLines {
+                    if !titleMarks.isEmpty {
+                        Text(Highlighted(text: title, marks: titleMarks).attributed)
+                            .font(typography.font(for: .session))
+                            .lineLimit(wrapsTitle ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if let titleLines {
                         Text(titleLines.first).font(typography.font(for: .session)).fixedSize()
                     } else {
                         Text(title)
@@ -269,7 +278,7 @@ struct CardHeader<Details: View>: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { titleLineWidth = $0 }
             .padding(.trailing, !isOpen && summary.isEmpty && cornerLabel == nil ? cornerWidth : 0)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { titleLine = $0 }
-            if let rest = titleLines?.rest, !rest.isEmpty {
+            if titleMarks.isEmpty, let rest = titleLines?.rest, !rest.isEmpty {
                 Text(rest).font(typography.font(for: .session)).fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 5) {
@@ -277,7 +286,7 @@ struct CardHeader<Details: View>: View {
                 details()
             }
             if let note {
-                NoteLine(note: note, isOpen: isOpen)
+                NoteLine(note: note, isOpen: isOpen, marks: noteMarks)
                     .padding(.trailing, !isOpen && summary.isEmpty ? cornerWidth : 0)
             }
             if showsSummary {
@@ -314,6 +323,7 @@ struct CardHeader<Details: View>: View {
 private struct NoteLine: View {
     let note: String
     let isOpen: Bool
+    var marks: [Int] = []
     @Environment(\.interfaceFontSize) private var fontSize
 
     private static let color = Color(nsColor: NSColor(name: nil) {
@@ -323,7 +333,7 @@ private struct NoteLine: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Image(systemName: "pencil")
-            Text(note).fixedSize(horizontal: false, vertical: true)
+            Text(Highlighted(text: note, marks: marks).attributed).fixedSize(horizontal: false, vertical: true)
         }
         .font(fontSize.font(11.5))
         .foregroundStyle(Self.color.opacity(isOpen ? 1 : 0.6))

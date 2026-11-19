@@ -78,20 +78,6 @@ extension CommandPalette {
         return store?.topics.rows.first { $0.id == id }?.title ?? ""
     }
 
-    /// Fill an Open Place: the Guest Topics, then the Benched Topics. A Guest Session must become a Topic first, so it
-    /// has no row.
-    func openPlaceRows() -> PickList<PaletteItem> {
-        guard let store else { return .empty }
-        let cut = store.topics.split
-        let topics = { (rows: [TopicsModel.Row]) in
-            rows.filter { if case .topic = $0.id { return true } else { return false } }.map { self.cardCandidate($0, choice: .card($0.id)) }
-        }
-        return FuzzyRanker.list([
-            PickSectionInput(id: "guests", title: "Guests", rule: .ranked(showsWhenEmpty: false), candidates: topics(cut.guests)),
-            PickSectionInput(id: "bench", title: "Bench", rule: .ranked(showsWhenEmpty: true), candidates: topics(cut.bench)),
-        ], query: FuzzyQuery(query), rules: PickRules())
-    }
-
     /// Replace from Bench: one row for each Benched card.
     func benchRows() -> PickList<PaletteItem> {
         guard let store else { return .empty }

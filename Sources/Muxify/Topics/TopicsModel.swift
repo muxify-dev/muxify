@@ -444,6 +444,22 @@ struct TopicsModel {
     /// follow the Sidebar mode, so the In Play Actions work in Sessions mode too.
     let cut: InPlayCut<ListCard>
 
+    /// The In Play place, counted from 1, that the Open Place `id` holds; nil when it holds none.
+    func place(ofOpenPlace id: String) -> Int? {
+        cut.places.firstIndex { if case .openPlace(id) = $0 { return true } else { return false } }.map { $0 + 1 }
+    }
+
+    /// The Open Places that hold an In Play place.
+    var openPlaceIDs: Set<String> {
+        Set(cut.places.compactMap { if case .openPlace(let id) = $0 { return id } else { return nil } })
+    }
+
+    /// The Open Place at In Play place `place`, counted from 1.
+    func openPlaceID(at place: Int) -> String? {
+        guard cut.places.indices.contains(place - 1), case .openPlace(let id) = cut.places[place - 1] else { return nil }
+        return id
+    }
+
     /// The slots of `list` that the item `id` can reach in a drag: the cards with its Pin and, among the cards that are
     /// not Pinned, the Bench line and the opened No Topic Session, which a card passes. A card that crosses the line
     /// trades with a card on the other side.
@@ -553,7 +569,7 @@ struct TopicsModel {
         case .emptyTopic(let group):
             activeTopic = group
             if case .topic(let id) = group { pageTopicID = id } else { pageTopicID = nil }
-        case nil:
+        case .openPlace, nil:
             activeTopic = nil
             pageTopicID = nil
         }

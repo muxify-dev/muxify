@@ -210,7 +210,7 @@ The Action that takes a card out of In Play: an In Play Topic, a Guest Topic or 
 _Avoid_: End Guest, Bench Topic, Snooze, hide, demote
 
 **Open Place**:
-An In Play place that no card fills. Settle, Forget, Pin and Bench on a regular In Play card leave an Open Place at its place. No Benched card moves up, and the other places keep their positions. The Open Place stays until the user fills it with a Guest Topic or a Benched Topic, also after Muxify or tmux restarts. The Sidebar shows it as a dashed card with its Hint. A click or the Hint's key asks which Guest Topic or Benched Topic fills it.
+An In Play place that no card fills. Settle, Forget, Pin and Bench on a regular In Play card leave an Open Place at its place. No Benched card moves up, and the other places keep their positions. The Open Place stays until the user fills it with a Guest Topic or a Benched Topic, also after Muxify or tmux restarts. The Sidebar shows it as a dashed card with its Hint. A click or the Hint's key goes to its Open Place page.
 _Avoid_: empty slot, hole, gap, free place
 
 **Trade**:
@@ -321,12 +321,16 @@ A native macOS Muxify window, with its own Active Environment, Location, termina
 _Avoid_: instance, Window (without "App", when you mean the native window)
 
 **Location**:
-What an App Window shows in the Terminal's place: a Window or an Empty Topic page. Each App Window has one Location, and the Active Topic comes from it.
+What an App Window shows in the Terminal's place: a Window, an Empty Topic page or an Open Place page. Each App Window has one Location, and the Active Topic comes from it. An Open Place page has no Active Topic.
 _Avoid_: place, focus, selection, current Window (when an Empty Topic page shows)
 
 **Empty Topic page**:
 The page in the Terminal's place for a Topic with no live Session, whether Empty, Dormant or Settled, or for No Topic when it has no Window. It offers Add a Session, or Reopen and Start Fresh.
 _Avoid_: Topic page, empty view, Empty (when you mean the page of a Dormant or Settled Topic)
+
+**Open Place page**:
+The page in the Terminal's place for an Open Place: a search field and the Guest Topics, then the Benched Topics, in the order of the Topics list, each drawn as its Sidebar card. Typing hides the Topics that do not match. A click or ↩ on a row fills the place with that Topic and opens it. ⎋ only clears the search. Every App Window keybind still acts on it.
+_Avoid_: Home window, Home, fill sheet, Fill Open Place step
 
 **Intent**:
 A move to a Location that the Terminal does not show yet, such as a click on a Window row before tmux switches the Client. An App Window has at most one Intent, and a new one replaces it.

@@ -541,6 +541,44 @@ final class RouterTests: XCTestCase {
         XCTAssertEqual(router.location, .emptyTopic(.noTopic))
     }
 
+    func testAnOpenPlacePageStaysWhileItsPlaceIsOpenAndTheClientDoesNotMove() {
+        var router = Router()
+        let facts = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"), openPlaces: ["p1"])
+        _ = router.handle(.read(1), facts)
+        let page = Location.openPlace("p1")
+        XCTAssertEqual(router.handle(.go(page), facts), [.visit(page)], "the page moves no Client")
+        XCTAssertTrue(router.handle(.read(2), facts).isEmpty)
+        XCTAssertEqual(router.location, page)
+    }
+
+    func testAClosedOpenPlaceMovesItsPageToTheWindowOfTheClient() {
+        var router = Router()
+        let facts = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"), openPlaces: ["p1"])
+        _ = router.handle(.read(1), facts)
+        _ = router.handle(.go(.openPlace("p1")), facts)
+        var filled = facts
+        filled.openPlaces = []
+        XCTAssertEqual(router.handle(.read(2), filled), [.visit(.window(id("@1")))])
+        XCTAssertEqual(router.location, .window(id("@1")))
+    }
+
+    func testAnOpenPlaceClosedWithNoTmuxChangeMovesItsPageToTheWindowOfTheClient() {
+        var router = Router()
+        let facts = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"), openPlaces: ["p1"])
+        _ = router.handle(.read(1), facts)
+        _ = router.handle(.go(.openPlace("p1")), facts)
+        XCTAssertTrue(router.handle(.topicsChanged, facts).isEmpty, "the page stays while its place is open")
+        var filled = facts
+        filled.openPlaces = []
+        XCTAssertEqual(router.handle(.topicsChanged, filled), [.visit(.window(id("@1")))])
+        XCTAssertEqual(router.location, .window(id("@1")))
+    }
+
+    func testAnOpenPlacePageRoundTripsAsALocation() throws {
+        let page = Location.openPlace("p1")
+        XCTAssertEqual(try JSONDecoder().decode(Location.self, from: JSONEncoder().encode(page)), page)
+    }
+
     private func attachmentID(_ effects: [Router.Effect], file: StaticString = #filePath, line: UInt = #line) throws -> Router.IntentID {
         for effect in effects {
             if case .attach(_, let command) = effect {

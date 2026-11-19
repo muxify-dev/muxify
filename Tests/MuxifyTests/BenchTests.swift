@@ -31,7 +31,7 @@ final class BenchTests: XCTestCase {
 
     private func shown(_ model: TopicsModel) -> [String] { model.list.map(\.id) }
 
-    func testAnOpenPlaceKeepsItsCardNumberAndItsKeyAsksWhatFillsIt() {
+    func testAnOpenPlaceKeepsItsCardNumberForItsKeyToGoToItsPage() {
         let open = model(inPlay: 3, at: "@1", openPlaces: [OpenPlace(id: "o", order: 0.5)])
         XCTAssertEqual(shown(open), ["topic-pinned", "topic-a", "open-place-2", "topic-b", "bench-line", "no-topic"])
         let targets = QuickSwitchTargets(model: open, sessions: [], windows: [], tabIDs: [])
