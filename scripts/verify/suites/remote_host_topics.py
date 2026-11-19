@@ -305,6 +305,10 @@ exec /bin/sh -c "$command"
         repo = self.projects/name
         repo.mkdir()
         self.host_git(repo, 'init', '-q', '-b', 'main')
+        # The Host's home has no git identity, and git cannot make one from a host name with no domain: a commit that
+        # the Git View runs on the Host takes the repository's own.
+        self.host_git(repo, 'config', 'user.name', 'Verifier')
+        self.host_git(repo, 'config', 'user.email', 'verifier@example.invalid')
         (repo/'host.txt').write_text('first line\n')
         self.host_git(repo, 'add', 'host.txt')
         self.host_git(repo, 'commit', '-q', '-m', 'first')

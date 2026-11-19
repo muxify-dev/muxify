@@ -1,5 +1,6 @@
 """The Topic records of a sandbox: the `topics` and `open_places` tables of `state/muxify/muxify.db`, read and
-written with Python's `sqlite3`, as another process writes them.
+written with Python's `sqlite3`, as another process writes them. `worktrees()` reads the Muxify Worktree records of
+the `worktrees` table.
 
 A record is a dict in the shape the old `topics.json` had: the columns by name, with `sessions` and `tags` as lists,
 `pinned`, `guest` and `unread` as `True` or left out, `session_order` as `'manual'` or left out, and every other
@@ -125,6 +126,19 @@ class TopicRecords:
 
     def open_places(self):
         return self.read()['open_places']
+
+    def worktrees(self):
+        """Every Muxify Worktree record, oldest first, as a dict in the shape the old `worktrees/<id>.json` had:
+        the columns by name, with `environment` left out when it is NULL."""
+        if not self.path.exists():
+            return []
+        with self._connection() as connection:
+            connection.row_factory = sqlite3.Row
+            try:
+                rows = connection.execute('SELECT * FROM worktrees ORDER BY created_at, id').fetchall()
+            finally:
+                connection.row_factory = None
+        return [{key: row[key] for key in row.keys() if row[key] is not None} for row in rows]
 
     # Changes.
 
