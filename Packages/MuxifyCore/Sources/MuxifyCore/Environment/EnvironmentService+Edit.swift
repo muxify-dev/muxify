@@ -82,6 +82,7 @@ extension EnvironmentService {
             }
             let made = try executor.run(commands, client: client)
             if let postCreate, let pane = made?.pane {
+                server.reportColours(beforeTypingInto: pane.rawValue)
                 try server.run(["send-keys", "-t", pane.rawValue, "-l", postCreate])
                 try server.run(["send-keys", "-t", pane.rawValue, "Enter"])
             }

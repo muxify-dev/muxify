@@ -40,6 +40,7 @@ extension EnvironmentService {
             if let setupFolder = repository.setupFolder, !repository.setup.postCreate.isEmpty {
                 let command = try worktrees.postCreateCommand(record, hooks: repository.setup.postCreate,
                                                               setupFile: setupFolder + "/" + WorktreeSetup.fileName)
+                server.reportColours(beforeTypingInto: made.pane.rawValue)
                 try server.run(["send-keys", "-t", made.pane.rawValue, "-l", command])
                 try server.run(["send-keys", "-t", made.pane.rawValue, "Enter"])
                 output.append("postCreate runs in \(made.sessionName)")

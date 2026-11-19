@@ -1,5 +1,6 @@
 import AppKit
 import GhosttyKit
+import MuxifyCore
 
 /// Things libghostty asks the host app to do that only the app can decide.
 protocol GhosttyRuntimeDelegate: AnyObject {
@@ -44,6 +45,17 @@ struct TerminalTheme: Equatable {
                 NSColor(srgbRed: CGFloat($0.r) / 255, green: CGFloat($0.g) / 255, blue: CGFloat($0.b) / 255, alpha: 1)
             }
         } : []
+    }
+
+    /// The background and foreground in 8 bits per channel, as Ghostty's config holds them.
+    var colours: TerminalColours? {
+        func colour(_ color: NSColor) -> TerminalColour? {
+            guard let rgb = color.usingColorSpace(.sRGB) else { return nil }
+            let channel = { (value: CGFloat) in UInt8((min(max(value, 0), 1) * 255).rounded()) }
+            return TerminalColour(red: channel(rgb.redComponent), green: channel(rgb.greenComponent), blue: channel(rgb.blueComponent))
+        }
+        guard let background = colour(background), let foreground = colour(foreground) else { return nil }
+        return TerminalColours(background: background, foreground: foreground)
     }
 
     var isDark: Bool {

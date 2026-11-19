@@ -218,6 +218,8 @@ class CommandPalette(unittest.TestCase):
         sid = self.new_session('sw-paste', self.beta)
         window = self.window_of(sid)
         self.s.show(window)
+        # The app can show the Window before tmux moves the Client: the switch waits for the Colour Report first.
+        wait(lambda: window in self.client_windows(), 'the client did not move to sw-paste', seconds=5)
         # The app's control client stays where it is, so the check compares every client with where it was.
         clients = set(self.client_windows())
         pane = self.s.tmux('display-message', '-p', '-t', window, '#{pane_id}')

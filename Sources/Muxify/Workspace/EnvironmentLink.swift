@@ -241,6 +241,9 @@ protocol EnvironmentLink: AnyObject {
     /// Whether this App Window consumes `@muxify_open` on its Environment, so that its Host Server names its own
     /// socket in `@muxify_browser_socket`: it sends `claim_open` or `release_open` when this changes.
     func setOpenConsumer(_ consumes: Bool)
+    /// Reports the Terminal's colours to the Panes of the Sessions that this App Window's Environment shows (ADR
+    /// 0095). Only the Local Environment reports: issue #149 is the remote one.
+    func reportColours(_ colours: TerminalColours?)
 
     // MARK: Git
 
@@ -322,6 +325,7 @@ extension EnvironmentLink {
     func sessionsOnlyLink() -> EnvironmentLink? { nil }
     func serveHostRequests(_ handler: @escaping HostRequestHandler) {}
     func setOpenConsumer(_ consumes: Bool) {}
+    func reportColours(_ colours: TerminalColours?) {}
 }
 
 /// What answers a Host Server's request for its App Window: a Browser command's reply, `done` for a `select`, or

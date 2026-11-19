@@ -34,6 +34,11 @@ struct TopicExecutor {
         var made: TmuxMade?
         // The postCreate command of each Worktree that Reopen made again, by folder, for the first Session there.
         var postCreates: [String: String] = [:]
+        // The Panes that got a Colour Report before a typed command: no Client shows a Session that a Reopen made.
+        var reported: Set<String> = []
+        func reportColours(to target: String) {
+            if reported.insert(target).inserted { server.reportColours(beforeTypingInto: target) }
+        }
         do {
             for command in commands {
                 switch command {
@@ -59,6 +64,7 @@ struct TopicExecutor {
                     reopenedSessionIDs.append(session.session.rawValue)
                     made = made ?? session
                     if let postCreate = postCreates.removeValue(forKey: directory) {
+                        reportColours(to: session.pane.rawValue)
                         try server.run(["send-keys", "-t", session.pane.rawValue, "-l", postCreate])
                         try server.run(["send-keys", "-t", session.pane.rawValue, "Enter"])
                     }
@@ -67,6 +73,7 @@ struct TopicExecutor {
                 case .tmuxMaking(let arguments):
                     made = try TmuxMade(output: server.run(Array(arguments.prefix(1)) + ["-P", "-F", TmuxMade.format] + arguments.dropFirst()))
                 case .sendKeys(let target, let keys, let literal):
+                    if !reopenedSessionIDs.isEmpty { reportColours(to: target) }
                     try server.run(Tmux.sendKeysArguments(target: target, keys: keys, literal: literal, client: client))
                 case .newTopicSession(let name, let directory):
                     let output = try server.run(["new-session", "-d", "-P", "-F", "#{window_id}", "-s", name, "-c", directory])

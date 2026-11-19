@@ -173,6 +173,7 @@ final class AppWindows {
                 MainActor.assumeIsolated {
                     self?.focus(id)
                     self?.stores[id]?.readActiveTopicOnEntry()
+                    self?.stores[id]?.reportColours()
                     self?.stores[id]?.refresh()
                 }
             },

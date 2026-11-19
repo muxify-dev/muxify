@@ -16,9 +16,10 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
 
     /// The first read of the records is now, so a subscriber starts with them and not with an empty list.
     init(topics: TopicStore = TopicStore(paths: MuxifyPaths())) {
-        publisher = EnvironmentPublisher(server: .app, topics: topics, delivery: .main,
-                                         startControlClient: ControlClient.start, report: Diagnostics.report)
-        super.init { TmuxConnection() }
+        let publisher = EnvironmentPublisher(server: .app, topics: topics, delivery: .main,
+                                             startControlClient: ControlClient.start, report: Diagnostics.report)
+        self.publisher = publisher
+        super.init { TmuxConnection(beforeRunning: publisher.reportColours(beforeRunning:)) }
         do {
             state.apply(state.changes(to: try topics.read(), all: true))
         } catch {
@@ -91,8 +92,13 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     /// The service on the Local server, with the SessionPaths as git reported them last.
     func environmentService(sessionPaths: [SessionPath], topics: Config.Topics, notifications: Config.Notifications,
                             worktreesRoot: String?) -> EnvironmentService? {
-        EnvironmentService(paths: publisher.topics.paths, server: TmuxServer.app, sessionPaths: sessionPaths, topics: topics,
+        EnvironmentService(paths: publisher.topics.paths, server: ColourReportingTmux(server: TmuxServer.app, publisher: publisher),
+                           sessionPaths: sessionPaths, topics: topics,
                            notifications: notifications, worktreesRoot: worktreesRoot)
+    }
+
+    func reportColours(_ colours: TerminalColours?) {
+        publisher.reportColours(colours)
     }
 
     func git(_ read: GitRead) async throws -> GitAnswer {

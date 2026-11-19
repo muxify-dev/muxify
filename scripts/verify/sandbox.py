@@ -279,6 +279,11 @@ class Sandbox:
                                 env=dict(self.env, TERM='xterm-256color'),
                                 stdin=terminal, stdout=terminal, stderr=terminal)
 
+    def tmux_control(self, session):
+        """Starts a control Client of the check's on pipes, attached to the Session; write command lines to its stdin."""
+        return subprocess.Popen(self._tmux_command(['-C', 'attach-session', '-t', session]), env=self.env,
+                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL)
+
     # app
 
     def launch(self, args=(), app_source=DEBUG_APP, timeout=30, fresh=True):

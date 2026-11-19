@@ -499,6 +499,15 @@ enum TestDriver {
             surface?.performBinding(text)
             return ["rows": [], "pressed": surface != nil]
         }
+        // Tells the App Window that it became key, as macOS does when the user brings it to the front. The app stays
+        // behind, so the check takes no focus from the user.
+        if name == "key" {
+            guard let window = NSApp.windows.first(where: { $0.isVisible && $0.styleMask.contains(.titled) }) else {
+                return ["rows": [], "pressed": false]
+            }
+            NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+            return ["rows": [], "pressed": true]
+        }
         // The main menu bar as data, each menu with the items it updates before it opens, without opening one.
         if name == "menus" {
             guard let mainMenu = updatedMainMenu() else { return ["rows": [], "pressed": false] }

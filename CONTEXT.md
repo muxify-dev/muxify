@@ -69,6 +69,10 @@ _Avoid_: tmux path, tmux version setting
 The Session `muxify-watch`, where Muxify's control-mode Client listens for tmux changes. Muxify makes it while you have a Session of your own and kills it after your last one closes. It has no Window you can see in the Sidebar, the Command Palette or the CLI, and no Terminal attaches to it.
 _Avoid_: listener Session, infra Session, hidden Session
 
+**Colour Report**:
+The background and foreground colours that a screen tells tmux it paints a Pane with. A program in the Pane that asks for its background or foreground gets the last Colour Report that any screen wrote, before any other answer. Muxify writes the colours of its Terminal for the Sessions that it shows, so the screen in use writes last. Muxify Mobile writes its theme's colours.
+_Avoid_: theme report, colour override, OSC report
+
 **Find in Pane**:
 Searching the history of the current Window's active Pane, from a find bar over the Terminal, with every match highlighted. It never searches the other Panes, the Browser or a Command Palette.
 _Avoid_: terminal search, scrollback search, Find (alone)

@@ -110,7 +110,84 @@ final class EnvironmentPublisherTests: XCTestCase {
         }
     }
 
+    func testASwitchThatReturnsFindsTheColourReportOnEveryPaneOfItsSession() async throws {
+        let probes = try probe(session: "work")
+        try server.run(["split-window", "-d", "-t", "work:", probeCommand(probes.1)])
+        let recorder = start()
+        try await settle(recorder, controlClients: 1)
+        publishers[0].reportColours(Self.light)
+
+        publishers[0].reportColours(beforeRunning: ["select-window", "-t", "work:", ";", "switch-client", "-c", "/dev/none", "-t", "work:"])
+        try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
+
+        for answer in [probes.0, probes.1] {
+            try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
+            XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7")
+        }
+    }
+
+    func testAPaneOfANewSessionThatNoClientShowsAnswersOnlyAfterTheReportBeforeTyping() async throws {
+        let recorder = start()
+        try server.run(["new-session", "-d", "-s", "other"])
+        try await settle(recorder, controlClients: 1)
+        publishers[0].reportColours(Self.light)
+        let probes = try probe(session: "made")
+        let pane = try server.run(["display-message", "-p", "-t", "made:", "#{pane_id}"]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        publishers[0].reportColours(beforeTypingInto: pane)
+        try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
+
+        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: probes.0) }
+        XCTAssertEqual(try String(contentsOfFile: probes.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7")
+    }
+
+    func testWithoutColoursASwitchReportsNothing() async throws {
+        let probes = try probe(session: "work")
+        let recorder = start()
+        try await settle(recorder, controlClients: 1)
+
+        publishers[0].reportColours(beforeRunning: ["switch-client", "-c", "/dev/none", "-t", "work:"])
+        try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
+
+        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: probes.0) }
+        XCTAssertEqual(try String(contentsOfFile: probes.0, encoding: .utf8), "none")
+    }
+
     // MARK: - Helpers
+
+    private static let light = TerminalColours(background: TerminalColour(red: 0xfb, green: 0xf1, blue: 0xc7),
+                                               foreground: TerminalColour(red: 0x3c, green: 0x38, blue: 0x36))
+
+    /// A Session whose Pane runs a program that waits for the file `go`, then asks for the background (OSC 11) as
+    /// Claude Code does, and writes the answer's colour, or `none` after a second without one, to the returned file.
+    /// A second answer file is for one more probe Pane.
+    private func probe(session: String) throws -> (String, String) {
+        let python = "/usr/bin/python3"
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: python), "no python3 for the probe")
+        let script = directory.appendingPathComponent("probe.py").path
+        try """
+            import os, re, select, sys, termios, tty, time
+            answer, go = sys.argv[1], sys.argv[2]
+            tty.setraw(0)
+            while not os.path.exists(go): time.sleep(0.02)
+            os.write(1, b'\\x1b]11;?\\x1b\\\\')
+            reply, end = b'', time.time() + 1
+            while time.time() < end and not reply.endswith(b'\\x1b\\\\'):
+                if select.select([0], [], [], 0.05)[0]: reply += os.read(0, 256)
+            found = re.search(rb'rgb:[0-9a-f/]+', reply)
+            open(answer + '.part', 'w').write(found.group().decode() if found else 'none')
+            os.rename(answer + '.part', answer)
+            time.sleep(30)
+            """.write(toFile: script, atomically: true, encoding: .utf8)
+        let first = directory.appendingPathComponent(session + "-1").path
+        let second = directory.appendingPathComponent(session + "-2").path
+        try server.run(["new-session", "-d", "-s", session, "-x", "80", "-y", "24", probeCommand(first)])
+        return (first, second)
+    }
+
+    private func probeCommand(_ answer: String) -> String {
+        "/usr/bin/python3 \(directory.appendingPathComponent("probe.py").path) \(answer) \(directory.appendingPathComponent("go").path)"
+    }
 
     private final class Recorder: @unchecked Sendable {
         private let lock = NSLock()
