@@ -45,27 +45,10 @@ Edit › Paste | ⌘V | disabled
 Edit › Delete | disabled
 Edit › Select All | ⌘A | disabled
 Edit › ---
-Edit › Writing Tools
-Edit › Writing Tools › Show Writing Tools | disabled
-Edit › Writing Tools › ---
-Edit › Writing Tools › Proofread | disabled
-Edit › Writing Tools › Rewrite | disabled
-Edit › Writing Tools › ---
-Edit › Writing Tools › Make Friendly | disabled
-Edit › Writing Tools › Make Professional | disabled
-Edit › Writing Tools › Make Concise | disabled
-Edit › Writing Tools › ---
-Edit › Writing Tools › Summarize | disabled
-Edit › Writing Tools › Create Key Points | disabled
-Edit › Writing Tools › Make List | disabled
-Edit › Writing Tools › Make Table | disabled
-Edit › Writing Tools › ---
-Edit › Writing Tools › Compose… | disabled
 Edit › AutoFill
 Edit › AutoFill › Contact… | disabled
 Edit › AutoFill › Passwords… | disabled
 Edit › AutoFill › Credit Card… | disabled
-Edit › Start Dictation | 🎤 | disabled
 Edit › Emoji & Symbols | ⌘Space
 View
 View › Hide Sidebar | ⌘S

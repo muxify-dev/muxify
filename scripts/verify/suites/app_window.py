@@ -36,6 +36,11 @@ PARTS = {
 KEYS = {'\r': '↩', '\t': '⇥', '\x1b': '⎋', ' ': 'Space', '\x08': '⌫', '\x7f': '⌫', '': '↑', '': '↓',
         '': '←', '': '→', '': '⌦'}
 MODIFIERS = [('function', 'fn'), ('control', '⌃'), ('option', '⌥'), ('shift', '⇧'), ('command', '⌘')]
+# Items that AppKit adds to the Edit menu only when an OS setting is on, such as Apple Intelligence for Writing Tools.
+# Their titles and states follow that setting too, as Start Dictation becomes Start Dictation… when Dictation is on.
+SYSTEM_ITEMS = [('Edit', 'Writing Tools'), ('Edit', 'Start Dictation')]
+# Items of the app whose enabled state AppKit sets from other apps: Show All is enabled only while an app is hidden.
+SYSTEM_STATE = [('Muxify', 'Show All')]
 
 
 def shortcut(item):
@@ -52,7 +57,8 @@ def shortcut(item):
 
 def menu_lines(items, path=()):
     """A line for each item that the user sees, in order, named by its title path, such as
-    `File › New Muxify Window | ⇧⌘N`, with `disabled`, `checked`, `mixed` or `alternate` after it. A separator is `---`."""
+    `File › New Muxify Window | ⇧⌘N`, with `disabled`, `checked`, `mixed` or `alternate` after it. A separator is `---`.
+    The items and states that the OS sets, SYSTEM_ITEMS and SYSTEM_STATE, have no line and no `disabled`."""
     lines = []
     for item in items:
         if item.get('hidden'):
@@ -61,7 +67,10 @@ def menu_lines(items, path=()):
             lines.append(' › '.join(path + ('---',)))
             continue
         here = path + (item['title'],)
-        words = [' › '.join(here), shortcut(item), '' if item['enabled'] else 'disabled',
+        if any(here[:-1] == system[:-1] and here[-1].startswith(system[-1]) for system in SYSTEM_ITEMS):
+            continue
+        enabled = item['enabled'] or here in SYSTEM_STATE
+        words = [' › '.join(here), shortcut(item), '' if enabled else 'disabled',
                  {'on': 'checked', 'mixed': 'mixed'}.get(item['state'], ''), 'alternate' if item['alternate'] else '']
         lines.append(' | '.join(word for word in words if word))
         # macOS fills Services with the services of the apps on this Mac.
