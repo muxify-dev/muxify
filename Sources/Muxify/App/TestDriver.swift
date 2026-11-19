@@ -114,6 +114,10 @@ enum TestDriver {
             pending = Spin(nonce: nonce, seconds: command["seconds"] as? Double ?? 1)
             return
         }
+        if command["command"] as? String == "scroll", command["wheel"] as? Bool == true {
+            pending = Wheel(nonce: nonce, command: command)
+            return
+        }
         if command["command"] as? String == "scroll", command["by"] != nil {
             pending = ScrollSteps(nonce: nonce, command: command)
             return
@@ -404,7 +408,7 @@ enum TestDriver {
         private let watched: [String]
         private let seconds: TimeInterval
         private var until: Date
-        private var gesture: Drag?
+        private var gesture: Steps?
         private var result: [String: Any] = [:]
         private var objects: [String: NSObject] = [:]
         private var frames: [String: [[Double]]] = [:]
@@ -420,6 +424,8 @@ enum TestDriver {
             command["watch"] = nil
             if ["drag", "click"].contains(command["command"] as? String) {
                 gesture = Drag(nonce: nonce, command: command)
+            } else if command["command"] as? String == "scroll", command["wheel"] as? Bool == true {
+                gesture = Wheel(nonce: nonce, command: command)
             } else {
                 result = TestDriver.run(command)
             }
@@ -699,6 +705,55 @@ enum TestDriver {
             clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, clip.bounds.origin.y + delta), end)))
             scrollView.reflectScrolledClipView(clip)
             return nil
+        }
+    }
+
+    /// `scroll` with `wheel`: a trackpad swipe of `by` points down the scroll view under the element, in `steps` moves,
+    /// one each tick, between a began and an ended phase. It goes to the scroll view, not through the window, so the
+    /// pointer does not move and the app takes no focus. Unlike the other scrolls, it goes past an end as a user's
+    /// swipe does, so the scroll view bounces there if it bounces at all.
+    private final class Wheel: Steps {
+        let nonce: String
+        private let scrollView: NSScrollView?
+        private let point: CGPoint
+        private var deltas: [CGFloat]
+        private var began = false
+
+        init(nonce: String, command: [String: Any]) {
+            self.nonce = nonce
+            scrollView = TestDriver.scrollView(under: command["target"] as? String ?? "")
+            let steps = max(1, command["steps"] as? Int ?? 1)
+            deltas = Array(repeating: CGFloat(command["by"] as? Double ?? 0) / CGFloat(steps), count: scrollView == nil ? 0 : steps)
+            let clip = scrollView?.contentView
+            let screen = clip.flatMap { clip in clip.window?.convertToScreen(clip.convert(clip.bounds, to: nil)) } ?? .zero
+            // Core Graphics counts from the top of the main screen.
+            point = CGPoint(x: screen.midX, y: (NSScreen.screens.first?.frame.maxY ?? 0) - screen.midY)
+        }
+
+        func step() -> [String: Any]? {
+            guard let scrollView else { return ["rows": [], "pressed": false] }
+            if !began {
+                began = true
+                send(0, phase: 1, to: scrollView)
+                return nil
+            }
+            if !deltas.isEmpty {
+                send(deltas.removeFirst(), phase: 2, to: scrollView)
+                return nil
+            }
+            send(0, phase: 4, to: scrollView)
+            return ["rows": [], "pressed": true]
+        }
+
+        /// One event of the swipe: a positive `down` moves the content up, as a swipe up on a trackpad does.
+        private func send(_ down: CGFloat, phase: Int64, to scrollView: NSScrollView) {
+            guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: Int32(-down.rounded()),
+                                      wheel2: 0, wheel3: 0) else { return }
+            event.location = point
+            event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            event.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: Double(-down))
+            event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+            if let event = NSEvent(cgEvent: event) { scrollView.scrollWheel(with: event) }
         }
     }
 
