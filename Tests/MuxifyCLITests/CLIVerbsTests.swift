@@ -130,6 +130,10 @@ final class CLIVerbsTests: XCTestCase {
             (["topic", "move", "--before-place", "cd69b134"], request(.placeCard(next: .openPlace("cd69b134"), after: false))),
             (["session", "move", "up", "--session", "notes"], request(.moveSession(.up), target: .sessionName("notes"))),
             (["session", "move", "down"], request(.moveSession(.down))),
+            (["session", "move", "--new-topic", "--session", "notes"], request(.moveWholeSession(to: .newTopic(title: "")), target: .sessionName("notes"))),
+            (["session", "move", "--new-topic", "Notes work"], request(.moveWholeSession(to: .newTopic(title: "Notes work")))),
+            (["session", "move", "--topic", "Fix", "--pane", "%3"],
+             request(.moveWholeSession(to: .topic("Fix")), target: .pane(try XCTUnwrap(PaneID(rawValue: "%3"))))),
             (["topic", "sort-sessions", "--topic", "Fix"], request(.sortSessions, target: .topic(.named("Fix")))),
             (["topic", "replace-from-bench", "--with", "Next"], request(.replaceFromBench(with: .topic("Next")))),
             (["topic", "fill-place", "2"], request(.fillPlace(2))),
@@ -149,6 +153,8 @@ final class CLIVerbsTests: XCTestCase {
                           ["topic", "move", "up", "--before", "A"], ["topic", "move", "--after", ""], ["topic", "move", "--before", "A", "B"],
                           ["topic", "move", "--before-place", "a", "--before-place", "b"],
                           ["session", "move", "up", "--window", "@1"], ["session", "move", "up", "--topic", "Fix"],
+                          ["session", "move", "--new-topic", "--window", "@1"], ["session", "move", "--new-topic", "a", "b"],
+                          ["session", "move", "--topic", "Fix", "--new-topic"], ["session", "move", "--topic", ""],
                           ["topic", "replace-from-bench"], ["topic", "replace-from-bench", "Next"],
                           ["topic", "replace-from-bench", "--with", "Next", "--with-session", "notes"],
                           ["topic", "replace-from-bench", "--with", "A", "--with", "B"], ["topic", "replace-from-bench", "--with", ""],
@@ -218,6 +224,23 @@ final class CLIVerbsTests: XCTestCase {
             (["window", "move", "--before", "@3", "--session", "notes"], CLIVerbs.usage(for: ["window", "move"])),
             (["window", "move", "--before", "@3", "--new-session"], CLIVerbs.usage(for: ["window", "move"])),
             (["window", "move", "--before", "@3", "title"], CLIVerbs.usage(for: ["window", "move"])),
+        ]
+        for (arguments, message) in errors {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+                XCTAssertEqual(error.localizedDescription, message, "\(arguments)")
+            }
+        }
+    }
+
+    func testSessionMoveTakesOneDestination() throws {
+        let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let oneDestination = "session move takes one destination: up, down, --topic <id|label> or --new-topic [\"title\"]"
+        let errors: [([String], String)] = [
+            (["session", "move", "--topic", "Fix", "--new-topic"], oneDestination),
+            (["session", "move", "up", "--topic", "Fix"], oneDestination),
+            (["session", "move", "--new-topic", "--window", "@1"], CLIVerbs.usage(for: ["session", "move"])),
+            (["session", "move", "--topic", ""], "--topic takes the id or label of an open Topic"),
         ]
         for (arguments, message) in errors {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in

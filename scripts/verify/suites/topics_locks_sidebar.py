@@ -1,4 +1,5 @@
-"""Guest Sessions in the Topics list (ADR 0018, ADR 0081): Make a Guest, Bench, New Topic from a Guest Session and Kill.
+"""Guest Sessions in the Topics list (ADR 0018, ADR 0081): Make a Guest, Bench, New Topic from a Guest Session or from its
+only Window, and Kill.
 
 A Guest Session is a No Topic Session with a Lock, the tmux option @muxify_lock. The Session card header in
 UI/SidebarView.swift gives "Make a Guest" as an accessibility action, and the card of a Guest Session gives "Bench" and
@@ -106,6 +107,36 @@ class TopicsLocksSidebar(TopicsSidebar):
         rs = s.wait_rows(lambda rs: self.above('topic-take-lower', topic, rs) and self.above('topics-guests-line', topic, rs)
                          and key not in s.ids(rs), 'the new Topic did not take the place of the Guest Session')
         self.assertIn('Guest', s.row(topic, rs).get('accessibilityValue', ''), self.describe(topic, rs))
+
+    def test_new_topic_from_the_only_window_of_a_guest_session_takes_its_place(self):
+        s = self.s
+        sid, key = self.guest_session('window-notes', 8)
+        later_sid, later = self.guest_session('window-later', 9)
+        s.wait_rows(lambda rs: self.above(key, later, rs), 'the first Guest Session is not above the second')
+        window = s.tmux('list-windows', '-t', sid, '-F', '#{window_id}')
+        self.select_window(sid + ':')
+        self.expand(key)
+        s.wait_rows(lambda rs: s.has('topic-window-' + window, rs), 'the Guest Session shows no row for its Window')
+        before = set(self.records())
+        # "New Topic from this Window" and "Move Window to Topic…" open the same Move step; SidebarView gives the Window
+        # row the second as an accessibility action (topicMembershipActions), because the context menu takes the mouse.
+        s.act('action', 'topic-window-' + window, 'Move Window to Topic…')
+        s.wait_rows(lambda rs: s.has('palette-row-new-topic', rs), 'Move Window to Topic did not open Move')
+        s.act('focus', 'palette-search')
+        s.act('set', 'palette-search', 'Window place')
+        s.wait_rows(lambda rs: 'Window place' in s.row('palette-row-new-topic', rs).get('accessibilityLabel', ''),
+                    'the New Topic row does not show the typed title')
+        s.act('press', 'palette-row-new-topic')
+        record = wait(lambda: next((r for i, r in self.records().items() if i not in before and r.get('title') == 'Window place'), None),
+                      'no Topic record for the Window')
+        self.addCleanup(self.store.remove, record['id'])
+        self.addCleanup(s.tmux_ok, 'kill-session', '-t', window)
+        self.assertEqual((record.get('order'), record.get('guest')), (8, True), json.dumps(record))
+        topic = 'topic-' + record['id']
+        rs = s.wait_rows(lambda rs: self.above(topic, later, rs) and key not in s.ids(rs),
+                         'the new Topic did not take the place of the Guest Session that its Window ended')
+        self.assertIn('Guest', s.row(topic, rs).get('accessibilityValue', ''), self.describe(topic, rs))
+        self.assertEqual(float(self.lock_option(later_sid)), 9, 'the other Guest Session moved')
 
     def test_killing_a_guest_session_removes_its_card(self):
         s = self.s

@@ -255,17 +255,36 @@ enum CLIVerbs {
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .request(try RequestInvocation(.kill(session: true), parsed: parsed))
         },
-        CLIVerb(path: .sessionMove, synopsis: "(up | down) [--session <name|id> | --pane <id>] [--json]",
-                options: [.flag("--json")], targets: [.session, .pane],
+        CLIVerb(path: .sessionMove,
+                synopsis: "(up | down | --topic <id|label> | --new-topic [\"title\"]) [--session <name|id> | --pane <id>] [--json]",
+                options: [.value("--topic"), .flag("--new-topic"), .flag("--json")], targets: [.session, .pane],
                 help: """
-                Moves this Pane's Session one place up or down among the Sessions of its Topic, as
-                Move Up and Move Down do on its row. For a Guest Session, which is in no Topic, it
-                moves its card as Move Topic Up and Down do: see `topic move`. At the end it fails.
-                `up` on a Session that is in no Topic and not a Guest makes it a Guest Session, at
-                the end of the Guests, as Make a Guest does. `down` on it fails: make it a Guest
-                first.
+                Moves this Pane's Session, or the Session that --session or --pane names.
+                  up | down              one place up or down among the Sessions of its Topic, as
+                                         Move Up and Move Down do on its row
+                  --topic <id|label>     the whole Session into the open Topic that has this id
+                                         or exact label, as Move Session does
+                  --new-topic ["title"]  the whole Session into a new Topic, Untitled without a
+                                         title. A new Topic is a Guest at the end of the Guests;
+                                         from a Guest Session, it takes the Guest Session's place.
+                For a Guest Session, which is in no Topic, `up` and `down` move its card as Move
+                Topic Up and Down do: see `topic move`. At the end they fail. `up` on a Session
+                that is in no Topic and not a Guest makes it a Guest Session, at the end of the
+                Guests, as Make a Guest does. `down` on it fails: make it a Guest first.
                 """) { parsed in
-            .request(try RequestInvocation(.moveSession(try upOrDown(parsed) ? .up : .down), parsed: parsed))
+            let topic = try parsed.value("--topic"), newTopic = parsed.flag("--new-topic")
+            switch (topic, newTopic) {
+            case (nil, false):
+                return .request(try RequestInvocation(.moveSession(try upOrDown(parsed) ? .up : .down), parsed: parsed))
+            case (let topic?, false) where parsed.operands.isEmpty:
+                return .request(try RequestInvocation(.moveWholeSession(to: .topic(try RequestInvocation.TargetOption.topicName(topic))),
+                                                      parsed: parsed))
+            case (nil, true):
+                guard parsed.operands.count <= 1 else { throw CLIError.usage }
+                return .request(try RequestInvocation(.moveWholeSession(to: .newTopic(title: parsed.operands.first ?? "")), parsed: parsed))
+            default:
+                throw CLIError("session move takes one destination: up, down, --topic <id|label> or --new-topic [\"title\"]", exitCode: 2)
+            }
         },
         CLIVerb(path: .sessionList, synopsis: "[--json]", options: [.flag("--json")],
                 help: """

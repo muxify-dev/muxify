@@ -75,6 +75,8 @@ struct RequestInvocation: Equatable {
         case replaceFromBench(with: CardName)
         /// The Session one place up or down among its Topic's Sessions, or a Locked Session's card.
         case moveSession(TopicSessionPlacement)
+        /// The whole Session into an open Topic or a new Topic, as Move Session does.
+        case moveWholeSession(to: SessionDestination)
         case sortSessions
         /// Read or Unread for the `scope` of the target or of the caller's Pane.
         case markRead(ReadChange, scope: ReadScope)
@@ -95,7 +97,7 @@ struct RequestInvocation: Equatable {
             case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .fillPlace, .moveCard, .placeCard, .tradeCard,
                  .sortSessions:
                 return [.topic, .window, .pane]
-            case .moveSession: return [.session, .pane]
+            case .moveSession, .moveWholeSession: return [.session, .pane]
             case .replaceFromBench, .makeGuest, .benchTopic: return [.topic, .session, .window, .pane]
             case .reopen, .startFresh: return [.topic]
             case .moveWindow, .moveToNewTopic, .removeWindowFromTopic: return [.window, .pane]
@@ -135,7 +137,7 @@ struct RequestInvocation: Equatable {
             case .settle, .forget, .forgetSettled, .reopen, .startFresh, .moveWindow, .placeWindow, .moveToNewTopic, .moveToNewWindow,
                  .removeSessionFromTopic, .removeWindowFromTopic, .newWindow, .newSession, .renameSession, .renameWindow, .zoomPane, .kill,
                  .makeGuest, .benchTopic, .fillPlace, .moveCard, .placeCard, .tradeCard, .replaceFromBench, .moveSession,
-                 .createWorktree, .removeWorktree:
+                 .moveWholeSession, .createWorktree, .removeWorktree:
                 return .inDoubt
             }
         }
@@ -196,7 +198,7 @@ struct RequestInvocation: Equatable {
             case .moveCard, .placeCard, .tradeCard: return "topic move"
             case .chooseInPlay: return "topic choose-in-play"
             case .replaceFromBench: return "topic replace-from-bench"
-            case .moveSession: return "session move"
+            case .moveSession, .moveWholeSession: return "session move"
             case .sortSessions: return "topic sort-sessions"
             case .markRead(let change, let scope): return CLIVerbPath.markRead(change, scope: scope).rawValue
             case .markAllRead: return "mark-all-read"
@@ -206,6 +208,12 @@ struct RequestInvocation: Equatable {
             case .visitSessionPath: return "session-paths visit"
             }
         }
+    }
+
+    /// Where `session move` takes a whole Session.
+    enum SessionDestination: Equatable {
+        case topic(String)
+        case newTopic(title: String)
     }
 
     /// A card of the Topics list as a command line names it: an open Topic by id or label, a Locked Session by name
@@ -400,8 +408,8 @@ extension RequestInvocation {
                 // No client: no terminal switches to the result, because a command changes what the user sees only
                 // when they ask for it. A new Worktree's Session is shown unless --no-open says not to, and a Remove
                 // that kills the caller's Session moves its terminal first.
-                return service.handle(EnvironmentRequest(try self.request(sessionPaths: config.sessionPaths, service: service), target: target,
-                                                         caller: caller.map(TopicCaller.pane)), client: callerClient)
+                return service.handle(EnvironmentRequest(try self.request(sessionPaths: config.sessionPaths, service: service),
+                                                         target: try requestTarget(), caller: caller.map(TopicCaller.pane)), client: callerClient)
             }
             do {
                 response = try handle()
@@ -521,6 +529,28 @@ extension RequestInvocation {
         }
     }
 
+    /// The service moves a whole Session only for a Session id target. So a whole-Session move turns its Session name,
+    /// `--pane` or caller Pane into the id of that Pane's Session.
+    private func requestTarget() throws -> EnvironmentTarget? {
+        guard case .moveWholeSession = command else { return target }
+        let named = target ?? caller.map(EnvironmentTarget.pane)
+        let snapshot = try TmuxServer.local.snapshot()
+        let window: TmuxWindow?
+        let missing: String
+        switch named {
+        case .session(let id)?: return .session(id)
+        case .sessionName(let name)?:
+            window = snapshot.windows.first { $0.sessionName == name }
+            missing = TopicRequestError.sessionUnavailable(name).description
+        case .pane(let pane)?:
+            window = snapshot.panes.first { $0.id == pane.rawValue }.flatMap { found in snapshot.windows.first { $0.id == found.windowID } }
+            missing = "No tmux Pane has the id \(pane.rawValue)."
+        default: return target
+        }
+        guard let window, let id = SessionID(rawValue: window.sessionID) else { throw CLIError(missing) }
+        return .session(id)
+    }
+
     private func request(sessionPaths: [SessionPath], service: EnvironmentService) throws -> EnvironmentCommand {
         switch command {
         case .new(let title, let tags): return .create(title: title, tags: tags.isEmpty ? nil : tags)
@@ -609,6 +639,8 @@ extension RequestInvocation {
         case .chooseInPlay(let cards): return .chooseInPlay(try cards.map { try $0.ref })
         case .replaceFromBench(let benched): return .replaceFromBench(with: try benched.ref)
         case .moveSession(let placement): return .moveSession(to: placement)
+        case .moveWholeSession(.topic(let topic)): return .move(to: .topic(.named(topic)))
+        case .moveWholeSession(.newTopic(let title)): return .move(to: .newTopic(title: title))
         case .sortSessions: return .sortSessions
         case .removeWindowFromTopic(nil): return .move(to: .newSession(topic: nil))
         case .removeWindowFromTopic(let name?):
