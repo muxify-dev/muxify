@@ -203,11 +203,10 @@ final class RemoteTmuxTests: XCTestCase {
         _ = try ready(second)
         // A UTF-8 name holds bytes that Ghostty reads as C1 controls; the report must not break out of its DCS.
         _ = try host.raw(["rename-window", "-t", started.id, "✳ agent"])
-        // The listener stays attached to the Watch Session, so it ends itself once the bootstrap clears the marker.
+        // The listener stays attached to a Session, so it ends itself once the bootstrap clears the marker.
         // Over real SSH the master, and so the Terminal, waits for it.
         let listener = Process()
-        let listenerCommand = second.command(["-C", "new-session", "-A", "-s", Tmux.watchSessionName,
-                                              "-f", "no-output,ignore-size", "cat"])
+        let listenerCommand = second.command(["-C", "attach-session", "-f", "no-output,ignore-size"])
         listener.executableURL = URL(fileURLWithPath: listenerCommand.executable)
         listener.arguments = listenerCommand.arguments
         listener.environment = host.environment
@@ -227,8 +226,6 @@ final class RemoteTmuxTests: XCTestCase {
         let listenerEnd = Date().addingTimeInterval(5)
         while listener.isRunning, Date() < listenerEnd { Thread.sleep(forTimeInterval: 0.02) }
         XCTAssertFalse(listener.isRunning, "The listener ends itself when its Terminal Client ends")
-        // Muxify kills the Watch Session itself once no Session of the user's is left.
-        _ = try host.raw(["kill-session", "-t", Tmux.watchSessionName])
         let survivors = try XCTUnwrap(second.closedSnapshot)
         XCTAssertEqual(survivors.windows.map(\.sessionName), ["project"])
         XCTAssertEqual(survivors.windows.map(\.name), ["✳ agent"])

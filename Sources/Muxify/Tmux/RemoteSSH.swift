@@ -82,7 +82,7 @@ final class RemoteSSH {
         let tmux = "tmux -u " + args.map(Tmux.shellQuote).joined(separator: " ")
         let script: String
         if args.first == "-C" {
-            // The listener stays attached to the Watch Session, and the SSH master, and so the Terminal, waits for
+            // The listener stays attached to a Session, and the SSH master, and so the Terminal, waits for
             // every channel over it. It ends itself once the attachment's marker is gone, which the bootstrap clears
             // when its Client ends. The control client reads the channel's input, saved before `&` replaces it.
             script = Self.remotePath + "\n" + checks + """
@@ -243,7 +243,7 @@ final class RemoteSSH {
             fi
             """
         } ?? """
-        if ! tmux -u list-sessions -f "$user_sessions" -F . 2>/dev/null | grep -q .; then
+        if ! tmux -u list-sessions -F . 2>/dev/null | grep -q .; then
             \(reportSnapshot)
             exit 0
         fi
@@ -284,14 +284,14 @@ final class RemoteSSH {
         fi
         # Set this here rather than relying on the SSH server's AcceptEnv.
         export TERM COLORTERM=truecolor MUXIFY_TERMINAL=1
-        # The Watch Session is Muxify's own: it does not count, and the Terminal never attaches to it.
-        user_sessions=\(Tmux.shellQuote(Tmux.userSessionFilter))
+        # An earlier Muxify's Listener sat in a Session of its own; it goes, so it neither counts nor gets the Terminal.
+        tmux -u kill-session -t \(Tmux.shellQuote("=" + EnvironmentPublisher.leftoverWatchSession)) 2>/dev/null
         \(sessionSetup)
         \(targetSetup)
         if [ -n "$target" ] && ! tmux -u list-panes -t "$target" >/dev/null 2>&1; then target=; fi
         \(picksLatestSession
-            ? "if [ -z \"$target\" ]; then target=$(tmux -u list-sessions -f \"$user_sessions\" -F '#{session_activity} #{session_id}' | sort -rn | head -n 1 | cut -d ' ' -f 2); fi"
-            : "if [ -z \"$target\" ]; then target=$(tmux -u list-windows -a -f \"$user_sessions\" -F '#{session_id}:#{window_id}' | head -n 1); fi")
+            ? "if [ -z \"$target\" ]; then target=$(tmux -u list-sessions -F '#{session_activity} #{session_id}' | sort -rn | head -n 1 | cut -d ' ' -f 2); fi"
+            : "if [ -z \"$target\" ]; then target=$(tmux -u list-windows -a -F '#{session_id}:#{window_id}' | head -n 1); fi")
         # Some SSH servers (including OrbStack) omit SSH_TTY despite -tt.
         client_tty=${SSH_TTY:-$(tty)}
         case "$client_tty" in

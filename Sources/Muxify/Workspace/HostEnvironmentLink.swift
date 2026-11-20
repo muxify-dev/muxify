@@ -270,7 +270,7 @@ final class HostEnvironmentLink: EnvironmentLink {
         state.apply(changes)
         guard serving else {
             serving = true
-            // The Sessions-only link stops listening: the server's publisher hears tmux and keeps the Watch Session.
+            // The Sessions-only link stops listening: the server's publisher hears tmux through its own Listener.
             inner.stopListening()
             events.send(.featuresChanged)
             events.send(.topics(state.topicContents))

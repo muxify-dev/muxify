@@ -175,7 +175,7 @@ protocol EnvironmentLink: AnyObject {
                          newSession: RemoteSSH.NewSession?) throws -> String
     /// Marks the App Window's own Client on this Mac's server, or removes the mark with nil.
     func updateLocalClient(_ client: TmuxClient?)
-    /// Whether the link hears every change of the server and the records itself and keeps its own Watch Session, so
+    /// Whether the link hears every change of the server and the records itself and keeps its own Listener, so
     /// the store neither polls it nor starts its listening. The Local link's `EnvironmentPublisher` does; a
     /// Sessions-only link leaves both to the store.
     var publishesChanges: Bool { get }

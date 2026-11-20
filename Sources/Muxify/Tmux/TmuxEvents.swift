@@ -28,15 +28,13 @@ final class TmuxEvents {
     /// Read on the main thread.
     var isRunning: Bool { client?.isRunning == true }
 
-    /// Attaches to the Watch Session, and makes it first when it is not there.
-    /// Notifications cover every Session, so the client hears the user's
-    /// Sessions from there, and their Panes never share a Session with it.
-    /// The Session runs `cat`, not a shell, so no shell startup file runs in it.
+    /// Attaches to the Session that tmux picks; it makes no Session, so the
+    /// server still exits with the last one. Notifications cover every
+    /// Session, so the client hears all of them from there.
     /// Call on the main thread.
     func start(invocation: ([String]) throws -> CommandInvocation) {
         guard !isRunning, Date() >= nextStart,
-              let invocation = try? invocation(["-C", "new-session", "-A", "-s", Tmux.watchSessionName,
-                                                "-f", "no-output,ignore-size", "cat"])
+              let invocation = try? invocation(["-C", "attach-session", "-f", "no-output,ignore-size"])
         else { return }
         stop()
         let token = UUID()

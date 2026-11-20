@@ -10,7 +10,7 @@ import MuxifyCore
 final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     let isOnThisMac = false
     let features: EnvironmentFeatures = []
-    /// The store polls the remote server and keeps its Watch Session through `startListening`; once a Host Server
+    /// The store polls the remote server and starts its Listener through `startListening`; once a Host Server
     /// serves, its publisher does both.
     let publishesChanges = false
     let environment: RemoteEnvironment

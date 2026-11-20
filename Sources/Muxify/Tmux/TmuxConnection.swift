@@ -28,15 +28,20 @@ final class TmuxConnection: @unchecked Sendable {
     private var localMarker: (option: String, pid: Int, registered: Bool)?
     /// Runs before each command on this Mac's server: the Colour Reports before a switch (ADR 0095).
     private let beforeRunning: (([String]) -> Void)?
+    /// The App Window's Client marker option on this Mac, which its publisher's Listener follows; nil gives each
+    /// replacement an option of its own.
+    private let localMarkerOption: String?
 
     init(environment: RemoteEnvironment?, sshExecutable: String = "/usr/bin/ssh") throws {
         remote = try environment.map { try RemoteSSH(environment: $0, sshExecutable: sshExecutable) }
         beforeRunning = nil
+        localMarkerOption = nil
     }
 
-    /// The connection to this Mac's server.
-    init(beforeRunning: (([String]) -> Void)? = nil) {
+    /// The connection to this Mac's server. `clientMarker` is the App Window's Client marker option.
+    init(clientMarker: String? = nil, beforeRunning: (([String]) -> Void)? = nil) {
         remote = nil
+        localMarkerOption = clientMarker
         self.beforeRunning = beforeRunning
     }
 
@@ -117,7 +122,7 @@ final class TmuxConnection: @unchecked Sendable {
     }
 
     /// Serializes marker writes with removal, so a late registration cannot
-    /// survive detach or retirement. Each replacement gets its own option.
+    /// survive detach or retirement. Each replacement writes the App Window's option again, or one of its own.
     func updateLocalClient(_ client: TmuxClient?) {
         guard isOnThisMac else { return }
         queue.async {
@@ -136,7 +141,8 @@ final class TmuxConnection: @unchecked Sendable {
                 }
             }
             guard let client, !client.isControl else { return }
-            let option = ClientMarker.option(nonce: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
+            let option = self.localMarkerOption
+                ?? ClientMarker.option(nonce: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
             let value = [String(client.pid), client.tty, NSHomeDirectory(), Tmux.hostName, "local"]
                 .joined(separator: Tmux.separator)
             self.localMarker = (option, client.pid, false)

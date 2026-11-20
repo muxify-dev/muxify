@@ -16,10 +16,13 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
 
     /// The first read of the records is now, so a subscriber starts with them and not with an empty list.
     init(topics: TopicStore = TopicStore(paths: MuxifyPaths())) {
+        // The App Window's Client marker: the publisher's Listener follows the Client that it names.
+        let marker = ClientMarker.option(nonce: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
         let publisher = EnvironmentPublisher(server: .app, topics: topics, delivery: .main,
-                                             startControlClient: ControlClient.start, report: Diagnostics.report)
+                                             startControlClient: ControlClient.start, clientMarker: marker,
+                                             report: Diagnostics.report)
         self.publisher = publisher
-        super.init { TmuxConnection(beforeRunning: publisher.reportColours(beforeRunning:)) }
+        super.init { TmuxConnection(clientMarker: marker, beforeRunning: publisher.reportColours(beforeRunning:)) }
         do {
             state.apply(state.changes(to: try topics.read(), all: true))
         } catch {

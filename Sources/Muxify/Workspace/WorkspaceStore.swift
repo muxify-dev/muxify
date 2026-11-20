@@ -1904,15 +1904,10 @@ final class WorkspaceStore {
             gatherGuests()
         }
 
-        // Listen while the user has a Session. The Watch Session alone must not keep the server running. A link that
-        // publishes its changes keeps its Watch Session itself.
-        if !link.publishesChanges, snapshot.serverRunning, isConnected, isLinked {
-            if !windows.isEmpty {
-                if !link.isListening { link.startListening() }
-            } else if let watch = snapshot.watchSessionID {
-                link.stopListening()
-                sendView(.killSession(session: watch))
-            }
+        // A link that publishes its changes keeps its Listener itself; the store starts the others' while a Session
+        // runs. The Listener makes no Session, so it ends with the server.
+        if !link.publishesChanges, snapshot.serverRunning, !windows.isEmpty, isConnected, isLinked, !link.isListening {
+            link.startListening()
         }
 
         if snapshot.serverRunning {

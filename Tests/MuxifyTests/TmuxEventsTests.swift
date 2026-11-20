@@ -32,15 +32,19 @@ final class TmuxEventsTests: XCTestCase {
         if let directory { try? FileManager.default.removeItem(at: directory) }
     }
 
-    func testTheEventsClientWatchesFromItsOwnSessionAndNeverAnswersAPanesColorQuery() throws {
+    /// tmux 3.8 answers a Pane's background question from a control Client in its Session as black, so the probe sits
+    /// in another Session than the one that tmux picks for the events client, the latest.
+    func testTheEventsClientWatchesFromASessionTmuxPicksAndNeverAnswersTheColorQueryOfAnotherSession() throws {
         try server.run(["new-session", "-d", "-s", "work", "-x", "80", "-y", "24"])
+        try server.run(["new-session", "-d", "-s", "spare"])
         try server.run(["set-option", "-g", "window-style", ""])
         let events = TmuxEvents()
         var changes: [String] = []
         events.onEvent = { if case .sessionWindowChanged(_, let window) = $0 { changes.append(window) } }
         defer { events.stop() }
         events.start(invocation: server.invocation)
-        try wait("the events client did not attach") { try self.controlClients() == [Tmux.watchSessionName] }
+        try wait("the events client did not attach") { try self.controlClients() == ["spare"] }
+        XCTAssertFalse(try sessions().contains(EnvironmentPublisher.leftoverWatchSession), "the events client made a Session")
 
         let reply = directory.appendingPathComponent("reply").path
         let probe = "stty raw -echo min 0 time 10; printf '\\033]11;?\\033\\\\'; head -c 64 > \(reply); touch \(reply).done"
@@ -54,11 +58,12 @@ final class TmuxEventsTests: XCTestCase {
         try server.run(["select-window", "-t", window])
         try wait("no session-window-changed from the user's Session") { changes.contains(window) }
 
-        try server.run(["kill-session", "-t", "=" + Tmux.watchSessionName])
+        let sitting = try XCTUnwrap(try controlClients().first)
+        try server.run(["kill-session", "-t", "=" + sitting])
         try wait("the events client outlived its Session") { !events.isRunning }
-        try wait("the events client did not come back with its Session", seconds: 5) {
+        try wait("the events client did not come back in the Session left", seconds: 5) {
             events.start(invocation: self.server.invocation)
-            return try self.controlClients() == [Tmux.watchSessionName]
+            return try self.controlClients().count == 1
         }
     }
 
@@ -128,6 +133,10 @@ final class TmuxEventsTests: XCTestCase {
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8),
                            colours(round: rounds - 1, pane: index).background.oscReply, "Pane \(panes[index])")
         }
+    }
+
+    private func sessions() throws -> [String] {
+        try server.run(["list-sessions", "-F", "#{session_name}"]).split(separator: "\n").map(String.init)
     }
 
     private func controlClients() throws -> [String] {

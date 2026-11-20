@@ -9,6 +9,7 @@ final class EnvironmentPublisherTests: XCTestCase {
     private var paths: MuxifyPaths!
     private var publishers: [EnvironmentPublisher] = []
     private var saved: [String: String?] = [:]
+    private var clientProcess: Process?
     private var socket: String { directory.appendingPathComponent("s").path }
 
     override func setUpWithError() throws {
@@ -27,6 +28,7 @@ final class EnvironmentPublisherTests: XCTestCase {
     override func tearDownWithError() throws {
         publishers.forEach { $0.stop() }
         publishers = []
+        if let clientProcess, clientProcess.isRunning { clientProcess.terminate(); clientProcess.waitUntilExit() }
         if let actual = try? server?.run(["display-message", "-p", "#{socket_path}"]),
            actual.trimmingCharacters(in: .whitespacesAndNewlines) == socket {
             _ = try? server.run(["kill-server"])
@@ -91,23 +93,76 @@ final class EnvironmentPublisherTests: XCTestCase {
         try await expectOnly("topic first", from: recorder, "a write by the publisher's own process")
     }
 
-    func testTwoPublishersKeepTheWatchSessionRule() async throws {
+    func testTheListenerSitsInTheSessionTmuxPicksThenFollowsTheMarkedClientWhereverItSwitches() async throws {
+        try server.run(["new-session", "-d", "-s", "work"])
+        try server.run(["new-session", "-d", "-s", "other"])
+        try server.run(["new-session", "-d", "-s", "third"])
+        let marker = ClientMarker.option(nonce: "terminal")
+        let recorder = start(clientMarker: marker)
+        try await settle(recorder, controlClients: 1)
+        XCTAssertTrue(try sessions().contains(try XCTUnwrap(try controlClients().first)), "the Listener sits in no Session")
+        XCTAssertFalse(try sessions().contains(EnvironmentPublisher.leftoverWatchSession), "the Listener made a Watch Session")
+        XCTAssertEqual(try sessions().count, 3, "the Listener made a Session")
+
+        let terminal = try attachClient(to: "work")
+        let value = [String(terminal.pid), terminal.tty, "/Users/u", "mac", "local"].joined(separator: Tmux.separator)
+        try server.run(["set-option", "-sq", marker, value])
+        try await wait("the Listener did not move to the marked Client's Session") { try self.controlClients() == ["work"] }
+        // tmux answers a Pane's background question from the first Client of its Session, and a control Client's as black.
+        XCTAssertEqual(try server.run(["list-clients", "-F", "#{client_control_mode}"]).split(separator: "\n"), ["0", "1"],
+                       "the Listener came before the Terminal's Client")
+
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
+        try await wait("the Listener did not follow a switch-client from outside Muxify") { try self.controlClients() == ["other"] }
+
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=third"])
+        try await wait("the Listener did not follow the next switch") { try self.controlClients() == ["third"] }
+    }
+
+    func testTheListenerIsAttachedAgainWithinHalfASecondAfterItsSessionIsKilled() async throws {
+        for name in ["work", "other", "third"] { try server.run(["new-session", "-d", "-s", name]) }
+        let recorder = start()
+        try await settle(recorder, controlClients: 1)
+        let sitting = try XCTUnwrap(try controlClients().first)
+
+        let killed = Date()
+        try server.run(["kill-session", "-t", "=" + sitting])
+        try await wait("the Listener was not attached again") {
+            let clients = try self.controlClients()
+            return clients.count == 1 && clients[0] != sitting
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(killed), 0.5, "the Listener waited before it attached again")
+    }
+
+    func testALeftoverWatchSessionIsKilledOnConnect() async throws {
+        try server.run(["new-session", "-d", "-s", "work"])
+        try server.run(["new-session", "-d", "-s", EnvironmentPublisher.leftoverWatchSession, "cat"])
+        let recorder = start()
+        try await settle(recorder, controlClients: 1)
+        XCTAssertEqual(try sessions(), ["work"])
+        XCTAssertEqual(try controlClients(), ["work"])
+    }
+
+    func testTheServerExitsAfterTheLastSessionClosesAndBothListenersComeBackWithTheNext() async throws {
         try server.run(["new-session", "-d", "-s", "work"])
         let first = start(), second = start()
-        try await wait("both publishers did not join the Watch Session") {
-            try self.controlClients() == [Tmux.watchSessionName, Tmux.watchSessionName]
-        }
+        try await wait("both publishers did not attach") { try self.controlClients() == ["work", "work"] }
 
         try server.run(["kill-session", "-t", "=work"])
-        try await wait("the Watch Session outlived the last user Session") { !(try self.sessions().contains(Tmux.watchSessionName)) }
+        try await wait("the server outlived the last Session") {
+            do { _ = try self.server.run(["display-message", "-p", "#{pid}"]); return false } catch {
+                return (error as? TmuxError)?.indicatesNoServer == true
+            }
+        }
         for recorder in [first, second] {
             try await wait("a publisher did not say the server stopped") { recorder.server?.isRunning == false }
         }
 
         try server.run(["new-session", "-d", "-s", "again"])
-        try await wait("a new user Session did not bring both publishers back", seconds: 5) {
-            try self.controlClients() == [Tmux.watchSessionName, Tmux.watchSessionName]
+        try await wait("a new Session did not bring both publishers back", seconds: 5) {
+            try self.controlClients() == ["again", "again"]
         }
+        XCTAssertEqual(try sessions(), ["again"])
     }
 
     func testASwitchThatReturnsFindsTheColourReportOnEveryPaneOfItsSession() async throws {
@@ -174,8 +229,12 @@ final class EnvironmentPublisherTests: XCTestCase {
 
     func testWithoutColoursASwitchReportsNothing() async throws {
         let probes = try probe(session: "work")
+        // The Listener sits in the Session that tmux picks, the latest: a control Client answers black for a Pane of
+        // its Session that has no Colour Report.
+        try server.run(["new-session", "-d", "-s", "spare"])
         let recorder = start()
         try await settle(recorder, controlClients: 1)
+        XCTAssertEqual(try controlClients(), ["spare"])
 
         publishers[0].reportColours(beforeRunning: ["switch-client", "-c", "/dev/none", "-t", "work:"])
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
@@ -248,10 +307,11 @@ final class EnvironmentPublisherTests: XCTestCase {
         func clear() { lock.lock(); log = []; lock.unlock() }
     }
 
-    private func start() -> Recorder {
+    private func start(clientMarker: String? = nil) -> Recorder {
         let recorder = Recorder()
         let publisher = EnvironmentPublisher(server: server, topics: TopicStore(paths: paths),
-                                             delivery: DispatchQueue(label: "test.environment-events"))
+                                             delivery: DispatchQueue(label: "test.environment-events"),
+                                             clientMarker: clientMarker)
         publishers.append(publisher)
         publisher.start(recorder.add)
         return recorder
@@ -259,9 +319,7 @@ final class EnvironmentPublisherTests: XCTestCase {
 
     /// Waits for the control Clients, then for a quiet moment, and forgets what came before.
     private func settle(_ recorder: Recorder, controlClients count: Int) async throws {
-        try await wait("the publisher did not join the Watch Session") {
-            try self.controlClients() == Array(repeating: Tmux.watchSessionName, count: count)
-        }
+        try await wait("the publisher did not attach its Listener") { try self.controlClients().count == count }
         var seen = -1
         try await wait("the publisher did not settle", seconds: 10) {
             let now = recorder.items.count
@@ -301,7 +359,38 @@ final class EnvironmentPublisherTests: XCTestCase {
         let deadline = Date().addingTimeInterval(seconds)
         while try await !done() {
             guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(nanoseconds: 50_000_000)
+            try await Task.sleep(nanoseconds: 20_000_000)
         }
+    }
+
+    /// A Client attached to `session` in a pseudo-terminal, as a Terminal is: its tty and pid.
+    private func attachClient(to session: String) throws -> ViewCommandExecutor.Client {
+        let binary = try XCTUnwrap(server.binary)
+        let attach = [binary, "-u", "-S", socket, "-f", "/dev/null", "attach-session", "-t", session]
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        #if os(Linux)
+        process.arguments = ["-qfc", attach.map(Tmux.shellQuote).joined(separator: " "), "/dev/null"]
+        #else
+        process.arguments = ["-q", "/dev/null"] + attach
+        #endif
+        var environment = ProcessInfo.processInfo.environment
+        environment["TMUX"] = nil
+        environment["TMUX_PANE"] = nil
+        environment["TERM"] = "xterm-256color"
+        process.environment = environment
+        process.standardInput = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        clientProcess = process
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            let fields = (try? server.run(["list-clients", "-f", "#{==:#{client_control_mode},0}", "-F", "#{client_tty} #{client_pid}"]))?
+                .trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: " ") ?? []
+            if fields.count == 2, !fields[0].isEmpty, let pid = Int(fields[1]) { return ViewCommandExecutor.Client(tty: fields[0], pid: pid) }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        throw TmuxError.timedOut
     }
 }
