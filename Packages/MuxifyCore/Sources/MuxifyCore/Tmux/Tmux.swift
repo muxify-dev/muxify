@@ -144,6 +144,11 @@ public struct TmuxClient: Hashable {
     public let windowID: String
     public var pid = 0
     public var isControl = false
+    /// The Client attached with `ignore-size`, as a Listener does: it sizes no Window, so it is no screen.
+    public var ignoresSize = false
+
+    /// `#{client_name}`: the tty, or `client-<pid>` for a Client without one, such as a control Client on pipes.
+    public var name: String { tty.isEmpty ? "client-\(pid)" : tty }
 }
 
 /// A tmux Pane, with the options an Agent's Extension writes onto it (ADR 0004).
@@ -368,7 +373,8 @@ public enum Tmux {
             "#{\(maximizeOption)}", "#{session_created}", "#{window_layout}", "#{@muxify_lock}", "#{@muxify_session_id}",
             "#{window_zoomed_flag}",
         ].joined(separator: s)
-        let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}", "#{client_pid}", "#{client_control_mode}"].joined(separator: s)
+        let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}", "#{client_pid}", "#{client_control_mode}",
+                            "#{client_flags}"].joined(separator: s)
         let paneFormat = [
             "P", "#{pane_id}", "#{window_id}", "#{pane_current_command}",
             "#{\(agentOption)}", "#{\(agentStatusOption)}", "#{\(agentUnreadOption)}", "#{\(agentConversationOption)}",
@@ -417,7 +423,8 @@ public enum Tmux {
             } else if f.first == "C", f.count >= 4 {
                 clients.append(TmuxClient(tty: f[1], sessionID: f[2], windowID: f[3],
                                           pid: f.count > 4 ? Int(f[4]) ?? 0 : 0,
-                                          isControl: f.count > 5 && f[5] == "1"))
+                                          isControl: f.count > 5 && f[5] == "1",
+                                          ignoresSize: field(6).split(separator: ",").contains("ignore-size")))
             } else if f.first == "P", f.count >= 7 {
                 panes.append(TmuxPane(
                     id: f[1], windowID: f[2], index: Int(field(8)) ?? 0, isActive: field(9) == "1",

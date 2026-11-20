@@ -33,6 +33,28 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
     }
 
+    func testWithTwoAppWindowsOnlyTheKeyOneAsksItsPublisherToWriteColourReports() throws {
+        let links = [FakeEnvironmentLink(), FakeEnvironmentLink()]
+        let stores = links.map { link in
+            WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }
+        }
+        let light = TerminalTheme(background: NSColor(srgbRed: 0xfb / 255, green: 0xf1 / 255, blue: 0xc7 / 255, alpha: 1),
+                                  foreground: NSColor(srgbRed: 0x3c / 255, green: 0x38 / 255, blue: 0x36 / 255, alpha: 1))
+        let colours = try XCTUnwrap(light.colours)
+
+        stores[0].setWritesColourReports(true)
+        stores[1].setWritesColourReports(false)
+        for store in stores { store.ghosttyThemeChanged(light) }
+        XCTAssertEqual(links[0].reportedColours.last, colours, "the key App Window did not write its colours")
+        XCTAssertFalse(links[1].reportedColours.contains { $0 != nil }, "an App Window that is not key wrote colours")
+
+        // The other App Window becomes key.
+        stores[0].setWritesColourReports(false)
+        stores[1].setWritesColourReports(true)
+        XCTAssertEqual(links[0].reportedColours.last, .some(nil), "the App Window that resigned key kept writing")
+        XCTAssertEqual(links[1].reportedColours.last, colours, "the App Window that became key did not write")
+    }
+
     func testAnActionWhoseFeatureTheLinkLacksIsHiddenFromTheCommandPalette() {
         let link = FakeEnvironmentLink(features: .all)
         let store = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }

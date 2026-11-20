@@ -241,8 +241,9 @@ protocol EnvironmentLink: AnyObject {
     /// Whether this App Window consumes `@muxify_open` on its Environment, so that its Host Server names its own
     /// socket in `@muxify_browser_socket`: it sends `claim_open` or `release_open` when this changes.
     func setOpenConsumer(_ consumes: Bool)
-    /// Reports the Terminal's colours to the Panes of the Sessions that this App Window's Environment shows (ADR
-    /// 0095). Only the Local Environment reports: issue #149 is the remote one.
+    /// Reports the Terminal's colours to the Panes of the Session that this App Window's Terminal shows, and again
+    /// each time it moves (ADR 0095); nil writes none, as for an App Window that is not key. Only the Local Environment
+    /// reports: issue #149 is the remote one.
     func reportColours(_ colours: TerminalColours?)
 
     // MARK: Git

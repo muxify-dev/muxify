@@ -43,45 +43,8 @@ enum ColourReport {
         }
     }
 
-    /// The Sessions that Muxify's own Clients show: each normal Client that a `@muxify_client_<nonce>` marker in
-    /// `serverOptions`, the output of `show-options -s`, names by pid and tty.
-    static func shownSessions(clients: [TmuxClient], serverOptions: String) -> Set<String> {
-        let prefix = ClientMarker.option(nonce: "")
-        let named = serverOptions.split(separator: "\n").compactMap { line -> ViewCommandExecutor.Client? in
-            guard line.hasPrefix(prefix), let space = line.firstIndex(of: " ") else { return nil }
-            let value = line[line.index(after: space)...].trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
-            return ClientMarker.named(by: value)
-        }
-        return Set(clients.filter { client in
-            !client.isControl && named.contains { $0.pid == client.pid && $0.tty == client.tty }
-        }.map(\.sessionID))
-    }
-
-    /// The `-t` target of each `switch-client` in one tmux invocation, whose commands `;` separates.
-    static func switchTargets(in arguments: [String]) -> [String] {
-        arguments.split(separator: ";").compactMap { command in
-            guard command.first == "switch-client", let flag = command.firstIndex(of: "-t"),
-                  command.index(after: flag) < command.endIndex else { return nil }
-            return command[command.index(after: flag)]
-        }
-    }
-
     static func isPaneID(_ value: String) -> Bool {
         value.count > 1 && value.first == "%" && value.dropFirst().allSatisfy(\.isASCIIDigit)
-    }
-}
-
-/// What the reads of one listener have reported, so that a read reports only the Sessions that became shown.
-struct ColourReportState: Sendable {
-    private var shown: Set<String> = []
-
-    init() {}
-
-    /// The Sessions to report for a read that finds `shown`: those that were not shown at the last read, or every
-    /// one with `all`.
-    mutating func sessionsToReport(shown: Set<String>, all: Bool) -> Set<String> {
-        defer { self.shown = shown }
-        return all ? shown : shown.subtracting(self.shown)
     }
 }
 

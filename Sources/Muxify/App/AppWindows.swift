@@ -173,7 +173,6 @@ final class AppWindows {
                 MainActor.assumeIsolated {
                     self?.focus(id)
                     self?.stores[id]?.readActiveTopicOnEntry()
-                    self?.stores[id]?.reportColours()
                     self?.stores[id]?.refresh()
                 }
             },
@@ -200,6 +199,9 @@ final class AppWindows {
         guard !isQuitting, let store = stores[id], nativeWindows[id] != nil else { return }
         catalog.focus(id)
         focusedID = id
+        // Only the key App Window writes the Colour Reports; it writes them again as it becomes key (ADR 0095).
+        for (other, each) in stores where other != id { each.setWritesColourReports(false) }
+        store.setWritesColourReports(true)
         remember(store.activeEnvironment?.name)
         updateOpenConsumers()
     }

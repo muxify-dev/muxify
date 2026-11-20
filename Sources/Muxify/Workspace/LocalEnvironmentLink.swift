@@ -22,7 +22,7 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
                                              startControlClient: ControlClient.start, clientMarker: marker,
                                              report: Diagnostics.report)
         self.publisher = publisher
-        super.init { TmuxConnection(clientMarker: marker, beforeRunning: publisher.reportColours(beforeRunning:)) }
+        super.init { TmuxConnection(clientMarker: marker) }
         do {
             state.apply(state.changes(to: try topics.read(), all: true))
         } catch {

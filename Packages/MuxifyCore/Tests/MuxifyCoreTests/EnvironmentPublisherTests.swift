@@ -165,20 +165,60 @@ final class EnvironmentPublisherTests: XCTestCase {
         XCTAssertEqual(try sessions(), ["again"])
     }
 
-    func testASwitchThatReturnsFindsTheColourReportOnEveryPaneOfItsSession() async throws {
-        let probes = try probe(session: "work")
-        try server.run(["split-window", "-d", "-t", "work:", probeCommand(probes.1)])
-        let recorder = start()
-        try await settle(recorder, controlClients: 1)
-        publishers[0].reportColours(Self.light)
+    func testEveryPaneOfTheSessionTheTerminalSwitchesToAnswersTheReportedColour() async throws {
+        let work = try probe(session: "work")
+        let other = try probe(session: "other")
+        try server.run(["split-window", "-d", "-t", "other:", probeCommand(other.1)])
+        let third = try probe(session: "third")
+        let unvisited = try probe(session: "unvisited")
+        let terminal = try startTerminal(in: "work", colours: Self.light)
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
 
-        publishers[0].reportColours(beforeRunning: ["select-window", "-t", "work:", ";", "switch-client", "-c", "/dev/none", "-t", "work:"])
+        // A switch that Muxify starts runs this same command on the Terminal's Client.
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
+        try await wait("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=third"])
+        try await wait("the Listener did not follow the next switch") { try self.controlClients() == ["third"] }
+        try await Task.sleep(nanoseconds: 300_000_000)
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
-        for answer in [probes.0, probes.1] {
+        for answer in [work.0, other.0, other.1, third.0] {
             try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
-            XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7")
+            XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
+        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: unvisited.0) }
+        XCTAssertNotEqual(try String(contentsOfFile: unvisited.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
+                          "a Session that the Terminal never showed got the Colour Report")
+    }
+
+    func testAScreensDetachGivesTheTerminalsSessionMuxifysColoursAgain() async throws {
+        let work = try probe(session: "work")
+        try server.run(["split-window", "-d", "-t", "work:", probeCommand(work.1)])
+        _ = try startTerminal(in: "work", colours: Self.light)
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        try await screenWritesAndDetaches(in: "work", flags: nil)
+        try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
+
+        for answer in [work.0, work.1] {
+            try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
+            XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
+        }
+    }
+
+    func testAListenersDetachWritesNothing() async throws {
+        let work = try probe(session: "work")
+        _ = try startTerminal(in: "work", colours: Self.light)
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        try await screenWritesAndDetaches(in: "work", flags: "ignore-size,no-output")
+        try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
+
+        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: work.0) }
+        XCTAssertEqual(try String(contentsOfFile: work.0, encoding: .utf8), "rgb:1010/1010/1010",
+                       "a Listener's detach made the publisher write")
     }
 
     func testAPaneOfANewSessionThatNoClientShowsAnswersOnlyAfterTheReportBeforeTyping() async throws {
@@ -198,21 +238,21 @@ final class EnvironmentPublisherTests: XCTestCase {
 
     /// Before, each switch waited for tmux to answer its Colour Report, counting answers over the Listener's life, so
     /// one lost answer made every later switch wait a second. A Listener that does not read its commands now holds no
-    /// switch up, and its reports still reach every Pane once it reads them.
+    /// switch up, and once it reads them it reports to every Pane of the Session that the Terminal ended in.
     func testTwelveSwitchesBetweenSessionsOfElevenAndEightPanesNeverWaitForTheColourReport() async throws {
-        let answers = try probes(session: "big", panes: 11) + probes(session: "small", panes: 8)
-        let recorder = start()
-        try await settle(recorder, controlClients: 1)
-        publishers[0].reportColours(Self.light)
+        _ = try probes(session: "big", panes: 11)
+        let answers = try probes(session: "small", panes: 8)
+        let terminal = try startTerminal(in: "small", colours: Self.light)
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["small"] }
         let tmux = ColourReportingTmux(server: server, publisher: publishers[0])
         let pid = try XCTUnwrap(pid_t(try server.run(["list-clients", "-f", "#{client_control_mode}", "-F", "#{client_pid}"])
             .trimmingCharacters(in: .whitespacesAndNewlines)), "no control Client")
 
         kill(pid, SIGSTOP)
         var slowest: TimeInterval = 0
-        for target in Array(repeating: ["big:", "small:"], count: 6).joined() {
+        for target in Array(repeating: ["=big", "=small"], count: 6).joined() {
             let start = Date()
-            _ = try? tmux.run(["switch-client", "-c", "/dev/none", "-t", target])
+            try tmux.run(["switch-client", "-c", terminal.tty, "-t", target])
             slowest = max(slowest, Date().timeIntervalSince(start))
         }
         kill(pid, SIGCONT)
@@ -229,24 +269,65 @@ final class EnvironmentPublisherTests: XCTestCase {
 
     func testWithoutColoursASwitchReportsNothing() async throws {
         let probes = try probe(session: "work")
-        // The Listener sits in the Session that tmux picks, the latest: a control Client answers black for a Pane of
-        // its Session that has no Colour Report.
         try server.run(["new-session", "-d", "-s", "spare"])
-        let recorder = start()
-        try await settle(recorder, controlClients: 1)
-        XCTAssertEqual(try controlClients(), ["spare"])
+        let terminal = try startTerminal(in: "spare", colours: nil)
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["spare"] }
 
-        publishers[0].reportColours(beforeRunning: ["switch-client", "-c", "/dev/none", "-t", "work:"])
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=work"])
+        try await wait("the Listener did not follow the Terminal") { try self.controlClients() == ["work"] }
+        try await Task.sleep(nanoseconds: 300_000_000)
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
         try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: probes.0) }
-        XCTAssertEqual(try String(contentsOfFile: probes.0, encoding: .utf8), "none")
+        XCTAssertNotEqual(try String(contentsOfFile: probes.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7")
     }
 
     // MARK: - Helpers
 
     private static let light = TerminalColours(background: TerminalColour(red: 0xfb, green: 0xf1, blue: 0xc7),
                                                foreground: TerminalColour(red: 0x3c, green: 0x38, blue: 0x36))
+    private static let dark = TerminalColours(background: TerminalColour(red: 0x10, green: 0x10, blue: 0x10),
+                                              foreground: TerminalColour(red: 0xee, green: 0xee, blue: 0xee))
+
+    /// A publisher with a Client marker, a Terminal's Client attached to `session` that the marker names, and the
+    /// colours of the key App Window, or none.
+    private func startTerminal(in session: String, colours: TerminalColours?) throws -> ViewCommandExecutor.Client {
+        let marker = ClientMarker.option(nonce: "terminal")
+        _ = start(clientMarker: marker)
+        publishers[0].reportColours(colours)
+        let terminal = try attachClient(to: session)
+        let value = [String(terminal.pid), terminal.tty, "/Users/u", "mac", "local"].joined(separator: Tmux.separator)
+        try server.run(["set-option", "-sq", marker, value])
+        return terminal
+    }
+
+    /// Another screen, as Muxify Mobile is: a control Client in `session`, attached with `flags`, writes its own
+    /// colours to every Pane of the Session and detaches once the publisher has read it.
+    private func screenWritesAndDetaches(in session: String, flags: String?) async throws {
+        let binary = try XCTUnwrap(server.binary)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = ["-S", socket, "-f", "/dev/null", "-C", "attach-session", "-t", session] + (flags.map { ["-f", $0] } ?? [])
+        var environment = ProcessInfo.processInfo.environment
+        environment["TMUX"] = nil
+        environment["TMUX_PANE"] = nil
+        process.environment = environment
+        let input = Pipe()
+        process.standardInput = input
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        defer { if process.isRunning { process.terminate() } }
+        try await wait("the screen did not attach") { try self.controlClients().count == 2 }
+        await publishers[0].read()
+        let panes = try server.run(["list-panes", "-s", "-t", "=" + session, "-F", "#{pane_id}"])
+            .split(separator: "\n").map(String.init)
+        let lines = ColourReport.commands(panes: panes, colours: Self.dark).map { $0 + "\n" }.joined()
+        input.fileHandleForWriting.write(Data(lines.utf8))
+        try input.fileHandleForWriting.close()
+        try await wait("the screen did not detach") { try self.controlClients().count == 1 }
+        try await Task.sleep(nanoseconds: 500_000_000)
+    }
 
     /// A Session whose Pane runs a program that waits for the file `go`, then asks for the background (OSC 11) as
     /// Claude Code does, and writes the answer's colour, or `none` after a second without one, to the returned file.

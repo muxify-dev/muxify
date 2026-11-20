@@ -13,8 +13,8 @@ extension TmuxRunning {
 
 extension TmuxServer: TmuxRunning {}
 
-/// The app's local server: its listener writes the Colour Reports of ADR 0095 before each switch that a command
-/// runs and before each command that Muxify types into a Session that it just made.
+/// The app's local server: its Listener writes the Colour Report of ADR 0095 before each command that Muxify types
+/// into a Session that it just made. A switch needs none here: the Listener reports when it follows the Terminal there.
 public struct ColourReportingTmux: TmuxRunning {
     private let server: any TmuxRunning
     private let publisher: EnvironmentPublisher
@@ -26,8 +26,7 @@ public struct ColourReportingTmux: TmuxRunning {
 
     @discardableResult
     public func run(_ arguments: [String]) throws -> String {
-        publisher.reportColours(beforeRunning: arguments)
-        return try server.run(arguments)
+        try server.run(arguments)
     }
 
     public func snapshot() throws -> TmuxSnapshot {

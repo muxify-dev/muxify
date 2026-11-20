@@ -16,9 +16,11 @@ import Foundation
 /// The Host Server's publisher also reads its Mac's Client marker, so its `server` event names that Mac's own Client,
 /// and writes the Sessions that each read gives the Topics onto their records, so the Mac writes no record itself.
 ///
-/// In the app it also writes the Colour Reports of ADR 0095 through its control Client: to each Session that one of
-/// Muxify's Clients shows, before each switch that Muxify starts, and before Muxify types into a Session that it made.
-/// It sends them and returns at once: nothing waits for tmux's answer, so a switch never waits for a Colour Report.
+/// In the app it also writes the Colour Reports of ADR 0095 through its Listener, while its App Window gives it colours:
+/// to every Pane of the Terminal's Session when the Listener moves there, which covers a switch that Muxify starts and
+/// one made inside tmux; again when it gets colours, as its App Window becomes key or Ghostty's colours change; again
+/// when another screen's control Client, one without `ignore-size`, detaches; and before Muxify types into a Session
+/// that it made. It sends them and returns at once: nothing waits for tmux's answer, so a switch never waits for one.
 ///
 /// The Listener follows the Terminal: it sits in the Session that the Client of `clientMarker` shows and moves there
 /// each time that Client does, as Muxify Mobile's control Client does. Before that Client attaches, it sits in the
@@ -58,6 +60,8 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     private var requestedSession: String?
     /// The Session that the Client of `clientMarker` shows, while it is attached.
     private var terminalSession: String?
+    /// The Session of the Terminal's last move, whose Panes got the colours for it.
+    private var movedSession: String?
     /// The marked Client that the Listener attached after, in its Session.
     private var followedClient: ViewCommandExecutor.Client?
     /// Whether a read found the server running since `start`, so an earlier Muxify's `muxify-watch` is gone.
@@ -72,9 +76,11 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     private var ownClient: ViewCommandExecutor.Client?
     private var rememberedServerID: String?
     private var rememberedWindows: [TmuxWindow] = []
-    private var colourReports = ColourReportState()
-    /// The next read reports to every shown Session, not only to those that it newly finds shown.
-    private var reportsAllSessions = true
+    /// The names of the control Clients without `ignore-size` at the last two reads: other screens, such as Muxify
+    /// Mobile, whose detach leaves their Colour Reports on the Panes. Two, so a read between a detach and its
+    /// notification does not forget the screen.
+    private var screens: Set<String> = []
+    private var earlierScreens: Set<String> = []
     private let listener = ListenerCommands()
 
     private let lock = NSLock()
@@ -216,26 +222,14 @@ public final class EnvironmentPublisher: @unchecked Sendable {
 
     // MARK: - Colour Reports (ADR 0095)
 
-    /// Sets the colours of Muxify's Terminal, and reports them to every Pane of each Session that Muxify's Clients
-    /// show. Nil reports nothing, as on a Host. The App Window calls it when it becomes key and when Ghostty's colours
-    /// change, so the screen in use writes the report last.
+    /// Sets the colours of Muxify's Terminal, and reports them to every Pane of the Terminal's Session. Nil reports
+    /// nothing from now on, as on a Host or in an App Window that is not key. The key App Window calls it when it
+    /// becomes key and when Ghostty's colours change, so the screen in use writes the report last.
     public func reportColours(_ colours: TerminalColours?) {
         lock.lock()
         self.colours = colours
         lock.unlock()
-        queue.async { [self] in
-            reportsAllSessions = true
-            if handler != nil { readSessions() }
-        }
-    }
-
-    /// Runs before tmux runs `arguments`: sends the colours' report to every Pane of the Session that each
-    /// `switch-client` in them goes to, and returns without waiting for tmux. A report that lands just after the
-    /// switch still turns a program to the right look, by the colour-scheme notice that it makes tmux send.
-    public func reportColours(beforeRunning arguments: [String]) {
-        for target in ColourReport.switchTargets(in: arguments) {
-            reportColours(toPanesIn: ["list-panes", "-s", "-t", target, "-F", "#{pane_id}"])
-        }
+        queue.async { [self] in reportColoursToTheTerminalsSession() }
     }
 
     /// Runs before Muxify types a command into `target`, a Pane of a Session that it just made: reports the colours
@@ -261,20 +255,20 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         }
     }
 
-    /// Reports the colours to the Sessions that Muxify's Clients show in `snapshot` and that the last read did not
-    /// find shown, or to all of them after `reportColours(_:)` or a new control Client.
-    private func reportShownSessions(_ snapshot: TmuxSnapshot) {
-        lock.lock()
-        let colours = self.colours
-        lock.unlock()
-        guard let colours, snapshot.serverRunning else { return }
-        let options = snapshot.clients.contains { !$0.isControl } ? (try? run(["show-options", "-s"])) ?? "" : ""
-        let shown = ColourReport.shownSessions(clients: snapshot.clients, serverOptions: options)
-        let sessions = colourReports.sessionsToReport(shown: shown, all: reportsAllSessions)
-        let windows = Set(snapshot.windows.filter { sessions.contains($0.sessionID) }.map(\.id))
-        let panes = snapshot.panes.filter { windows.contains($0.windowID) }.map(\.id)
-        // Without a control Client the reports are lost, so the next read sends them all.
-        reportsAllSessions = !listener.send(ColourReport.commands(panes: panes, colours: colours))
+    /// Reports the colours to every Pane of the Session that the Terminal shows, on `queue`. Before the Terminal
+    /// attaches there is none: the Listener's move there reports then.
+    private func reportColoursToTheTerminalsSession() {
+        guard handler != nil, let session = terminalSession, Self.isSessionID(session) else { return }
+        reportColours(toPanesIn: ["list-panes", "-s", "-t", session, "-F", "#{pane_id}"])
+    }
+
+    /// Another screen's control Client detached, so its Colour Reports stay on the Panes: the Terminal's Session gets
+    /// Muxify's again. A Listener, this one or another App Window's, attaches with `ignore-size`; its detach does not
+    /// count, so a Listener that starts again makes no screen write.
+    private func clientDetached(_ name: String, from number: Int) {
+        let known = [screens.remove(name), earlierScreens.remove(name)].contains { $0 != nil }
+        guard number == clientNumber, known else { return }
+        reportColoursToTheTerminalsSession()
     }
 
     // MARK: - Reads, on `queue`
@@ -318,8 +312,9 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         sentSessions = true
         sent.apply(changes)
         if snapshot.serverRunning { leftoverGone = true }
+        earlierScreens = screens
+        screens = Set(snapshot.clients.filter { $0.isControl && !$0.ignoresSize }.map(\.name))
         keepListening(snapshot)
-        reportShownSessions(snapshot)
         return changes + (remember(snapshot) ? topicChanges() : [])
     }
 
@@ -426,6 +421,16 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         // before the marked Client starts again in that Client's Session, so the Terminal comes first.
         if client != nil, terminalSession != nil, let own = ownClient, own != followedClient { detach() }
         if client == nil, Date() >= nextAttach { attach() } else { follow() }
+        // A read can find the Terminal's move before the Listener's notification of it arrives.
+        if let session = terminalSession, client != nil, listenerSession != nil { terminalMoved(to: session) }
+        if terminalSession == nil { movedSession = nil }
+    }
+
+    /// The Terminal shows `session`: its Panes get the colours once for each move there.
+    private func terminalMoved(to session: String) {
+        guard session != movedSession else { return }
+        movedSession = session
+        reportColoursToTheTerminalsSession()
     }
 
     /// Attaches the Listener to the Terminal's Session or, before the Terminal attaches, to the Session that tmux
@@ -447,13 +452,15 @@ public final class EnvironmentPublisher: @unchecked Sendable {
                 guard let self else { return }
                 let moves = lines.compactMap(Self.sessionChange(in:))
                 if !moves.isEmpty { queue.async { self.heard(moves, from: number) } }
+                for name in lines.compactMap(Self.detachedClient(in:)) {
+                    queue.async { self.clientDetached(name, from: number) }
+                }
                 if lines.contains(where: Self.isChange) { heardChange() }
             }, { [weak self] in
                 self?.queue.async { self?.clientExited(number) }
             })
             self.client = client
             listener.attach(client)
-            reportsAllSessions = true
             listener.send(["refresh-client -B '\(Self.subscriptionName)::\(Self.subscriptionFormat)'"])
         } catch {
             report("tmux control client failed to start: \(error)")
@@ -494,14 +501,30 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         return nil
     }
 
+    /// The name of the Client that `%client-detached` tells of.
+    static func detachedClient(in line: String) -> String? {
+        let words = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+        guard words.first == "%client-detached", words.count == 2, !words[1].isEmpty else { return nil }
+        return String(words[1])
+    }
+
     private func heard(_ changes: [SessionChange], from number: Int) {
         guard number == clientNumber, client != nil else { return }
         for change in changes {
             switch change {
             case .listener(let session):
+                // A Listener that just attached in the Terminal's Session: no Terminal's move told of it.
+                let attached = listenerSession == nil
                 listenerSession = session
                 requestedSession = nil
-            case .client(let name, let session) where name == ownClient?.tty: terminalSession = session
+                if attached, session == terminalSession {
+                    movedSession = session
+                    reportColoursToTheTerminalsSession()
+                }
+            case .client(let name, let session) where name == ownClient?.tty:
+                // The Terminal moved, by a switch that Muxify started or one made inside tmux; the Listener follows.
+                terminalSession = session
+                terminalMoved(to: session)
             case .client: break
             }
         }
@@ -511,9 +534,13 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     /// Moves the Listener to the Terminal's Session, on its own control connection.
     private func follow() {
         guard client != nil, let target = terminalSession, target != listenerSession, target != requestedSession,
-              target.count > 1, target.first == "$", target.dropFirst().allSatisfy({ $0.isASCII && $0.isNumber }) else { return }
+              Self.isSessionID(target) else { return }
         requestedSession = target
         listener.send(["switch-client -t '\(target)'"])
+    }
+
+    static func isSessionID(_ value: String) -> Bool {
+        value.count > 1 && value.first == "$" && value.dropFirst().allSatisfy { $0.isASCII && $0.isNumber }
     }
 
     /// One read for any number of notifications that arrive before it starts. It waits a moment, so a burst of

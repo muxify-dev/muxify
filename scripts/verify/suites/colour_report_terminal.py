@@ -9,6 +9,7 @@ Run from the repo root after `make build`:
 """
 
 import sys
+import time
 import unittest
 
 from scripts.verify.sandbox import REPO, Sandbox, wait
@@ -28,7 +29,11 @@ class ColourReportTerminal(unittest.TestCase):
         cls.sandbox.launch()
         wait(lambda: '@muxify_client_' in cls.sandbox.tmux('show-options', '-s'), 'Muxify did not register its Client')
         cls.sandbox.show(cls.window('base-colours'))
-        cls.muxify = wait(lambda: cls.answers('base-colours')[-1:], 'the shown Session answered no colour')[0]
+        # The Listener writes the report once it sits in the Terminal's Session, which at launch is after it found the
+        # Terminal's Client, so the first answers can be tmux's own: Muxify's colours are the answer that stays.
+        wait(lambda: cls.answers('base-colours'), 'the shown Session answered no colour')
+        time.sleep(3)
+        cls.muxify = wait(lambda: cls.settled(cls.answers('base-colours')), 'the shown Session answered no settled colour')
         assert cls.muxify != OTHER, 'the Terminal is white, so a check cannot tell the reports apart'
         # A control Client of the check's, as Muxify Mobile is one: its reports stay while it is attached.
         cls.phone = cls.sandbox.tmux_control('phone')
@@ -48,6 +53,11 @@ class ColourReportTerminal(unittest.TestCase):
     @classmethod
     def lines(cls, session):
         return (cls.sandbox.root/(session + '.log')).read_text().splitlines()
+
+    @staticmethod
+    def settled(answers):
+        """The last answer, once the probe gave it three times in a row."""
+        return answers[-1] if len(answers) >= 3 and len(set(answers[-3:])) == 1 else None
 
     @classmethod
     def answers(cls, session):
@@ -73,7 +83,10 @@ class ColourReportTerminal(unittest.TestCase):
         wait(lambda: self.answers(session)[-1:] == [self.muxify],
              lambda: 'the key App Window did not report its colours: %s' % self.lines(session)[-5:])
 
-    def test_a_switch_that_muxify_starts_sends_a_notice_whose_answer_is_muxifys_colours(self):
+    def test_a_switch_that_muxify_starts_reports_muxifys_colours(self):
+        """The Listener writes the report when it hears the Terminal move, so a program that asks after the switch gets
+        Muxify's colours. Measured on tmux 3.8 with Muxify's Terminal: a report written after the switch sends the
+        Pane no colour-scheme notice, so a program that asked before the switch keeps its answer until it asks again."""
         session = 'switch-colours'
         self.start_probe(session)
         self.report_other_colour(session)
@@ -81,16 +94,10 @@ class ColourReportTerminal(unittest.TestCase):
 
         self.sandbox.show(self.window(session))
 
-        def first_answer_after_notice():
-            lines = self.lines(session)[before:]
-            after = lines[lines.index('notice'):] if 'notice' in lines else []
-            return next((line for line in after if line.startswith('answer ')), None)
-        first = wait(first_answer_after_notice,
-                     lambda: 'no notice and answer after the switch: %s' % self.lines(session)[before:])
-        self.assertEqual(first, 'answer ' + self.muxify,
-                         'the first answer after the switch notice: %s' % self.lines(session)[before:])
+        wait(lambda: [line for line in self.lines(session)[before:] if line.startswith('answer ')][-1:] == ['answer ' + self.muxify],
+             lambda: 'the switch that Muxify started did not get Muxify\'s colours: %s' % self.lines(session)[before:][-5:])
 
-    def test_a_switch_inside_tmux_reports_muxifys_colours_after_the_next_read(self):
+    def test_a_switch_inside_tmux_reports_muxifys_colours(self):
         session = 'inside-colours'
         self.start_probe(session)
         self.report_other_colour(session)
@@ -101,6 +108,26 @@ class ColourReportTerminal(unittest.TestCase):
 
         wait(lambda: self.answers(session)[-1:] == [self.muxify],
              lambda: 'the switch inside tmux did not get Muxify\'s colours: %s' % self.lines(session)[-5:])
+
+
+    def test_another_screen_that_detaches_leaves_muxifys_colours(self):
+        session = 'detach-colours'
+        self.start_probe(session)
+        self.sandbox.show(self.window(session))
+        wait(lambda: self.answers(session)[-1:] == [self.muxify], 'the shown Session did not answer Muxify\'s colour')
+        screen = self.sandbox.tmux_control(session)
+        self.addCleanup(screen.terminate)
+        pane = self.sandbox.tmux('display-message', '-p', '-t', session + ':', '#{pane_id}').strip()
+        screen.stdin.write(('refresh-client -r "%s:\\033]11;%s\\033\\\\"\n' % (pane, OTHER)).encode())
+        screen.stdin.flush()
+        wait(lambda: self.answers(session)[-1:] == [OTHER],
+             lambda: 'the probe did not get the other screen\'s report: %s' % self.lines(session)[-5:])
+
+        screen.stdin.close()
+        screen.wait(timeout=5)
+
+        wait(lambda: self.answers(session)[-1:] == [self.muxify],
+             lambda: 'the other screen\'s detach did not give back Muxify\'s colours: %s' % self.lines(session)[-5:])
 
 
 if __name__ == '__main__':

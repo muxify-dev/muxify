@@ -65,6 +65,10 @@ final class FakeEnvironmentLink: EnvironmentLink {
     var attachmentEnd: AttachmentEnd? { nil }
     func installHostCLI(environmentName: String) {}
     /// How many times the store asked for the Config again.
+    /// Every colours report the store sent, in order: nil when it writes none.
+    private(set) var reportedColours: [TerminalColours?] = []
+    func reportColours(_ colours: TerminalColours?) { reportedColours.append(colours) }
+
     private(set) var configReloads = 0
     func reloadConfig() { configReloads += 1 }
 

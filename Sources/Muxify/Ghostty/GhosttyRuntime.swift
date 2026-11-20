@@ -32,6 +32,12 @@ struct TerminalTheme: Equatable {
     /// follow the Ghostty theme (the Command Palette's).
     let ansi: [NSColor]
 
+    init(background: NSColor, foreground: NSColor, ansi: [NSColor] = []) {
+        self.background = background
+        self.foreground = foreground
+        self.ansi = ansi
+    }
+
     init?(config: ghostty_config_t) {
         guard let background = Self.color(config, "background"),
               let foreground = Self.color(config, "foreground") else { return nil }

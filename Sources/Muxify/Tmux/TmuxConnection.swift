@@ -26,23 +26,19 @@ final class TmuxConnection: @unchecked Sendable {
     private let lock = NSLock()
     private var retired = false
     private var localMarker: (option: String, pid: Int, registered: Bool)?
-    /// Runs before each command on this Mac's server: the Colour Reports before a switch (ADR 0095).
-    private let beforeRunning: (([String]) -> Void)?
     /// The App Window's Client marker option on this Mac, which its publisher's Listener follows; nil gives each
     /// replacement an option of its own.
     private let localMarkerOption: String?
 
     init(environment: RemoteEnvironment?, sshExecutable: String = "/usr/bin/ssh") throws {
         remote = try environment.map { try RemoteSSH(environment: $0, sshExecutable: sshExecutable) }
-        beforeRunning = nil
         localMarkerOption = nil
     }
 
     /// The connection to this Mac's server. `clientMarker` is the App Window's Client marker option.
-    init(clientMarker: String? = nil, beforeRunning: (([String]) -> Void)? = nil) {
+    init(clientMarker: String? = nil) {
         remote = nil
         localMarkerOption = clientMarker
-        self.beforeRunning = beforeRunning
     }
 
     var isOnThisMac: Bool { remote == nil }
@@ -57,7 +53,6 @@ final class TmuxConnection: @unchecked Sendable {
         let stopped = retired
         lock.unlock()
         guard !stopped else { throw TmuxError.cancelled }
-        beforeRunning?(args)
         return try runner.run(invocation(args))
     }
 

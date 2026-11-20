@@ -1192,6 +1192,9 @@ final class WorkspaceStore {
     var environmentName: String { activeEnvironment?.name ?? "Local" }
     /// The Ghostty theme's colors; the header and sidebar follow them.
     private(set) var theme: TerminalTheme?
+    /// Whether this is the key App Window, whose Listener writes the Colour Reports (ADR 0095). Every App Window keeps
+    /// its Listener for events; `AppWindows` moves this with focus.
+    private(set) var writesColourReports = false
 
     /// The Sidebar mode the user picked. `TopicsModel.mode` is the one shown, because the Config can turn a mode off.
     var sidebarMode: SidebarMode {
@@ -3424,10 +3427,18 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
         reportColours()
     }
 
-    /// Tells the link the Terminal's colours, so programs in the Sessions that Muxify shows get them as the answer to a
-    /// colour question (ADR 0095). The App Window calls it again when it becomes key: the screen in use writes last.
+    /// Makes this App Window the one that writes the Colour Reports, which writes them now, or stops its writes.
+    func setWritesColourReports(_ writes: Bool) {
+        guard writes || writesColourReports else { return }
+        writesColourReports = writes
+        reportColours()
+    }
+
+    /// Tells the link the Terminal's colours while this is the key App Window, so programs in the Terminal's Session
+    /// get them as the answer to a colour question (ADR 0095), and no colours otherwise, so it writes none. The key App
+    /// Window calls it again when it becomes key: the screen in use writes last.
     func reportColours() {
-        link.reportColours(theme?.colours)
+        link.reportColours(writesColourReports ? theme?.colours : nil)
     }
 
     func ghosttyReloadConfig() {
