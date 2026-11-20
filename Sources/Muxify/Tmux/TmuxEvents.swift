@@ -87,17 +87,96 @@ final class TmuxEvents {
 /// input; the pty hangup when Muxify ends, however it ends, stops it.
 final class ControlClient: TmuxControlClient {
     private let pid: pid_t
-    private let master: Int32
     private let reader: DispatchSourceRead
     private let exitSource: DispatchSourceProcess
-    private let state = State()
+    private let state: State
 
-    /// Whether the client was reaped, and whether its pty master was closed.
+    /// The pty master and what is still to be written to it. The master is non-blocking, so a send never waits for
+    /// tmux: the bytes the pty does not take wait in `pending`, in order, and the write source writes them when the
+    /// pty can take more.
     private final class State: @unchecked Sendable {
         let lock = NSLock()
+        let master: Int32
+        let writer: DispatchSourceWrite
         // `lock` guards these.
+        var reader: DispatchSourceRead?
         var exited = false
-        var closed = false
+        var stopped = false
+        var pending: [UInt8] = []
+        /// A new write source starts suspended; it runs only while bytes are pending.
+        var writerSuspended = true
+        /// The master is closed once both sources are cancelled, so neither watches a closed descriptor.
+        var openSources = 2
+
+        init(master: Int32, queue: DispatchQueue) {
+            self.master = master
+            writer = DispatchSource.makeWriteSource(fileDescriptor: master, queue: queue)
+            writer.setEventHandler { [weak self] in
+                guard let self else { return }
+                lock.lock()
+                defer { lock.unlock() }
+                guard !stopped else { return }
+                flush()
+            }
+            // Dispatch releases the handlers once the source is cancelled, which ends this cycle.
+            writer.setCancelHandler { self.sourceCancelled() }
+        }
+
+        /// Writes `bytes` after any that are pending.
+        func send(_ bytes: [UInt8]) {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !stopped, !exited else { return }
+            let idle = pending.isEmpty
+            pending += bytes
+            // With bytes pending, the write source is already waiting to write these after them.
+            if idle { flush() }
+        }
+
+        /// Writes what the pty takes of `pending`, and runs the write source only while some is left. Call with
+        /// `lock` held, before `stopped`.
+        private func flush() {
+            while !pending.isEmpty {
+                let written = pending.withUnsafeBytes { write(master, $0.baseAddress, $0.count) }
+                if written > 0 {
+                    pending.removeFirst(written)
+                } else if written < 0, errno == EINTR {
+                    continue
+                } else if written < 0, errno == EAGAIN {
+                    break
+                } else {
+                    // The client has gone: nothing will read the rest.
+                    pending.removeAll()
+                }
+            }
+            if pending.isEmpty != writerSuspended {
+                if pending.isEmpty { writer.suspend() } else { writer.resume() }
+                writerSuspended = pending.isEmpty
+            }
+        }
+
+        /// Drops what is pending and cancels both sources; the last cancel handler closes the master.
+        func stop() {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !stopped else { return }
+            stopped = true
+            pending.removeAll()
+            reader?.cancel()
+            writer.cancel()
+            // A suspended source never runs its cancel handler, and must not be released suspended.
+            if writerSuspended {
+                writer.resume()
+                writerSuspended = false
+            }
+        }
+
+        func sourceCancelled() {
+            lock.lock()
+            defer { lock.unlock() }
+            openSources -= 1
+            if openSources == 0 { close(master) }
+        }
     }
 
     /// Starts a client for the Local Environment's publisher.
@@ -119,17 +198,19 @@ final class ControlClient: TmuxControlClient {
         let pid = envp.map { muxify_forkpty_exec(binary, argv, $0, &master) } ?? muxify_forkpty_exec(binary, argv, environ, &master)
         guard pid > 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         self.pid = pid
-        self.master = master
         _ = fcntl(master, F_SETFL, fcntl(master, F_GETFL) | O_NONBLOCK)
 
-        reader = DispatchSource.makeReadSource(fileDescriptor: master, queue: DispatchQueue(label: "muxify.tmux-events"))
+        let queue = DispatchQueue(label: "muxify.tmux-events")
+        let state = State(master: master, queue: queue)
+        self.state = state
+        reader = DispatchSource.makeReadSource(fileDescriptor: master, queue: queue)
         var buffer = Data()
-        reader.setEventHandler { [reader] in
+        reader.setEventHandler {
             var chunk = [UInt8](repeating: 0, count: 16384)
             let count = read(master, &chunk, chunk.count)
             guard count > 0 else {
                 // A pty whose client has gone reads as EIO, not as end of file.
-                if count == 0 || (errno != EAGAIN && errno != EINTR) { reader.cancel() }
+                if count == 0 || (errno != EAGAIN && errno != EINTR) { state.stop() }
                 return
             }
             buffer.append(contentsOf: chunk[..<count])
@@ -142,13 +223,10 @@ final class ControlClient: TmuxControlClient {
             }
             if !lines.isEmpty { onLines(lines) }
         }
-        let state = state
-        reader.setCancelHandler {
-            state.lock.lock()
-            state.closed = true
-            close(master)
-            state.lock.unlock()
-        }
+        reader.setCancelHandler { state.sourceCancelled() }
+        state.lock.lock()
+        state.reader = reader
+        state.lock.unlock()
         reader.resume()
 
         // The exit source keeps this client alive until it has reaped tmux.
@@ -163,7 +241,7 @@ final class ControlClient: TmuxControlClient {
             state.exited = true
             state.lock.unlock()
             exitSource.cancel()
-            reader.cancel()
+            state.stop()
             DispatchQueue.main.async(execute: onExit)
         }
     }
@@ -174,23 +252,14 @@ final class ControlClient: TmuxControlClient {
         return !state.exited
     }
 
-    /// Writes one command line to the client through the pty.
+    /// Writes one command line to the client through the pty, after any line still pending. It never waits for the
+    /// pty: what the pty does not take now, it takes when it can.
     func send(_ command: String) {
-        state.lock.lock()
-        defer { state.lock.unlock() }
-        guard !state.closed, !state.exited else { return }
-        let line = Array((command + "\n").utf8)
-        var offset = 0
-        while offset < line.count {
-            let written = line[offset...].withUnsafeBytes { write(master, $0.baseAddress, $0.count) }
-            if written < 0, errno == EINTR { continue }
-            guard written > 0 else { return }
-            offset += written
-        }
+        state.send(Array((command + "\n").utf8))
     }
 
-    /// Closing the master hangs the client up; the exit source then reaps it.
-    func stop() { reader.cancel() }
+    /// Closing the master hangs the client up; the exit source then reaps it. What is pending is dropped.
+    func stop() { state.stop() }
 
     /// True when this call reaped the client.
     private func reap() -> Bool {
