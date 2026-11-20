@@ -28,7 +28,12 @@ final class EnvironmentPublisherTests: XCTestCase {
     override func tearDownWithError() throws {
         publishers.forEach { $0.stop() }
         publishers = []
-        if let clientProcess, clientProcess.isRunning { clientProcess.terminate(); clientProcess.waitUntilExit() }
+        if let clientProcess, clientProcess.isRunning {
+            clientProcess.terminate()
+            // `waitUntilExit` can miss the exit and wait for ever, as in HostServerTests: wait for the pid, a while at most.
+            let deadline = Date().addingTimeInterval(5)
+            while kill(clientProcess.processIdentifier, 0) == 0, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+        }
         if let actual = try? server?.run(["display-message", "-p", "#{socket_path}"]),
            actual.trimmingCharacters(in: .whitespacesAndNewlines) == socket {
             _ = try? server.run(["kill-server"])
