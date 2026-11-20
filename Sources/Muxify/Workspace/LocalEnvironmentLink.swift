@@ -22,7 +22,9 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
                                              startControlClient: ControlClient.start, clientMarker: marker,
                                              report: Diagnostics.report)
         self.publisher = publisher
-        super.init { TmuxConnection(clientMarker: marker) }
+        // A switch runs on the Listener after its Colour Report, so a program that tmux tells of the new colour scheme
+        // at the switch gets these colours.
+        super.init { TmuxConnection(clientMarker: marker, switchOnListener: publisher.switchClient) }
         do {
             state.apply(state.changes(to: try topics.read(), all: true))
         } catch {

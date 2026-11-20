@@ -184,12 +184,17 @@ public struct ViewCommandExecutor {
 
     private let execute: ([String]) throws -> String
     private let ownClient: Client?
+    private let switchOnListener: ((_ client: String, _ target: String) throws -> Bool)?
 
     /// `ownClient` is the Client that a command acting as a Client must still find at its tty; nil checks nothing,
-    /// for a transport that checks it itself or before the Client is known.
-    public init(ownClient: Client? = nil, run: @escaping ([String]) throws -> String) {
+    /// for a transport that checks it itself or before the Client is known. `switchOnListener` runs a
+    /// `switchClient` on the publisher's Listener, after the Colour Report (`EnvironmentPublisher.switchClient`); when
+    /// it returns false, `run` runs the switch.
+    public init(ownClient: Client? = nil, run: @escaping ([String]) throws -> String,
+                switchOnListener: ((_ client: String, _ target: String) throws -> Bool)? = nil) {
         self.ownClient = ownClient
         execute = run
+        self.switchOnListener = switchOnListener
     }
 
     public init(server: TmuxRunning, ownClient: Client? = nil) {
@@ -200,6 +205,9 @@ public struct ViewCommandExecutor {
     @discardableResult
     public func run(_ command: ViewCommand) throws -> String {
         if let tty = command.ownClient { try check(tty) }
+        if case .switchClient(let client, let target) = command, let switchOnListener, try switchOnListener(client, target) {
+            return ""
+        }
         let arguments = Self.arguments(for: command)
         guard case .paste = command, let buffer = arguments.firstIndex(of: "-b").map({ arguments[$0 + 1] }) else {
             return try execute(arguments)

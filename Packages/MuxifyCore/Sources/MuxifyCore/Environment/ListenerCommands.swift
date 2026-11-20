@@ -25,6 +25,13 @@ final class ListenerCommands: @unchecked Sendable {
         client = nil
     }
 
+    /// Whether a Client takes lines now.
+    var isAttached: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return client != nil
+    }
+
     /// Sends the lines, in order, without a wait. False when no Client takes them now: then `hold` keeps them for the
     /// next Client, and without it they are skipped.
     @discardableResult

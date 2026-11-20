@@ -14,7 +14,8 @@ extension TmuxRunning {
 extension TmuxServer: TmuxRunning {}
 
 /// The app's local server: its Listener writes the Colour Report of ADR 0095 before each command that Muxify types
-/// into a Session that it just made. A switch needs none here: the Listener reports when it follows the Terminal there.
+/// into a Session that it just made. A switch needs none here: the App Window's view commands run a switch on the
+/// Listener after its report, and the Listener reports when it follows the Terminal after any other.
 public struct ColourReportingTmux: TmuxRunning {
     private let server: any TmuxRunning
     private let publisher: EnvironmentPublisher

@@ -282,7 +282,128 @@ final class EnvironmentPublisherTests: XCTestCase {
         XCTAssertNotEqual(try String(contentsOfFile: probes.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7")
     }
 
+    /// tmux tells a program with mode 2031 of a new colour scheme at the switch, when its Terminal's differs from the
+    /// one the Pane was last told. A report written after the switch then changes the answer but sends no notice, so
+    /// the program would keep the other screen's look. A switch through the publisher runs on the Listener after the
+    /// report: at the notice, the program gets the reported colours.
+    func testAProgramThatAsksAtTheSwitchsNoticeGetsTheReportedColours() async throws {
+        let notices = try themeProbe(session: "other")
+        try server.run(["new-session", "-d", "-s", "work"])
+        let terminal = try startTerminal(in: "work", colours: Self.light)
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try terminalSays(.light)
+        try await screenWritesAndDetaches(in: "other", flags: "ignore-size,no-output")
+        try await wait("the probe was not told dark") { self.lines(notices).last == "dark" }
+
+        XCTAssertTrue(try publishers[0].switchClient(terminal.tty, to: "=other:"), "no Listener took the switch")
+
+        try await wait("the Terminal did not move") { try self.clientSession(terminal.tty) == "other" }
+        try await wait("the probe was not told light", seconds: 5) { self.lines(notices).last?.hasPrefix("light") == true }
+        XCTAssertEqual(lines(notices).last, "light rgb:fbfb/f1f1/c7c7", "the program at the notice got other colours")
+        try await wait("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
+    }
+
+    /// The report goes before the switch, on one connection, and the Terminal's move that follows does not write the
+    /// Session again. With no Listener, the publisher takes no switch, and the move writes.
+    func testASwitchThroughThePublisherWritesItsSessionOnceBeforeTheSwitch() async throws {
+        let other = try probe(session: "other")
+        try server.run(["split-window", "-d", "-t", "other:", probeCommand(other.1)])
+        try server.run(["new-session", "-d", "-s", "work"])
+        let sent = SentLines()
+        let terminal = try startTerminal(in: "work", colours: Self.light, sent: sent)
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        sent.clear()
+
+        XCTAssertTrue(try publishers[0].switchClient(terminal.tty, to: "=other:"))
+        try await wait("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        let panes = try server.run(["list-panes", "-s", "-t", "=other", "-F", "#{pane_id}"]).split(separator: "\n").map(String.init)
+        let report = ColourReport.commands(panes: panes, colours: Self.light)
+        let switchLine = try XCTUnwrap(sent.lines.firstIndex { $0.hasPrefix("'switch-client'") }, "\(sent.lines)")
+        XCTAssertEqual(Array(sent.lines[..<switchLine]), report, "the report did not go just before the switch")
+        XCTAssertEqual(sent.lines.filter { $0.hasPrefix("refresh-client -r") }, report, "the move wrote the Session again")
+        try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
+        for answer in [other.0, other.1] {
+            try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
+            XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
+        }
+
+        publishers[0].stop()
+        try await wait("the Listener did not detach") { try self.controlClients().isEmpty }
+        XCTAssertFalse(try publishers[0].switchClient(terminal.tty, to: "=work:"), "a switch went to no Listener")
+    }
+
     // MARK: - Helpers
+
+    /// What the Listener sent, line by line.
+    private final class SentLines: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [String] = []
+        var lines: [String] { lock.lock(); defer { lock.unlock() }; return log }
+        func add(_ line: String) { lock.lock(); log.append(line); lock.unlock() }
+        func clear() { lock.lock(); log = []; lock.unlock() }
+    }
+
+    private final class RecordingControlClient: TmuxControlClient {
+        let client: TmuxControlClient
+        let sent: SentLines
+        init(_ client: TmuxControlClient, sent: SentLines) { self.client = client; self.sent = sent }
+        func send(_ command: String) { sent.add(command); client.send(command) }
+        func stop() { client.stop() }
+    }
+
+    private enum Theme: String { case dark = "1", light = "2" }
+
+    /// The Terminal's Client tells tmux the colour scheme of its terminal, as Ghostty does when asked.
+    private func terminalSays(_ theme: Theme) throws {
+        let input = try XCTUnwrap(clientProcess?.standardInput as? Pipe)
+        input.fileHandleForWriting.write(Data("\u{1b}[?997;\(theme.rawValue)n".utf8))
+    }
+
+    /// A Session whose Pane runs a program that turns on mode 2031, as Claude Code does, and logs each colour-scheme
+    /// notice to the returned file: `dark`, or `light` and the background (OSC 11) it asked for at once.
+    private func themeProbe(session: String) throws -> String {
+        let python = "/usr/bin/python3"
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: python), "no python3 for the probe")
+        let script = directory.appendingPathComponent("theme.py").path
+        try """
+            import os, re, select, sys, tty, time
+            log = sys.argv[1]
+            tty.setraw(0)
+            os.write(1, b'\\x1b[?2031h')
+            pending = b''
+            def note(text):
+                with open(log, 'a') as f: f.write(text + '\\n')
+            while True:
+                if select.select([0], [], [], 0.05)[0]: pending += os.read(0, 256)
+                notice = re.search(rb'\\x1b\\[\\?997;([12])n', pending)
+                if not notice: continue
+                pending = pending[notice.end():]
+                if notice.group(1) == b'1':
+                    note('dark')
+                    continue
+                os.write(1, b'\\x1b]11;?\\x1b\\\\')
+                end = time.time() + 1
+                while time.time() < end and not re.search(rb'rgb:[0-9a-f/]+', pending):
+                    if select.select([0], [], [], 0.05)[0]: pending += os.read(0, 256)
+                found = re.search(rb'rgb:[0-9a-f/]+', pending)
+                note('light ' + (found.group().decode() if found else 'none'))
+                pending = pending[found.end():] if found else b''
+            """.write(toFile: script, atomically: true, encoding: .utf8)
+        let log = directory.appendingPathComponent(session + "-notices").path
+        try server.run(["new-session", "-d", "-s", session, "-x", "80", "-y", "24", "\(python) \(script) \(log)"])
+        return log
+    }
+
+    private func lines(_ path: String) -> [String] {
+        ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+    }
+
+    private func clientSession(_ tty: String) throws -> String {
+        try server.run(["display-message", "-p", "-c", tty, "#{client_session}"]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     private static let light = TerminalColours(background: TerminalColour(red: 0xfb, green: 0xf1, blue: 0xc7),
                                                foreground: TerminalColour(red: 0x3c, green: 0x38, blue: 0x36))
@@ -291,9 +412,10 @@ final class EnvironmentPublisherTests: XCTestCase {
 
     /// A publisher with a Client marker, a Terminal's Client attached to `session` that the marker names, and the
     /// colours of the key App Window, or none.
-    private func startTerminal(in session: String, colours: TerminalColours?) throws -> ViewCommandExecutor.Client {
+    private func startTerminal(in session: String, colours: TerminalColours?,
+                               sent: SentLines? = nil) throws -> ViewCommandExecutor.Client {
         let marker = ClientMarker.option(nonce: "terminal")
-        _ = start(clientMarker: marker)
+        _ = start(clientMarker: marker, sent: sent)
         publishers[0].reportColours(colours)
         let terminal = try attachClient(to: session)
         let value = [String(terminal.pid), terminal.tty, "/Users/u", "mac", "local"].joined(separator: Tmux.separator)
@@ -388,11 +510,15 @@ final class EnvironmentPublisherTests: XCTestCase {
         func clear() { lock.lock(); log = []; lock.unlock() }
     }
 
-    private func start(clientMarker: String? = nil) -> Recorder {
+    private func start(clientMarker: String? = nil, sent: SentLines? = nil) -> Recorder {
         let recorder = Recorder()
+        let startControlClient: TmuxControlClientStart = { invocation, environment, onLines, onExit in
+            let client = try PipeControlClient.start(invocation, environment, onLines, onExit)
+            return sent.map { RecordingControlClient(client, sent: $0) } ?? client
+        }
         let publisher = EnvironmentPublisher(server: server, topics: TopicStore(paths: paths),
                                              delivery: DispatchQueue(label: "test.environment-events"),
-                                             clientMarker: clientMarker)
+                                             startControlClient: startControlClient, clientMarker: clientMarker)
         publishers.append(publisher)
         publisher.start(recorder.add)
         return recorder

@@ -19,6 +19,12 @@ PROBE = REPO/'scripts/verify/fixtures/colour_probe.py'
 OTHER = 'rgb:ffff/ffff/ffff'
 
 
+def is_light(colour):
+    """Whether tmux takes the `rgb:rrrr/gggg/bbbb` background for a light colour scheme."""
+    red, green, blue = (int(part[:2], 16) for part in colour[len('rgb:'):].split('/'))
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue > 127
+
+
 class ColourReportTerminal(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -63,12 +69,13 @@ class ColourReportTerminal(unittest.TestCase):
     def answers(cls, session):
         return [line.split()[1] for line in cls.lines(session) if line.startswith('answer ')]
 
-    def report_other_colour(self, session):
+    def report_other_colour(self, session, colour=OTHER, screen=None):
         """Writes the other screen's background for the Session's Pane, and waits until the probe gets it."""
         pane = self.sandbox.tmux('display-message', '-p', '-t', session + ':', '#{pane_id}').strip()
-        self.phone.stdin.write(('refresh-client -r "%s:\\033]11;%s\\033\\\\"\n' % (pane, OTHER)).encode())
-        self.phone.stdin.flush()
-        wait(lambda: self.answers(session)[-1:] == [OTHER],
+        screen = screen or self.phone
+        screen.stdin.write(('refresh-client -r "%s:\\033]11;%s\\033\\\\"\n' % (pane, colour)).encode())
+        screen.stdin.flush()
+        wait(lambda: self.answers(session)[-1:] == [colour],
              lambda: 'the probe did not get the other report: %s' % self.lines(session)[-5:])
 
     def test_the_app_window_becoming_key_reports_muxifys_colours_over_another_screens_report(self):
@@ -84,16 +91,34 @@ class ColourReportTerminal(unittest.TestCase):
              lambda: 'the key App Window did not report its colours: %s' % self.lines(session)[-5:])
 
     def test_a_switch_that_muxify_starts_reports_muxifys_colours(self):
-        """The Listener writes the report when it hears the Terminal move, so a program that asks after the switch gets
-        Muxify's colours. Measured on tmux 3.8 with Muxify's Terminal: a report written after the switch sends the
-        Pane no colour-scheme notice, so a program that asked before the switch keeps its answer until it asks again."""
+        """tmux 3.8 tells a program with mode 2031 of the new colour scheme at the switch, and the program asks at once,
+        as Claude Code does. A report written after the switch would change the answer but send no notice, so the
+        program would keep the other screen's look. Muxify runs its switch on the Listener after the report, so the
+        answer at the notice is Muxify's. The other screen sits in the probe's Session, so tmux tells the probe of its
+        colour, which is of the other kind: the switch then sends a notice."""
         session = 'switch-colours'
         self.start_probe(session)
-        self.report_other_colour(session)
+        screen = self.sandbox.tmux_control(session)
+        self.addCleanup(screen.terminate)
+        # tmux tells a program of a colour scheme only when it changes after the program turned on mode 2031, which
+        # the probe does before it asks.
+        wait(lambda: self.answers(session), 'the probe did not start')
+        other = 'rgb:0000/0000/0000' if is_light(self.muxify) else OTHER
+        start = len(self.lines(session))
+        self.report_other_colour(session, other, screen)
+        wait(lambda: 'notice' in self.lines(session)[start:],
+             lambda: 'the probe was not told the other screen\'s colour scheme: %s' % self.lines(session))
         before = len(self.lines(session))
 
         self.sandbox.show(self.window(session))
 
+        def at_notice():
+            after = self.lines(session)[before:]
+            notice = after.index('notice') if 'notice' in after else None
+            return next((line for line in after[notice:] if line.startswith('answer ')), None) if notice is not None else None
+        answer = wait(at_notice, lambda: 'the switch sent the program no notice of Muxify\'s colour scheme: %s'
+                      % self.lines(session)[before:][-5:])
+        self.assertEqual(answer, 'answer ' + self.muxify, 'the program that asked at the switch\'s notice got other colours')
         wait(lambda: [line for line in self.lines(session)[before:] if line.startswith('answer ')][-1:] == ['answer ' + self.muxify],
              lambda: 'the switch that Muxify started did not get Muxify\'s colours: %s' % self.lines(session)[before:][-5:])
 

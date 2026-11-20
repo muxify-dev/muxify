@@ -29,16 +29,22 @@ final class TmuxConnection: @unchecked Sendable {
     /// The App Window's Client marker option on this Mac, which its publisher's Listener follows; nil gives each
     /// replacement an option of its own.
     private let localMarkerOption: String?
+    /// Runs a switch on the App Window's Listener, after its Colour Report; false when the switch runs here.
+    private let switchOnListener: ((_ client: String, _ target: String) throws -> Bool)?
 
     init(environment: RemoteEnvironment?, sshExecutable: String = "/usr/bin/ssh") throws {
         remote = try environment.map { try RemoteSSH(environment: $0, sshExecutable: sshExecutable) }
         localMarkerOption = nil
+        switchOnListener = nil
     }
 
     /// The connection to this Mac's server. `clientMarker` is the App Window's Client marker option.
-    init(clientMarker: String? = nil) {
+    /// `switchOnListener` runs a `switchClient` on the App Window's Listener, as `EnvironmentPublisher.switchClient`
+    /// does, and returns false when there is none.
+    init(clientMarker: String? = nil, switchOnListener: ((_ client: String, _ target: String) throws -> Bool)? = nil) {
         remote = nil
         localMarkerOption = clientMarker
+        self.switchOnListener = switchOnListener
     }
 
     var isOnThisMac: Bool { remote == nil }
@@ -61,7 +67,9 @@ final class TmuxConnection: @unchecked Sendable {
     func view(_ command: ViewCommand, ownClient: ViewCommandExecutor.Client?,
               completion: @escaping (Result<String, Error>) -> Void) {
         queue.async {
-            let result = Result { try ViewCommandExecutor(ownClient: ownClient, run: self.run).run(command) }
+            let result = Result {
+                try ViewCommandExecutor(ownClient: ownClient, run: self.run, switchOnListener: self.switchOnListener).run(command)
+            }
             DispatchQueue.main.async { completion(result) }
         }
     }

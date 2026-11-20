@@ -195,6 +195,25 @@ final class ViewCommandExecutorTests: XCTestCase {
         XCTAssertTrue(try own.run(.clientPane(client: client.tty)).hasPrefix("%"))
     }
 
+    func testASwitchRunsOnTheListenerWhenOneTakesItAndHereWhenNone() throws {
+        var ran: [[String]] = []
+        var listener: [String] = []
+        var attached = true
+        let executor = ViewCommandExecutor(run: { ran.append($0); return "" }, switchOnListener: { client, target in
+            if attached { listener.append(client + " " + target) }
+            return attached
+        })
+        try executor.run(.switchClient(client: "/dev/ttys001", target: "$1:@2"))
+        XCTAssertEqual(listener, ["/dev/ttys001 $1:@2"])
+        XCTAssertEqual(ran, [], "a switch that the Listener took also ran here")
+
+        attached = false
+        try executor.run(.switchClient(client: "/dev/ttys001", target: "$1:@2"))
+        XCTAssertEqual(ran, [["switch-client", "-Z", "-c", "/dev/ttys001", "-t", "$1:@2"]])
+        try executor.run(.selectPane(target: "%1", move: nil))
+        XCTAssertEqual(ran.last, ["select-pane", "-t", "%1"], "only a switch goes to the Listener")
+    }
+
     func testTheOwnClientCheckRefusesACommandWhoseTTYNamesAnotherClient() throws {
         try server.run(["new-session", "-d", "-s", "other", "-c", directory.path])
         let client = try attachClient(to: "work")
