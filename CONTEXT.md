@@ -70,7 +70,7 @@ The tmux program that a running tmux server was started from. Muxify and the `mu
 _Avoid_: tmux path, tmux version setting
 
 **Colour Report**:
-The background and foreground colours that a screen tells tmux it paints a Pane with. A program in the Pane that asks for its background or foreground gets the last Colour Report that any screen wrote, before any other answer. Muxify writes the colours of its Terminal for the Sessions that it shows, so the screen in use writes last. Muxify Mobile writes its theme's colours.
+The background and foreground colours that a screen tells tmux it paints a Pane with. A program in the Pane that asks for its background or foreground gets the last Colour Report that any screen wrote, before any other answer. The Listener of the key App Window writes the colours of its Terminal when the Terminal shows another Session, when its user changes the focus or types first after another screen took the Window, and when another screen leaves the server, on this Mac and on a Remote Environment's host, so the screen in use writes last. Muxify Mobile writes its theme's colours.
 _Avoid_: theme report, colour override, OSC report
 
 **Find in Pane**:

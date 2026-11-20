@@ -251,8 +251,8 @@ protocol EnvironmentLink: AnyObject {
     /// socket in `@muxify_browser_socket`: it sends `claim_open` or `release_open` when this changes.
     func setOpenConsumer(_ consumes: Bool)
     /// Reports the Terminal's colours to the Panes of the Session that this App Window's Terminal shows, and again
-    /// each time it moves (ADR 0095); nil writes none, as for an App Window that is not key. Only the Local Environment
-    /// reports: issue #149 is the remote one.
+    /// each time it moves (ADR 0098); nil writes none, as for an App Window that is not key. The Local Environment's
+    /// publisher writes them; a Host's link sends them to its Host Server, whose Listener writes them.
     func reportColours(_ colours: TerminalColours?)
     /// Writes the colours to every Pane of `window`, as the store decided after a `focusChanged` or a `windowTaken`
     /// event, without waiting. It writes nothing while no colours were reported.

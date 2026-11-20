@@ -12,6 +12,18 @@ public struct TerminalColour: Hashable, Sendable {
         self.blue = blue
     }
 
+    /// `#rrggbb`, the form that the Host Server protocol carries.
+    public var hex: String {
+        "#" + [red, green, blue].map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Reads `#rrggbb`; nil for anything else.
+    public init?(hex: String) {
+        let digits = hex.dropFirst()
+        guard hex.first == "#", digits.count == 6, digits.allSatisfy(\.isHexDigit), let value = UInt32(digits, radix: 16) else { return nil }
+        self.init(red: UInt8(value >> 16 & 0xff), green: UInt8(value >> 8 & 0xff), blue: UInt8(value & 0xff))
+    }
+
     /// The form of an OSC 10 or 11 reply: each channel written twice, `rgb:fbfb/f1f1/c7c7`.
     var oscReply: String {
         "rgb:" + [red, green, blue].map { String(format: "%02x%02x", $0, $0) }.joined(separator: "/")

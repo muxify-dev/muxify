@@ -54,9 +54,9 @@ public struct HostServerContext: @unchecked Sendable {
 }
 
 /// `muxify server`: the Host Server's requests (ADR 0087). It serves `ping` and `shutdown`, the `environment`,
-/// `config`, `repository`, `topic` and `snapshot` subscriptions, `environment` requests, `mark_read`, the view commands,
-/// the Topic and Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads, writes and
-/// network commands, `session_paths`, `visit_session_path`, `upload` and `browser_tabs`. Programs on the Host reach its
+/// `config`, `repository`, `topic`, `snapshot` and `focus` subscriptions, `environment` requests, `mark_read`, the view
+/// commands, the Topic and Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads,
+/// writes and network commands, `session_paths`, `visit_session_path`, `upload`, `browser_tabs` and `colours`. Programs on the Host reach its
 /// Mac through its own socket, whose requests it sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask`
 /// goes to the network command that runs it, which asks the Mac.
 public enum HostServer {
@@ -162,6 +162,8 @@ public enum HostServer {
                 host.subscribe(topic, for: request, nonce: nonce)
             case .subscribe(.snapshot):
                 host.subscribeSnapshot(request, nonce: nonce)
+            case .subscribe(.focus):
+                host.subscribeFocus(request, nonce: nonce)
             case .environment(let environmentRequest):
                 host.run(environmentRequest, for: request, nonce: nonce)
             case .markRead(let mark):
@@ -194,6 +196,8 @@ public enum HostServer {
                 host.uploads.receive(chunk, for: request)
             case .browserTabs(let tabs):
                 host.browserTabs(tabs, for: request)
+            case .colours(let colours):
+                host.colours(colours, for: request, nonce: nonce)
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -306,6 +310,8 @@ final class HostEnvironment: @unchecked Sendable {
     // `lock` guards these.
     private var publisherStorage: EnvironmentPublisher?
     private var stopped = false
+    /// The id of the `colours` request whose colours the publisher has.
+    private var coloursID = 0
 
     // Only `delivery` touches these.
     private var state = EnvironmentState()
@@ -317,6 +323,8 @@ final class HostEnvironment: @unchecked Sendable {
     private var snapshotConfig: Config?
     private var observesConfig = false
     private var lastShown: Data?
+    /// The `focus` subscribers, which get what the Listener heard of the focus in the Terminal's Window.
+    private var focusSubscribers: [Int: ProtocolIncomingRequest] = [:]
     /// The `repository` subscriptions by request; `lock` guards it.
     private var watches: [Int: RepositoryWatch] = [:]
     let uploads: HostUploads
@@ -444,7 +452,7 @@ final class HostEnvironment: @unchecked Sendable {
                 if hasState { send(state.all, to: id, first: true) }
             }
             request.onCancel { self.delivery.async { self.subscribers[id] = nil } }
-            publisher.start { changes in self.receive(changes) }
+            start(publisher)
         }
     }
 
@@ -453,7 +461,7 @@ final class HostEnvironment: @unchecked Sendable {
     func subscribe(_ topic: TopicSubscription, for request: ProtocolIncomingRequest, nonce: String?) {
         details.subscribe(request, topic: topic.id)
         Task {
-            await self.publisher(nonce: nonce).start { changes in self.receive(changes) }
+            start(await self.publisher(nonce: nonce))
         }
     }
 
@@ -483,6 +491,24 @@ final class HostEnvironment: @unchecked Sendable {
         }
     }
 
+    /// Starts the publisher once, for every subscription: its items go to `receive`, and what its Listener heard of the
+    /// focus to the `focus` subscribers.
+    private func start(_ publisher: EnvironmentPublisher) {
+        publisher.start(news: { [weak self] news in self?.heard(news) }, { [weak self] changes, _ in self?.receive(changes) })
+    }
+
+    /// On `delivery`: what the Listener heard of the focus in the Window that the Terminal shows goes to each `focus`
+    /// subscriber, whose Mac decides whose screen made it (ADR 0098).
+    private func heard(_ news: EnvironmentPublisher.News) {
+        let event: FocusEvent
+        switch news {
+        case .heard, .readFailed: return
+        case .focusChanged(let window): event = .focusChanged(window: window)
+        case .taken(let window): event = .taken(window: window)
+        }
+        for (id, request) in focusSubscribers where !request.sendEvent(event, key: event.key) { focusSubscribers[id] = nil }
+    }
+
     /// On `delivery`: the first item of the publisher holds every key, and goes whole to each subscriber; each later
     /// change goes as an event of its own key, which replaces an unsent one.
     private func receive(_ changes: [EnvironmentChange]) {
@@ -508,6 +534,44 @@ final class HostEnvironment: @unchecked Sendable {
         if !sent { subscribers[id] = nil }
     }
 
+    // MARK: - The Mac's colours (ADR 0098)
+
+    /// The `focus` subscription: what the Listener hears of the focus in the Window that the Terminal shows, from now
+    /// on. It starts the publisher, whose Listener hears it.
+    func subscribeFocus(_ request: ProtocolIncomingRequest, nonce: String?) {
+        Task {
+            let publisher = await self.publisher(nonce: nonce)
+            let id = request.id
+            delivery.async { [self] in
+                guard !request.isCancelled else { return }
+                focusSubscribers[id] = request
+            }
+            request.onCancel { self.delivery.async { self.focusSubscribers[id] = nil } }
+            start(publisher)
+        }
+    }
+
+    /// The Mac's colours: the publisher writes them by the rules it follows on the Mac, from its Listener and without
+    /// waiting. With a Window, it writes that Window's Panes now; without one, the Terminal's Session's.
+    /// Handlers run concurrently, so a request's id, which grows with each request on the channel, tells the Mac's last
+    /// colours: an older request that comes late leaves them, and only writes its Window with them.
+    func colours(_ colours: ColoursRequest, for request: ProtocolIncomingRequest, nonce: String?) {
+        Task {
+            let publisher = await self.publisher(nonce: nonce)
+            lock.lock()
+            let newest = request.id > coloursID
+            if newest { coloursID = request.id }
+            switch (newest, colours.window) {
+            case (true, let window?): publisher.reportColours(colours.colours, toWindow: window)
+            case (true, nil): publisher.reportColours(colours.colours)
+            case (false, let window?): publisher.reportColours(toWindow: window)
+            case (false, nil): break
+            }
+            lock.unlock()
+            request.finish()
+        }
+    }
+
     // MARK: - The snapshot subscription
 
     /// The `snapshot` subscription (ADR 0093): `environment show`'s view, computed from the state that the
@@ -526,7 +590,7 @@ final class HostEnvironment: @unchecked Sendable {
                 sendSnapshot(first: id)
             }
             request.onCancel { self.delivery.async { self.snapshotSubscribers[id] = nil } }
-            publisher.start { changes in self.receive(changes) }
+            start(publisher)
         }
     }
 
@@ -804,7 +868,8 @@ final class HostEnvironment: @unchecked Sendable {
     }
 
     /// Runs a view command on the Host's tmux. A command that acts as the App Window's own Client runs only while
-    /// the Client marker names that Client. A command that changes tmux reads again before its answer.
+    /// the Client marker names that Client. A command that changes tmux reads again before its answer. A switch runs on
+    /// the publisher's Listener after its Colour Report, as on the Mac, while a subscriber runs the publisher.
     func view(_ command: ViewCommand, for request: ProtocolIncomingRequest, nonce: String?) {
         let tmux = context.tmux
         Task {
@@ -818,7 +883,10 @@ final class HostEnvironment: @unchecked Sendable {
             let changes = Self.changesTmux(command)
             guard !changes || request.startMutation() else { return }
             do {
-                let output = try await Self.background { [own] in try ViewCommandExecutor(server: tmux, ownClient: own).run(command) }
+                let listener = runningPublisher
+                let output = try await Self.background { [own] in
+                    try ViewCommandExecutor(ownClient: own, run: { try tmux.run($0) }, switchOnListener: listener?.switchClient).run(command)
+                }
                 if changes, let publisher = runningPublisher { await readAgain(publisher) }
                 request.finish(ViewOutput(output: output))
             } catch {

@@ -1,5 +1,7 @@
 # The screen in use writes the Colour Report last
 
+> **Partly superseded by [ADR-0098](0098-colour-reports-are-written-without-waiting-by-the-screen-in-use.md):** the report before each switch, the report after the next read, the wait for tmux's answer and the switch rules below no longer apply: the Listener writes without waiting, when its Terminal moves, and a switch that Muxify starts runs on the Listener after the report. A Remote Environment's Host Server writes the Mac's colours too (issue #149). The rule that the screen in use writes the Colour Report last stands.
+
 Claude Code, nvim and Codex choose a light or a dark look from tmux's answer to a background question (OSC 11). tmux 3.8 answers a Pane from, in this order: the Pane's Colour Report, which a control Client writes with `refresh-client -r`; the Window's `window-style`; the Client that shows the Session. A Pane keeps one Colour Report, the last one that any control Client wrote. tmux keeps it while any control Client is attached. Muxify's Listener ([ADR-0097](0097-the-listener-follows-the-terminals-session.md)) is always attached, so a Colour Report never goes. Muxify Mobile writes its theme's colours when it attaches. After that, a program on the Mac got the phone's look.
 
 We decide that **the screen in use writes the Colour Report last**. Muxify's listener writes the background and foreground of its Ghostty Terminal for every Pane of each Session that one of Muxify's Clients shows. A Client is Muxify's when a Client marker names its pid and tty and it is not a control Client.

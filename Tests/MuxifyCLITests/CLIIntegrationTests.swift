@@ -1376,7 +1376,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         let server = try startServer()
         defer { stopIfRunning(server.process) }
         let session = try await server.client.connect()
-        XCTAssertEqual(session.protocolVersion, 1)
+        XCTAssertEqual(session.protocolVersion, 2)
         XCTAssertEqual(session.peerBuild, "muxify dev 0")
         try await server.client.ping()
         server.client.close()

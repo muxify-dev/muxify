@@ -16,7 +16,8 @@ import Foundation
 /// The Host Server's publisher also reads its Mac's Client marker, so its `server` event names that Mac's own Client,
 /// and writes the Sessions that each read gives the Topics onto their records, so the Mac writes no record itself.
 ///
-/// In the app it also writes the Colour Reports of ADR 0095 through its Listener, while its App Window gives it colours:
+/// It also writes the Colour Reports of ADR 0098 through its Listener, while its App Window gives it colours, in the app
+/// or, on a Host, through the Host Server's `colours` request:
 /// to every Pane of the target's Session right before a switch that Muxify starts, which it runs on the Listener's own
 /// connection after the report; to every Pane of the Terminal's Session when the Listener moves there, which covers a
 /// switch made inside tmux, once for each move; again when it gets colours, as its App Window becomes key or Ghostty's colours change; again
@@ -25,7 +26,8 @@ import Foundation
 ///
 /// It does not decide whose screen changed the focus, which tmux does not say: it tells an in-process subscriber that
 /// the focus changed in the Window that the Terminal shows, or that another screen took that Window, and writes a
-/// Window's Panes when the subscriber asks (`reportColours(toWindow:)`). The subscriber decides.
+/// Window's Panes when the subscriber asks (`reportColours(toWindow:)`). The subscriber decides: the App Window's store,
+/// which on a Host hears these through the Host Server's `focus` subscription.
 ///
 /// The Listener follows the Terminal: it sits in the Session that the Client of `clientMarker` shows and moves there
 /// each time that Client does, as Muxify Mobile's control Client does. Before that Client attaches, it sits in the
@@ -237,7 +239,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         }
     }
 
-    // MARK: - Colour Reports (ADR 0095)
+    // MARK: - Colour Reports (ADR 0098)
 
     /// Sets the colours of Muxify's Terminal, and reports them to every Pane of the Terminal's Session. Nil reports
     /// nothing from now on, as on a Host or in an App Window that is not key. The key App Window calls it when it
@@ -260,6 +262,15 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     /// caller does not wait for tmux.
     public func reportColours(toWindow window: String) {
         queue.async { [self] in reportColours(toPanesIn: ["list-panes", "-t", window, "-F", "#{pane_id}"]) }
+    }
+
+    /// Sets the colours, as `reportColours(_:)` does, but writes only every Pane of `window`: a Host Server's Mac
+    /// sends its colours with the Window that it decided to write.
+    public func reportColours(_ colours: TerminalColours?, toWindow window: String) {
+        lock.lock()
+        self.colours = colours
+        lock.unlock()
+        reportColours(toWindow: window)
     }
 
     /// `listing` prints one Pane id on each line. Off `queue`, so a read in progress does not hold the report up.

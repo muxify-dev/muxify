@@ -26,7 +26,7 @@ final class ProtocolChannelTests: XCTestCase {
         server.start()
         let client = wire.client(build: "muxify client 1")
         let session = try await client.connect()
-        XCTAssertEqual(session, ProtocolClient.Session(protocolVersion: 1, peerBuild: "muxify server 1", peerCapabilities: Set(HostProtocol.capabilities)))
+        XCTAssertEqual(session, ProtocolClient.Session(protocolVersion: 2, peerBuild: "muxify server 1", peerCapabilities: Set(HostProtocol.capabilities)))
         try await client.ping()
         XCTAssertEqual(server.client?.build, "muxify client 1")
         XCTAssertEqual(server.client?.capabilities, [], "a client declares no capability unless it names one")
@@ -60,7 +60,7 @@ final class ProtocolChannelTests: XCTestCase {
         let mac = wire.handDrivenClient()
         XCTAssertEqual(try mac.line(), "MUXIFY-PROTOCOL")
         XCTAssertTrue((try mac.line() ?? "").contains(#""kind":"hello""#))
-        mac.write(#"{"id":0,"kind":"hello","later":1,"hello":{"protocol":1,"build":"b","capabilities":[],"later":[1]}}"#)
+        mac.write(#"{"id":0,"kind":"hello","later":1,"hello":{"protocol":2,"build":"b","capabilities":[],"later":[1]}}"#)
         mac.write(#"{"id":1,"kind":"request","later":{},"request":{"ping":{"later":true}}}"#)
         XCTAssertEqual(try mac.line(), #"{"end":{"ok":{}},"id":1,"kind":"end"}"#)
         mac.closeOutput()
@@ -157,7 +157,7 @@ final class ProtocolChannelTests: XCTestCase {
         let mac = wire.handDrivenClient()
         XCTAssertEqual(try mac.line(), "MUXIFY-PROTOCOL")
         _ = try mac.line()
-        mac.write(#"{"id":0,"kind":"hello","hello":{"protocol":1,"build":"b","capabilities":[]}}"#)
+        mac.write(#"{"id":0,"kind":"hello","hello":{"protocol":2,"build":"b","capabilities":[]}}"#)
         mac.pause()
         mac.write(#"{"id":1,"kind":"request","request":{"watch":{}}}"#)
         try await Task.sleep(for: .milliseconds(500))
@@ -177,7 +177,7 @@ final class ProtocolChannelTests: XCTestCase {
         let wire = Wire()
         let host = wire.handDrivenServer()
         host.write("MUXIFY-PROTOCOL")
-        host.write(#"{"id":0,"kind":"hello","hello":{"protocol":1,"min_protocol":1,"build":"s","capabilities":[]}}"#)
+        host.write(#"{"id":0,"kind":"hello","hello":{"protocol":2,"min_protocol":2,"build":"s","capabilities":[]}}"#)
         let client = wire.client()
         try await client.connect()
         let calls = (0..<3).map { _ in Task { try await client.ping() } }
@@ -204,7 +204,7 @@ final class ProtocolChannelTests: XCTestCase {
         let wire = Wire()
         let host = wire.handDrivenServer()
         host.write("MUXIFY-PROTOCOL")
-        host.write(#"{"id":0,"kind":"hello","hello":{"protocol":1,"min_protocol":1,"build":"s","capabilities":[]}}"#)
+        host.write(#"{"id":0,"kind":"hello","hello":{"protocol":2,"min_protocol":2,"build":"s","capabilities":[]}}"#)
         let client = wire.client()
         try await client.connect()
         let closed = expectation(description: "the channel closed")
@@ -234,7 +234,7 @@ final class ProtocolChannelTests: XCTestCase {
         host.write("Welcome to fish, the friendly interactive shell")
         host.write(String(repeating: "motd ", count: 2000))
         host.write("MUXIFY-PROTOCOL")
-        host.write(#"{"id":0,"kind":"hello","hello":{"protocol":1,"min_protocol":1,"build":"s","capabilities":[]}}"#)
+        host.write(#"{"id":0,"kind":"hello","hello":{"protocol":2,"min_protocol":2,"build":"s","capabilities":[]}}"#)
         let session = try await wire.client().connect()
         XCTAssertEqual(session.peerBuild, "s")
     }
@@ -281,6 +281,32 @@ final class ProtocolChannelTests: XCTestCase {
         XCTAssertEqual(try host.line(), #"{"hello":{"build":"older","capabilities":[],"protocol":2},"id":0,"kind":"hello"}"#)
     }
 
+    /// Protocol 2 adds the Mac's colours and the `focus` subscription with no fallback (ADR 0098): a Mac and a Host
+    /// Server of protocol 1 are refused on both sides.
+    func testAPeerOfProtocol1IsRefusedOnBothSides() async throws {
+        XCTAssertEqual(HostProtocol.supported, 2...2)
+        let wire = Wire()
+        let server = wire.hostServer(build: "s")
+        server.start()
+        let mac = wire.handDrivenClient()
+        XCTAssertEqual(try mac.line(), "MUXIFY-PROTOCOL")
+        XCTAssertTrue((try mac.line() ?? "").contains(#""min_protocol":2,"protocol":2"#), "the server offers protocol 2 alone")
+        mac.write(#"{"id":0,"kind":"hello","hello":{"protocol":1,"build":"muxify older 1","capabilities":[]}}"#)
+        let exit = await server.wait()
+        XCTAssertEqual(exit, .failed("the client picked protocol 1"), "a Host Server of this build served a Mac of protocol 1")
+
+        let older = Wire()
+        let host = older.handDrivenServer()
+        host.write("MUXIFY-PROTOCOL")
+        host.write(#"{"id":0,"kind":"hello","hello":{"protocol":1,"min_protocol":1,"build":"muxify older 1","capabilities":["request"]}}"#)
+        do {
+            try await older.client().connect()
+            XCTFail("a Mac of this build connected to a Host Server of protocol 1")
+        } catch let failure as ProtocolClient.Failure {
+            XCTAssertEqual(failure, .noSharedProtocol(serverBuild: "muxify older 1", serverProtocols: 1...1))
+        }
+    }
+
     func testNoSharedProtocolFailsWithAReasonThatCarriesTheServersBuild() async throws {
         let wire = Wire()
         let host = wire.handDrivenServer()
@@ -320,7 +346,7 @@ final class ProtocolChannelTests: XCTestCase {
         let ping = Task { try await client.ping() }
         XCTAssertNil(try host.line(timeout: 0.3), "nothing is written before the server's hello")
         host.write("MUXIFY-PROTOCOL")
-        host.write(#"{"id":0,"kind":"hello","hello":{"protocol":1,"min_protocol":1,"build":"s","capabilities":[]}}"#)
+        host.write(#"{"id":0,"kind":"hello","hello":{"protocol":2,"min_protocol":2,"build":"s","capabilities":[]}}"#)
         XCTAssertTrue((try host.line() ?? "").contains(#""kind":"hello""#), "the client's hello comes first")
         XCTAssertEqual(try host.line(), #"{"id":1,"kind":"request","request":{"ping":{}}}"#)
         host.write(#"{"id":1,"kind":"end","end":{"ok":{}}}"#)

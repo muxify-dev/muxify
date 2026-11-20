@@ -18,6 +18,11 @@ import MuxifyCore
 /// Programs on the Host reach this App Window through the server's own socket (ADR 0091): the server sends each
 /// `browser` and `select` request over the channel, and the link hands it to its store's handler. While this App
 /// Window consumes `@muxify_open`, the link tells the server with `claim_open`, so `@muxify_browser_socket` names it.
+///
+/// The Terminal's colours go to the server in `colours` (ADR 0098): on each `hello`, and whenever the store reports them,
+/// as the App Window becomes key or Ghostty's colours change. The server's Listener writes them as on this Mac. What it
+/// hears of the focus comes back on the `focus` subscription, and the store decides, as for this Mac, whether to write
+/// a Window, which goes in `colours` too.
 @MainActor
 final class HostEnvironmentLink: EnvironmentLink {
     let isOnThisMac = false
@@ -69,6 +74,9 @@ final class HostEnvironmentLink: EnvironmentLink {
     private var consumesOpen = false
     /// What the current server was last told: `claim_open` or `release_open`. Nil for a server told nothing yet.
     private var toldConsumes: Bool?
+    /// The Terminal's colours as the store last reported them, which each new server gets after its `hello`.
+    private var colours: TerminalColours?
+    private var focusSubscription: Task<Void, Never>?
 
     init(environmentName: String, inner: EnvironmentLink, build: String = AppBuild.line, nonce: @escaping () -> String?,
          helloTimeout: TimeInterval = HostProtocol.helloTimeout, pingInterval: TimeInterval = 15,
@@ -230,8 +238,44 @@ final class HostEnvironmentLink: EnvironmentLink {
             }
             self?.configEnded(from: client)
         }
+        let focus = client.subscribe(HostRequest.subscribe(.focus), as: FocusEvent.self)
+        focusSubscription = Task { [weak self] in
+            do {
+                for try await event in focus { self?.receive(event, from: client) }
+            } catch {}
+        }
+        if colours != nil { sendColours(window: nil) }
         startPinging(client)
         adoptWaitingWorktrees(on: client)
+    }
+
+    /// What the server's Listener heard of the focus: the store decides, as for this Mac.
+    private func receive(_ event: FocusEvent, from client: ProtocolClient) {
+        guard client === self.client else { return }
+        switch event {
+        case .focusChanged(let window): events.send(.focusChanged(window: window))
+        case .taken(let window): events.send(.windowTaken(window: window))
+        }
+    }
+
+    // MARK: Colour Reports (ADR 0098)
+
+    func reportColours(_ colours: TerminalColours?) {
+        self.colours = colours
+        sendColours(window: nil)
+    }
+
+    func reportColours(toWindow window: String) {
+        guard colours != nil else { return }
+        sendColours(window: window)
+    }
+
+    /// Sends the colours, and the Window to write, once the current server answered `hello`, in the order reported.
+    /// Nothing waits for the answer; a server that has not answered gets the colours after its `hello`.
+    private func sendColours(window: String?) {
+        guard let client, session != nil else { return }
+        lastSent = Date()
+        _ = client.begin(HostRequest.colours(ColoursRequest(colours, window: window)), as: ProtocolEmpty.self)
     }
 
     /// Once after each `hello`: the Mac's Muxify Worktree rows that wait for this Environment go to the Host, which
@@ -335,6 +379,8 @@ final class HostEnvironmentLink: EnvironmentLink {
         subscription = nil
         configSubscription?.cancel()
         configSubscription = nil
+        focusSubscription?.cancel()
+        focusSubscription = nil
         // The store keeps the Config it has until the next server's first item.
         servedConfig = nil
         pinger?.invalidate()

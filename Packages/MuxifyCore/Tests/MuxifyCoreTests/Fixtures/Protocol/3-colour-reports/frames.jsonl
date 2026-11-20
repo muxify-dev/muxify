@@ -1,0 +1,11 @@
+{"hello":{"build":"muxify 1a2b3c4 1763100000","capabilities":["request","snapshot","topic-detail","ranked-session-paths","browser-tabs"],"min_protocol":2,"protocol":2},"id":0,"kind":"hello"}
+{"hello":{"build":"muxify 1a2b3c4 1763100000","capabilities":[],"nonce":"0a1b2c3d","protocol":2},"id":0,"kind":"hello"}
+{"id":1,"kind":"request","request":{"subscribe":{"focus":{}}}}
+{"id":2,"kind":"request","request":{"colours":{"background":"#fbf1c7","foreground":"#3c3836"}}}
+{"end":{"ok":{}},"id":2,"kind":"end"}
+{"id":1,"item":{"focus_changed":"@3"},"kind":"item"}
+{"id":3,"kind":"request","request":{"colours":{"background":"#fbf1c7","foreground":"#3c3836","window":"@3"}}}
+{"end":{"ok":{}},"id":3,"kind":"end"}
+{"id":1,"item":{"taken":"@3"},"kind":"item"}
+{"id":4,"kind":"request","request":{"colours":{}}}
+{"end":{"ok":{}},"id":4,"kind":"end"}
