@@ -18,6 +18,7 @@ import Foundation
 ///
 /// In the app it also writes the Colour Reports of ADR 0095 through its control Client: to each Session that one of
 /// Muxify's Clients shows, before each switch that Muxify starts, and before Muxify types into a Session that it made.
+/// It sends them and returns at once: nothing waits for tmux's answer, so a switch never waits for a Colour Report.
 ///
 /// It installs no tmux hook. It keeps the Watch Session's rule: with no user Session left it kills the Watch Session,
 /// so the server can exit, and it joins or makes it again once a user Session appears.
@@ -78,8 +79,6 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     static let ticksPerAttachCheck = 4
     static let notificationDelay: TimeInterval = 0.05
     static let readTimeout: TimeInterval = 5
-    /// How long a Colour Report before a switch or a typed command waits for tmux, at most.
-    static let colourReportTimeout: TimeInterval = 1
 
     /// `startControlClient` starts the control Client; the app passes one on a pty. Events go to the handler on
     /// `delivery`. `clientMarker` names the server option of the subscriber's Client marker, whose Client the
@@ -217,9 +216,9 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         }
     }
 
-    /// Runs before tmux runs `arguments`: reports the colours to every Pane of the Session that each `switch-client`
-    /// in them goes to, and returns once tmux has the reports. So a program there that asks at once on the switch's
-    /// notice gets Muxify's answer, not the report that another screen left.
+    /// Runs before tmux runs `arguments`: sends the colours' report to every Pane of the Session that each
+    /// `switch-client` in them goes to, and returns without waiting for tmux. A report that lands just after the
+    /// switch still turns a program to the right look, by the colour-scheme notice that it makes tmux send.
     public func reportColours(beforeRunning arguments: [String]) {
         for target in ColourReport.switchTargets(in: arguments) {
             reportColours(toPanesIn: ["list-panes", "-s", "-t", target, "-F", "#{pane_id}"])
@@ -227,29 +226,25 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     }
 
     /// Runs before Muxify types a command into `target`, a Pane of a Session that it just made: reports the colours
-    /// to the Pane, and returns once tmux has the report. No Client shows such a Session yet, so tmux has no other
-    /// answer for a program that starts there.
+    /// to the Pane, without waiting for tmux. No Client shows such a Session yet, so tmux has no other answer for a
+    /// program that starts there.
     public func reportColours(beforeTypingInto target: String) {
         reportColours(toPanesIn: ["display-message", "-p", "-t", target, "#{pane_id}"])
     }
 
     /// `listing` prints one Pane id on each line. Off `queue`, so a read in progress does not hold the report up.
+    /// Without a control Client the report waits for the next one, and the caller does not.
     private func reportColours(toPanesIn listing: [String]) {
         lock.lock()
         let colours = self.colours
         lock.unlock()
         guard let colours, let panes = try? run(listing) else { return }
+        let lines = ColourReport.commands(panes: panes.split(separator: "\n").map(String.init), colours: colours)
+        guard !listener.send(lines, hold: true) else { return }
         // A Session that Muxify just made can be the first user Session, before the control Client joins the Watch
-        // Session.
+        // Session: that Client takes the report first.
         queue.async { [self] in
             if client == nil, handler != nil { attach() }
-        }
-        guard listener.waitForClient(timeout: Self.colourReportTimeout) else {
-            return report("colour report: no control Client")
-        }
-        let lines = ColourReport.commands(panes: panes.split(separator: "\n").map(String.init), colours: colours)
-        if !listener.sendAndWait(lines, timeout: Self.colourReportTimeout) {
-            report("colour report: tmux did not answer within \(Self.colourReportTimeout) s")
         }
     }
 
@@ -423,15 +418,13 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         do {
             let invocation = try server.invocation(["-C", "new-session", "-A", "-s", Tmux.watchSessionName,
                                                     "-f", "no-output,ignore-size", "cat"])
-            let listener = self.listener
             let client = try startControlClient(invocation, environment, { [weak self] lines in
-                listener.heard(lines, number: number)
                 if lines.contains(where: Self.isChange) { self?.heardChange() }
             }, { [weak self] in
                 self?.queue.async { self?.clientExited(number) }
             })
             self.client = client
-            listener.attach(client, number: number)
+            listener.attach(client)
             reportsAllSessions = true
             listener.send(["refresh-client -B '\(Self.subscriptionName)::\(Self.subscriptionFormat)'"])
         } catch {

@@ -141,6 +141,37 @@ final class EnvironmentPublisherTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: probes.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7")
     }
 
+    /// Before, each switch waited for tmux to answer its Colour Report, counting answers over the Listener's life, so
+    /// one lost answer made every later switch wait a second. A Listener that does not read its commands now holds no
+    /// switch up, and its reports still reach every Pane once it reads them.
+    func testTwelveSwitchesBetweenSessionsOfElevenAndEightPanesNeverWaitForTheColourReport() async throws {
+        let answers = try probes(session: "big", panes: 11) + probes(session: "small", panes: 8)
+        let recorder = start()
+        try await settle(recorder, controlClients: 1)
+        publishers[0].reportColours(Self.light)
+        let tmux = ColourReportingTmux(server: server, publisher: publishers[0])
+        let pid = try XCTUnwrap(pid_t(try server.run(["list-clients", "-f", "#{client_control_mode}", "-F", "#{client_pid}"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)), "no control Client")
+
+        kill(pid, SIGSTOP)
+        var slowest: TimeInterval = 0
+        for target in Array(repeating: ["big:", "small:"], count: 6).joined() {
+            let start = Date()
+            _ = try? tmux.run(["switch-client", "-c", "/dev/none", "-t", target])
+            slowest = max(slowest, Date().timeIntervalSince(start))
+        }
+        kill(pid, SIGCONT)
+
+        XCTAssertLessThan(slowest, 0.5, "a switch waited for its Colour Report")
+        // The Listener reads what waited for it; the probes ask after that.
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
+        for answer in answers {
+            try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
+            XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
+        }
+    }
+
     func testWithoutColoursASwitchReportsNothing() async throws {
         let probes = try probe(session: "work")
         let recorder = start()
@@ -183,6 +214,16 @@ final class EnvironmentPublisherTests: XCTestCase {
         let second = directory.appendingPathComponent(session + "-2").path
         try server.run(["new-session", "-d", "-s", session, "-x", "80", "-y", "24", probeCommand(first)])
         return (first, second)
+    }
+
+    /// A Session of `panes` probe Panes, each in a Window of its own, and their answer files.
+    private func probes(session: String, panes: Int) throws -> [String] {
+        let first = try probe(session: session).0
+        return try [first] + (2...panes).map { index in
+            let answer = directory.appendingPathComponent("\(session)-\(index)").path
+            try server.run(["new-window", "-d", "-t", session + ":", probeCommand(answer)])
+            return answer
+        }
     }
 
     private func probeCommand(_ answer: String) -> String {
