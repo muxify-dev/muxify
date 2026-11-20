@@ -93,7 +93,7 @@ finally:
         sandbox = self.sandbox
         output, ready = sandbox.root/(name + '.input'), sandbox.root/(name + '.ready')
         command = shlex.join([sys.executable, str(self.recorder), str(output), str(ready)])
-        # Without -t tmux picks the Session with the newest activity, which can be the app's Watch Session.
+        # Without -t tmux picks the Session with the newest activity, which need not be this one.
         pane = sandbox.tmux('new-window', '-d', '-t', '=attachments:', '-P', '-F', '#{pane_id}', '-n', name, command)
         wait(ready.exists, 'Pane recorder did not start')
         # The store must finish reading its initial remote attachment first.

@@ -63,6 +63,7 @@ final class FakeEnvironmentLink: EnvironmentLink {
     func startListening() { listening = true }
     func stopListening() { listening = false }
     var attachmentEnd: AttachmentEnd? { nil }
+    var localClientExitStatus: Int? { nil }
     func installHostCLI(environmentName: String) {}
     /// How many times the store asked for the Config again.
     /// Every colours report the store sent, in order: nil when it writes none.

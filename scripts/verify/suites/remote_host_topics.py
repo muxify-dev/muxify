@@ -488,6 +488,32 @@ exec /bin/sh -c "$command"
         self.assertFalse(self.s.has('git-write-error'), 'the fetch failed')
         self.close_git_view()
 
+    def test_the_listener_of_a_sessions_only_window_follows_the_terminal_and_makes_no_session(self):
+        self.use('old')
+        self.s.wait_rows(lambda rs: self.s.has('topics-unavailable', rs), 'the window does not show Sessions only', seconds=30)
+
+        def placement():
+            """The tty and Session of the Terminal's Client, which the bootstrap's marker names, and the Sessions of
+            the Listeners."""
+            markers = [self.s.tmux('show-options', '-sqv', line.split()[0]).split('\u241f')
+                       for line in self.s.tmux('show-options', '-s').splitlines() if line.startswith('@muxify_client_')]
+            ttys = [m[1] for m in markers if len(m) == 5 and m[4] == 'remote']
+            clients = [line.split('|') for line in self.s.tmux(
+                'list-clients', '-F', '#{client_control_mode}|#{client_tty}|#{session_id}').splitlines()]
+            terminal = next(((tty, session) for mode, tty, session in clients if mode == '0' and tty in ttys), (None, None))
+            return terminal + ([session for mode, _, session in clients if mode == '1'],)
+
+        def listener_in(session):
+            return lambda: (lambda _, terminal, listeners: terminal == session and listeners == [session])(*placement())
+
+        tty, terminal, _ = wait(lambda: (lambda p: p if p[0] else None)(placement()), 'the Terminal\'s Client is not attached')
+        # The Listener makes no Session: it sits in the Terminal's.
+        wait(listener_in(terminal), lambda: 'the Listener is not in the Terminal\'s Session: %s' % (placement(),))
+        other = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'listener-follows', '/bin/sh')
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', other)
+        self.s.tmux('switch-client', '-c', tty, '-t', other)
+        wait(listener_in(other), lambda: 'the Listener did not follow the Terminal: %s' % (placement(),))
+
     def test_a_host_whose_muxify_has_no_server_mode_shows_sessions_only_and_why(self):
         self.use('old')
         expected = 'Topics are unavailable on Fixture: the Host\'s muxify is too old (%s).' % OLD_BUILD

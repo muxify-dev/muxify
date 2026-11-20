@@ -67,6 +67,38 @@ final class TmuxEventsTests: XCTestCase {
         }
     }
 
+    /// The Listener of a Sessions-only App Window, over SSH on the host: it attaches with no target, moves to the
+    /// Session that the Terminal's Client shows, and follows it on `%client-session-changed`.
+    func testTheListenerMovesToTheTerminalsSessionAndFollowsItWhereverItSwitches() throws {
+        try server.run(["new-session", "-d", "-s", "work"])
+        try server.run(["new-session", "-d", "-s", "other"])
+        try server.run(["new-session", "-d", "-s", "third"])
+        let terminal = try attachClient(to: "work")
+        defer { terminal.process.terminate() }
+        let session = { (name: String) in
+            try self.server.run(["display-message", "-p", "-t", "=" + name + ":", "#{session_id}"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let events = TmuxEvents()
+        defer { events.stop() }
+        events.follow(client: terminal.tty, session: try session("work"))
+        events.start(invocation: server.invocation)
+        try wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        XCTAssertEqual(try sessions().count, 3, "the Listener made a Session")
+
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
+        try wait("the Listener did not follow a switch made inside tmux") { try self.controlClients() == ["other"] }
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=third"])
+        try wait("the Listener did not follow the next switch") { try self.controlClients() == ["third"] }
+
+        // Another Client's switch is not the Terminal's.
+        let other = try attachClient(to: "work")
+        defer { other.process.terminate() }
+        try server.run(["switch-client", "-c", other.tty, "-t", "=other"])
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertEqual(try controlClients(), ["third"], "the Listener followed another Client")
+    }
+
     func testAControlClientWritesABatchFarLargerThanItsPtyWholeAndInOrder() throws {
         let python = "/usr/bin/python3"
         try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: python), "no python3 for the probe")
@@ -133,6 +165,36 @@ final class TmuxEventsTests: XCTestCase {
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8),
                            colours(round: rounds - 1, pane: index).background.oscReply, "Pane \(panes[index])")
         }
+    }
+
+    /// A Terminal's Client, attached through a pty of its own.
+    private func attachClient(to session: String) throws -> (tty: String, process: Process) {
+        let binary = try XCTUnwrap(server.binary)
+        let known = Set(try terminalClients())
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        process.arguments = ["-q", "/dev/null", binary, "-u", "-S", socket, "-f", "/dev/null", "attach-session", "-t", session]
+        var environment = ProcessInfo.processInfo.environment
+        environment["TMUX"] = nil
+        environment["TMUX_PANE"] = nil
+        environment["TERM"] = "xterm-256color"
+        process.environment = environment
+        process.standardInput = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            if let tty = try terminalClients().first(where: { !known.contains($0) }) { return (tty, process) }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        process.terminate()
+        throw TmuxError.timedOut
+    }
+
+    private func terminalClients() throws -> [String] {
+        ((try? server.run(["list-clients", "-f", "#{==:#{client_control_mode},0}", "-F", "#{client_tty}"])) ?? "")
+            .split(separator: "\n").map(String.init)
     }
 
     private func sessions() throws -> [String] {

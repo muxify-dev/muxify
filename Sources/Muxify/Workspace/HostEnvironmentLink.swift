@@ -531,6 +531,7 @@ final class HostEnvironmentLink: EnvironmentLink {
 
     func stopListening() { inner.stopListening() }
     var attachmentEnd: AttachmentEnd? { inner.attachmentEnd }
+    var localClientExitStatus: Int? { inner.localClientExitStatus }
 
     // MARK: Topics
 

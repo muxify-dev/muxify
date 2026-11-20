@@ -82,8 +82,9 @@ final class RemoteSSH {
         let tmux = "tmux -u " + args.map(Tmux.shellQuote).joined(separator: " ")
         let script: String
         if args.first == "-C" {
-            // The listener stays attached to a Session, and the SSH master, and so the Terminal, waits for
-            // every channel over it. It ends itself once the attachment's marker is gone, which the bootstrap clears
+            // The Listener attaches with no target and `TmuxEvents` moves it to the Session that the marked Client,
+            // the Terminal's, shows; it makes no Session. The SSH master, and so the Terminal, waits for every channel
+            // over it. It ends itself once the attachment's marker is gone, which the bootstrap clears
             // when its Client ends. The control client reads the channel's input, saved before `&` replaces it.
             script = Self.remotePath + "\n" + checks + """
 

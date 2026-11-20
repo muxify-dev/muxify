@@ -185,6 +185,9 @@ protocol EnvironmentLink: AnyObject {
     func stopListening()
     /// How the attachment ended, for a link whose attachment owns its transport; nil on this Mac.
     var attachmentEnd: AttachmentEnd? { get }
+    /// The exit status of the Terminal's tmux Client on this Mac, once it exited: 0 after its Session ended or it
+    /// detached, 1 after the server was killed. Nil elsewhere.
+    var localClientExitStatus: Int? { get }
     /// Puts the Host CLI on the Environment's machine once it connects. Nothing waits for it.
     func installHostCLI(environmentName: String)
     /// Sends the Config again as a `config` event: on connecting, on Reload Config and when a Command Palette opens.
@@ -451,6 +454,8 @@ class TmuxConnectionLink {
         guard connection?.isOnThisMac == true else { return }
         ownClient = client.flatMap { $0.isControl || $0.pid <= 0 ? nil : ViewCommandExecutor.Client(tty: $0.tty, pid: $0.pid) }
     }
+
+    var localClientExitStatus: Int? { connection?.localClientExitStatus }
 
     var attachmentEnd: AttachmentEnd? {
         guard let connection, let remote = connection.remote else { return nil }

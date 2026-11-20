@@ -1,4 +1,10 @@
+---
+status: superseded by ADR-0097
+---
+
 # The control Client listens from its own Watch Session
+
+> **Superseded by [ADR-0097](0097-the-listener-follows-the-terminals-session.md):** the Listener has no Session of its own. It sits in the Session that its App Window's Terminal shows and moves with it, on this Mac, on a Remote Environment's host and in Sessions-only mode. No `muxify-watch` is made, and one that an earlier version left is killed on connect.
 
 Muxify's control-mode Client attaches to the Watch Session, `muxify-watch`. Before, it attached to the selected Session, or to the first Session, and stayed there.
 

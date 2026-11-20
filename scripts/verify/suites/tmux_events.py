@@ -54,28 +54,35 @@ class TmuxEvents(unittest.TestCase):
         listing = self.s.tmux_ok('list-clients', '-F', '#{client_control_mode} #{session_name}').stdout.split('\n')
         return sorted(line for line in listing if line)
 
-    def test_control_client_listens_from_the_watch_session_that_the_sidebar_never_shows(self):
-        # tmux answers a Pane's color query from the first client on its Session, and a control client answers black.
-        wait(lambda: '1 muxify-watch' in self.clients_by_session(), 'no control client on muxify-watch')
+    def listener_follows_the_terminal(self):
+        """The Listener and the Terminal's Client sit in one Session: the Listener follows the Terminal."""
         clients = self.clients_by_session()
-        self.assertEqual([c for c in clients if c.startswith('1 ')], ['1 muxify-watch'], clients)
-        self.assertNotIn('0 muxify-watch', clients, 'the app attached its Terminal to the Watch Session')
-        watch = self.s.tmux('list-windows', '-t', '=muxify-watch:', '-F', '#{window_id}').split()
-        user = self.s.tmux('list-windows', '-t', '=main:', '-F', '#{window_id}').split()
-        rows = self.s.wait_rows(lambda rs: any(self.s.has(prefix + w, rs) for w in user
-                                               for prefix in ('topic-window-', 'session-window-')),
-                                'the Sidebar does not show main')
-        shown = [key for key in self.s.ids(rows) if any(key.endswith('-window-' + w) for w in watch)]
-        self.assertEqual(shown, [], 'the Sidebar shows the Watch Session')
+        terminal = [c[2:] for c in clients if c.startswith('0 ')]
+        return len(terminal) == 1 and [c[2:] for c in clients if c.startswith('1 ')] == terminal
 
-    def test_the_watch_session_does_not_keep_the_server_running_after_the_last_session_closes(self):
-        wait(lambda: '1 muxify-watch' in self.clients_by_session(), 'no control client on muxify-watch')
+    def test_control_client_listens_from_the_session_the_terminal_shows_and_makes_none(self):
+        # A Listener that attached before the Terminal's Client starts again in its Session.
+        wait(self.listener_follows_the_terminal,
+             lambda: 'the Listener is not in the Terminal\'s Session: %s' % self.clients_by_session())
+        self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_name}').split(), ['main'],
+                         'the app made a Session of its own')
+        self.s.tmux('new-session', '-d', '-s', 'other', SHELL)
+        self.addCleanup(lambda: self.s.tmux_ok('kill-session', '-t', '=other'))
+        tty = self.s.tmux('list-clients', '-f', '#{==:#{client_control_mode},0}', '-F', '#{client_tty}')
+        self.s.tmux('switch-client', '-c', tty, '-t', '=other')
+        wait(lambda: self.clients_by_session() == ['0 other', '1 other'],
+             'the Listener did not follow the Terminal to other: %s' % self.clients_by_session())
+        self.s.tmux('switch-client', '-c', tty, '-t', '=main')
+        wait(lambda: self.clients_by_session() == ['0 main', '1 main'],
+             'the Listener did not follow the Terminal back to main: %s' % self.clients_by_session())
+
+    def test_the_listener_does_not_keep_the_server_running_after_the_last_session_closes(self):
+        wait(lambda: self.control_clients(), 'app did not start a tmux control client')
         server = int(self.s.tmux('display-message', '-p', '#{pid}'))
         # The next check needs the app and a server again; setUp launches the app when it is gone.
         self.addCleanup(lambda: alive(self.s.pid) and os.kill(self.s.pid, signal.SIGKILL))
         for session in self.s.tmux('list-sessions', '-F', '#{session_name}').split('\n'):
-            if session != 'muxify-watch':
-                self.s.tmux_ok('kill-session', '-t', '=' + session)
+            self.s.tmux_ok('kill-session', '-t', '=' + session)
         wait(lambda: not alive(server), 'tmux server %d still runs: %s'
              % (server, self.s.tmux_ok('list-sessions', '-F', '#{session_name}').stdout.split()), seconds=10)
 

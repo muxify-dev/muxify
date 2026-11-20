@@ -1315,10 +1315,14 @@ final class WorkspaceStore {
     @ObservationIgnored private var reconnectAttempt = 0
     /// The Session of the Terminal's Client at the last read that found it, so its exit can tell a closed Session from a detach.
     @ObservationIgnored private var clientSessionID: String?
-    /// A read found that Session gone while the server still ran: it ended, and tmux did not stop with it.
+    /// A read found that Session gone while the server still ran: it ended, and tmux did not stop with it. Or the
+    /// server stopped with it: the Local Client exited with 0, as tmux's Client does when its Session ends.
     @ObservationIgnored private var clientSessionEnded = false
     /// The last read started before a Local Client exited.
     @ObservationIgnored private var exitedAfterRead: Int?
+    /// The exit status of the Local Client that exited last: 0 when its Session ended or it detached, 1 when the
+    /// server was killed.
+    @ObservationIgnored private var clientExitStatus: Int?
     @ObservationIgnored private var attachmentTarget: Target?
     @ObservationIgnored private var attachmentReadsOnArrival = false
     @ObservationIgnored private var pendingAttachment: Router.IntentID?
@@ -1627,6 +1631,7 @@ final class WorkspaceStore {
         clientSessionID = nil
         clientSessionEnded = false
         exitedAfterRead = nil
+        clientExitStatus = nil
         readGeneration += 1
         pendingReads = 0
         pendingReadNavigations.removeAll()
@@ -1893,6 +1898,9 @@ final class WorkspaceStore {
             clientSessionEnded = false
         } else if let session = clientSessionID, snapshot.serverRunning, !windows.contains(where: { $0.sessionID == session }) {
             clientSessionEnded = true
+        } else if clientSessionID != nil, !snapshot.serverRunning, surface == nil, clientExitStatus == 0 {
+            // tmux exits with its last Session, and nothing keeps it running; a detach leaves the server running.
+            clientSessionEnded = true
         }
         if isTransitioning { return }
         updateTopicSelection()
@@ -2007,6 +2015,7 @@ final class WorkspaceStore {
         }
         pendingAttachment = intent
         exitedAfterRead = nil
+        clientExitStatus = nil
         let oldSurface = surface
         surface = view
         oldSurface?.close()
@@ -3547,6 +3556,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
         }
         // A read already under way may still list the Session, so only a read that starts after this one decides.
         exitedAfterRead = lastStartedRead
+        clientExitStatus = link.localClientExitStatus
         refresh()
     }
 

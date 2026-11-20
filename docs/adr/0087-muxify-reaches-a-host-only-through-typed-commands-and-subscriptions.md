@@ -26,9 +26,11 @@ Each one pushes state, never deltas. Every event has a key, so a newer event rep
 - **`upload { name, offset, data, last }`**: one Attachment, sent as a pipelined run of chunks of at most 64 KiB. The first `end` names the path on the Host. The paste is a view command. When a chunk fails, the paste fails and the server deletes the partial file.
 - **`adopt_worktrees { rows }`**: sent once after `hello`, when the Mac has Worktree rows waiting to move to this Host ([ADR 0090](0090-a-muxify-worktrees-record-lives-on-the-machine-that-has-it.md)). Its `end` lists every row as `taken`, or `skipped` with a reason such as a name or path clash. The Mac deletes only the taken rows. A channel that ends before the `end` leaves every row in place.
 
-## The Watch Session
+## The Listener
 
-Each server's control Client runs `new-session -A -s muxify-watch -f no-output,ignore-size cat`, so it joins the Watch Session or makes it (ADR 0063). When the user has no Session left, any server kills the Watch Session. The other servers' control Clients get `%exit`, and every server makes or joins it again when a user Session appears. A Muxify app on the same machine follows the same rule. The bootstrap's `kill -HUP` of the listener goes away, because the listener ends with its server.
+> **Superseded in part by [ADR-0097](0097-the-listener-follows-the-terminals-session.md):** there is no Watch Session. Each server's Listener sits in the Session that its Mac's Terminal shows on the host and moves with it.
+
+Each server's Listener, its control-mode Client, attaches with `no-output,ignore-size` and follows the Client that its Mac's Client marker names (ADR 0097). It makes no Session, so it ends with the server when the user has no Session left, and starts again when a Session appears. A Muxify app on the same machine follows the same rule. The bootstrap's `kill -HUP` of the listener goes away, because the listener ends with its server.
 
 ## In code
 

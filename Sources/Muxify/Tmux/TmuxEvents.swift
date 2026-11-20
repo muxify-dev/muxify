@@ -8,7 +8,9 @@ import MuxifyCore
 /// pane output and doesn't count towards window sizes. It is not read-only:
 /// tmux gives a command from outside tmux the client with the newest
 /// activity, which is often this one, and a read-only client refuses commands
-/// such as `send-keys` for everybody.
+/// such as `send-keys` for everybody. It is the Listener of a Sessions-only App
+/// Window, on the host over SSH: it sits in the Session that the Terminal's
+/// Client shows there and moves with it, and writes no Colour Report.
 final class TmuxEvents {
     enum Event {
         /// A Session's current Window changed (select-window, prefix+n, …).
@@ -24,17 +26,23 @@ final class TmuxEvents {
     /// Tells the current client's callbacks from those of one already replaced.
     private var clientToken = UUID()
     private var nextStart = Date.distantPast
+    /// The Client that the Listener follows, by its name (`#{client_name}`, its tty), and the Session it shows.
+    private var followed: (client: String, session: String?)?
+    /// The Session the Listener sits in, from its own `%session-changed`; nil until it attached.
+    private var listenerSession: String?
+    /// The Session that the last `switch-client` asked for, until the Listener gets there.
+    private var requestedSession: String?
 
     /// Read on the main thread.
     var isRunning: Bool { client?.isRunning == true }
 
-    /// Attaches to the Session that tmux picks; it makes no Session, so the
-    /// server still exits with the last one. Notifications cover every
-    /// Session, so the client hears all of them from there.
-    /// Call on the main thread.
+    /// Attaches to the Session that tmux picks; it makes no Session, so the server still exits with the last one.
+    /// Notifications cover every Session, so the client hears all of them from there, and it moves to the Session of
+    /// the Client it follows. Call on the main thread.
     func start(invocation: ([String]) throws -> CommandInvocation) {
         guard !isRunning, Date() >= nextStart,
-              let invocation = try? invocation(["-C", "attach-session", "-f", "no-output,ignore-size"])
+              // `-E`: the Listener gives the Session it sits in none of its environment (`update-environment`).
+              let invocation = try? invocation(["-C", "attach-session", "-E", "-f", "no-output,ignore-size"])
         else { return }
         stop()
         let token = UUID()
@@ -42,16 +50,21 @@ final class TmuxEvents {
         do {
             client = try ControlClient(binary: invocation.executable, arguments: invocation.arguments, onLines: { [weak self] lines in
                 let events = lines.compactMap(Self.event(from:))
-                guard !events.isEmpty else { return }
+                let moves = lines.compactMap(EnvironmentPublisher.sessionChange(in:))
+                guard !events.isEmpty || !moves.isEmpty else { return }
                 DispatchQueue.main.async {
                     guard let self, self.clientToken == token else { return }
+                    if !moves.isEmpty { self.heard(moves) }
                     events.forEach { self.onEvent?($0) }
                 }
             }, onExit: { [weak self] in
-                // A client that ends on its own (server gone, SSH dropped) waits before the next start.
                 guard let self, self.clientToken == token else { return }
+                // A Listener that attached starts again at once while the server runs; one that never attached waits
+                // a moment before the next start.
+                self.nextStart = self.listenerSession == nil ? Date().addingTimeInterval(1) : .distantPast
                 self.client = nil
-                self.nextStart = Date().addingTimeInterval(2)
+                self.listenerSession = nil
+                self.requestedSession = nil
             })
         } catch {
             Diagnostics.report("tmux control client failed to start: \(error)")
@@ -62,6 +75,38 @@ final class TmuxEvents {
         clientToken = UUID()
         client?.stop()
         client = nil
+        listenerSession = nil
+        requestedSession = nil
+    }
+
+    /// Follows `client`, the Terminal's Client by its name, to `session`, the Session that a read found it in; nil
+    /// follows no Client. Call on the main thread.
+    func follow(client: String?, session: String?) {
+        followed = client.map { ($0, session) }
+        moveToFollowedSession()
+    }
+
+    private func heard(_ moves: [EnvironmentPublisher.SessionChange]) {
+        for move in moves {
+            switch move {
+            case .listener(let session):
+                listenerSession = session
+                requestedSession = nil
+            case .client(let name, let session) where name == followed?.client:
+                // The Terminal moved, by a switch that Muxify started or one made inside tmux; the Listener follows.
+                followed?.session = session
+            case .client: break
+            }
+        }
+        moveToFollowedSession()
+    }
+
+    /// Moves the Listener to the followed Client's Session, on its own control connection.
+    private func moveToFollowedSession() {
+        guard let client, let target = followed?.session, target != listenerSession, target != requestedSession,
+              EnvironmentPublisher.isSessionID(target) else { return }
+        requestedSession = target
+        client.send("switch-client -E -t '\(target)'")
     }
 
     deinit { client?.stop() }

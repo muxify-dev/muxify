@@ -489,7 +489,9 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         followedClient = terminalSession == nil ? nil : ownClient
         do {
             let target = terminalSession.map { ["-t", $0] } ?? []
-            let invocation = try server.invocation(["-C", "attach-session", "-f", "no-output,ignore-size"] + target)
+            // `-E`: tmux copies `update-environment` from an attaching or switching Client into its Session, and the
+            // Listener's environment is the app's, not the Terminal's.
+            let invocation = try server.invocation(["-C", "attach-session", "-E", "-f", "no-output,ignore-size"] + target)
             let client = try startControlClient(invocation, environment, { [weak self] lines in
                 guard let self else { return }
                 let moves = lines.compactMap(Self.sessionChange(in:))
@@ -529,12 +531,12 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     }
 
     /// A Session change that the Listener heard: its own, or another Client's.
-    enum SessionChange: Equatable {
+    public enum SessionChange: Equatable {
         case listener(session: String)
         case client(name: String, session: String)
     }
 
-    static func sessionChange(in line: String) -> SessionChange? {
+    public static func sessionChange(in line: String) -> SessionChange? {
         let words = line.split(separator: " ", omittingEmptySubsequences: false)
         if words.first == "%session-changed", words.count >= 2 { return .listener(session: String(words[1])) }
         if words.first == "%client-session-changed", words.count >= 3 {
@@ -578,10 +580,10 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         guard client != nil, let target = terminalSession, target != listenerSession, target != requestedSession,
               Self.isSessionID(target) else { return }
         requestedSession = target
-        listener.send(["switch-client -t '\(target)'"])
+        listener.send(["switch-client -E -t '\(target)'"])
     }
 
-    static func isSessionID(_ value: String) -> Bool {
+    public static func isSessionID(_ value: String) -> Bool {
         value.count > 1 && value.first == "$" && value.dropFirst().allSatisfy { $0.isASCII && $0.isNumber }
     }
 
