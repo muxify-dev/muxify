@@ -199,7 +199,7 @@ final class AppWindows {
         guard !isQuitting, let store = stores[id], nativeWindows[id] != nil else { return }
         catalog.focus(id)
         focusedID = id
-        // Only the key App Window writes the Colour Reports; it writes them again as it becomes key (ADR 0095).
+        // Only the key App Window writes the Colour Reports; it writes them again as it becomes key (ADR 0098).
         for (other, each) in stores where other != id { each.setWritesColourReports(false) }
         store.setWritesColourReports(true)
         remember(store.activeEnvironment?.name)

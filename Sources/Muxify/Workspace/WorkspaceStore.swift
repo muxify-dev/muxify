@@ -1192,10 +1192,10 @@ final class WorkspaceStore {
     var environmentName: String { activeEnvironment?.name ?? "Local" }
     /// The Ghostty theme's colors; the header and sidebar follow them.
     private(set) var theme: TerminalTheme?
-    /// Whether this is the key App Window, whose Listener writes the Colour Reports (ADR 0095). Every App Window keeps
+    /// Whether this is the key App Window, whose Listener writes the Colour Reports (ADR 0098). Every App Window keeps
     /// its Listener for events; `AppWindows` moves this with focus.
     private(set) var writesColourReports = false
-    /// Set when another screen took the Window that the Terminal shows (ADR 0095): the Terminal's next key or click
+    /// Set when another screen took the Window that the Terminal shows (ADR 0098): the Terminal's next key or click
     /// writes its colours. The Terminal reads it on every key, so it is a plain Boolean that Observation does not track.
     @ObservationIgnored private var isWindowTaken = false
     /// The Window that another screen took, as the Listener named it last.
@@ -3460,7 +3460,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
         reportColours()
     }
 
-    // MARK: - The screen in use writes the colours (ADR 0095)
+    // MARK: - The screen in use writes the colours (ADR 0098)
 
     // The Mac app decides; the Listener only reports what it heard and writes when asked. tmux does not say which
     // Client changed the focus, so only the screen whose user made the change knows it.

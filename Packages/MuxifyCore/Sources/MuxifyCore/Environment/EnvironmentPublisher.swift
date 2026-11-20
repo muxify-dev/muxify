@@ -16,13 +16,13 @@ import Foundation
 /// The Host Server's publisher also reads its Mac's Client marker, so its `server` event names that Mac's own Client,
 /// and writes the Sessions that each read gives the Topics onto their records, so the Mac writes no record itself.
 ///
-/// It also writes the Colour Reports of ADR 0098 through its Listener, while its App Window gives it colours, in the app
-/// or, on a Host, through the Host Server's `colours` request:
-/// to every Pane of the target's Session right before a switch that Muxify starts, which it runs on the Listener's own
-/// connection after the report; to every Pane of the Terminal's Session when the Listener moves there, which covers a
-/// switch made inside tmux, once for each move; again when it gets colours, as its App Window becomes key or Ghostty's colours change; again
-/// when another screen's control Client, one without `ignore-size`, detaches; and before Muxify types into a Session
-/// that it made. It sends them and returns at once: nothing waits for tmux's answer, so a switch never waits for one.
+/// It also writes the Colour Reports of ADR 0098 through its Listener, while its App Window gives it colours, in the
+/// app or, on a Host, through the Host Server's `colours` request: to every Pane of the target's Session right before
+/// a switch that Muxify starts, which it runs on the Listener's own connection after the report; to every Pane of the
+/// Terminal's Session when the Listener moves there, which covers a switch made inside tmux, once for each move; again
+/// when it gets colours, as its App Window becomes key or Ghostty's colours change; again when another screen's control
+/// Client, one without `ignore-size`, detaches; and before Muxify types into a Session that it made. It sends them and
+/// returns at once: nothing waits for tmux's answer, so a switch never waits for one.
 ///
 /// It does not decide whose screen changed the focus, which tmux does not say: it tells an in-process subscriber that
 /// the focus changed in the Window that the Terminal shows, or that another screen took that Window, and writes a
@@ -273,8 +273,9 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         reportColours(toWindow: window)
     }
 
-    /// `listing` prints one Pane id on each line. Off `queue`, so a read in progress does not hold the report up.
-    /// Without a control Client the report waits for the next one, and the caller does not.
+    /// `listing` prints one Pane id on each line. `reportColours(beforeTypingInto:)` calls it off `queue`, so a read in
+    /// progress does not hold that report up. Without a control Client the report waits for the next one, and the
+    /// caller does not.
     private func reportColours(toPanesIn listing: [String]) {
         lock.lock()
         let colours = self.colours
@@ -311,9 +312,9 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         let marked = session != nil && switchedSessions.last != session
         if marked, let session { switchedSessions.append(session) }
         lock.unlock()
-        let report = colours.map { ColourReport.commands(panes: panes.compactMap(\.last), colours: $0) } ?? []
+        let colourReport = colours.map { ColourReport.commands(panes: panes.compactMap(\.last), colours: $0) } ?? []
         let arguments = ViewCommandExecutor.arguments(for: .switchClient(client: client, target: target))
-        guard listener.send(report + [arguments.map(Tmux.shellQuote).joined(separator: " ")]) else {
+        guard listener.send(colourReport + [arguments.map(Tmux.shellQuote).joined(separator: " ")]) else {
             lock.lock()
             if marked, let index = switchedSessions.lastIndex(where: { $0 == session }) { switchedSessions.remove(at: index) }
             lock.unlock()

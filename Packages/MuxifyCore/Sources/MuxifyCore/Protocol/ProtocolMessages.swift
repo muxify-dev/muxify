@@ -29,7 +29,7 @@ public enum HostProtocol {
     public static let serverSilence: TimeInterval = 45
 }
 
-/// What a Host Server adds to protocol 1 (ADR 0086's change rule, ADR 0093). Each side sends a request case, a
+/// What a Host Server adds to its protocol's base (ADR 0086's change rule, ADR 0093). Each side sends a request case, a
 /// subscription case or a key that a capability adds only when the other side's `hello` declared it, and the server
 /// answers `unsupported` to one that a client sends without declaring it.
 public enum HostCapability: String, CaseIterable, Sendable {
@@ -212,8 +212,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// Pane of the Session that the Terminal shows. Answers `{}`. Protocol 2's base.
     case colours(ColoursRequest)
 
-    /// The capability that the client must have declared for the server to serve this request; nil for protocol 1's
-    /// base. A new case does not compile until it chooses.
+    /// The capability that the client must have declared for the server to serve this request; nil for the
+    /// protocol's base. A new case does not compile until it chooses.
     public var capability: HostCapability? {
         switch self {
         case .environment(let request): return request.request == nil ? nil : .request
@@ -364,7 +364,7 @@ public enum HostSubscription: Codable, Equatable, Sendable {
     /// (ADR 0098). Nothing comes first. Protocol 2's base.
     case focus
 
-    /// The capability that this subscription needs; nil for protocol 1's base.
+    /// The capability that this subscription needs; nil for the protocol's base.
     public var capability: HostCapability? {
         switch self {
         case .environment, .config, .repository, .focus: return nil
