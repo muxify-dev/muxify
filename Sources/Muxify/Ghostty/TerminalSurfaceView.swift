@@ -296,6 +296,7 @@ final class TerminalSurfaceView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
+        delegate?.ghosttyTerminalInput()
         window?.makeFirstResponder(self)
         sendMouseButton(event, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT)
     }
@@ -305,6 +306,7 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        delegate?.ghosttyTerminalInput()
         sendMouseButton(event, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT)
     }
 
@@ -314,6 +316,7 @@ final class TerminalSurfaceView: NSView {
 
     override func otherMouseDown(with event: NSEvent) {
         guard event.buttonNumber == 2 else { return }
+        delegate?.ghosttyTerminalInput()
         sendMouseButton(event, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_MIDDLE)
     }
 
@@ -423,6 +426,7 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        delegate?.ghosttyTerminalInput()
         isHandlingKeyDown = true
         defer { isHandlingKeyDown = false }
         guard let surface else {

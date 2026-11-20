@@ -37,6 +37,12 @@ enum EnvironmentEvent {
     case serverUnavailable(HostServerUnavailable)
     /// The Config the App Window runs with: it replaces the store's `remoteConfig` whole.
     case config(EnvironmentConfig)
+    /// The focus changed in `window`, the Window that the Terminal shows. tmux does not say whose screen changed it:
+    /// the store decides whether this Mac's user did, and then writes the Window's colours.
+    case focusChanged(window: String)
+    /// Another screen took `window`, the Window that the Terminal shows: the Terminal's next key or click writes its
+    /// colours again.
+    case windowTaken(window: String)
 }
 
 /// Which Config an App Window runs with (ADR 0010).
@@ -248,6 +254,9 @@ protocol EnvironmentLink: AnyObject {
     /// each time it moves (ADR 0095); nil writes none, as for an App Window that is not key. Only the Local Environment
     /// reports: issue #149 is the remote one.
     func reportColours(_ colours: TerminalColours?)
+    /// Writes the colours to every Pane of `window`, as the store decided after a `focusChanged` or a `windowTaken`
+    /// event, without waiting. It writes nothing while no colours were reported.
+    func reportColours(toWindow window: String)
 
     // MARK: Git
 
@@ -330,6 +339,7 @@ extension EnvironmentLink {
     func serveHostRequests(_ handler: @escaping HostRequestHandler) {}
     func setOpenConsumer(_ consumes: Bool) {}
     func reportColours(_ colours: TerminalColours?) {}
+    func reportColours(toWindow window: String) {}
 }
 
 /// What answers a Host Server's request for its App Window: a Browser command's reply, `done` for a `select`, or

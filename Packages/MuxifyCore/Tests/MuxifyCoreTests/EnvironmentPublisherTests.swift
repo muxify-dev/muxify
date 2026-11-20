@@ -335,7 +335,113 @@ final class EnvironmentPublisherTests: XCTestCase {
         XCTAssertFalse(try publishers[0].switchClient(terminal.tty, to: "=work:"), "a switch went to no Listener")
     }
 
+    func testAFocusChangeInTheWindowThatTheTerminalShowsReachesTheSubscriber() async throws {
+        try server.run(["new-session", "-d", "-s", "work", "-x", "80", "-y", "24"])
+        let second = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "work:"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try server.run(["new-session", "-d", "-s", "other"])
+        let otherPane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "other:"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let news = NewsLog()
+        _ = try startTerminal(in: "work", colours: Self.light, news: news)
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let shown = try windowID("work:")
+        news.clear()
+
+        try server.run(["select-pane", "-t", second])
+        try await wait("the focus change did not reach the subscriber") { news.lines.contains("focus " + shown) }
+
+        try server.run(["select-pane", "-t", otherPane])
+        try await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertEqual(news.lines.filter { $0.hasPrefix("focus") }, ["focus " + shown],
+                       "a focus change in a Session that the Terminal does not show reached the subscriber")
+
+        let added = try server.run(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "work:"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try server.run(["select-window", "-t", added])
+        try await wait("the Session's new Window did not reach the subscriber") { news.lines.contains("focus " + added) }
+    }
+
+    func testAnotherClientThatMovesIntoTheTerminalsSessionTakesTheShownWindow() async throws {
+        try server.run(["new-session", "-d", "-s", "work", "-x", "80", "-y", "24"])
+        let news = NewsLog()
+        _ = try startTerminal(in: "work", colours: Self.light, news: news)
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try await Task.sleep(nanoseconds: 500_000_000)
+        await publishers[0].read()
+        let shown = try windowID("work:")
+        news.clear()
+
+        let screen = try controlClient(attachingTo: "work")
+        defer { screen.terminate() }
+
+        try await wait("another Client's move into the Terminal's Session did not reach the subscriber") {
+            news.lines.contains("taken " + shown)
+        }
+    }
+
+    func testWritingAWindowWritesOnlyThatWindowsPanes() async throws {
+        try server.run(["new-session", "-d", "-s", "work"])
+        let painted = try probe(session: "paint")
+        try server.run(["split-window", "-d", "-t", "paint:", probeCommand(painted.1)])
+        let unpainted = directory.appendingPathComponent("paint-3").path
+        try server.run(["new-window", "-d", "-t", "paint:", probeCommand(unpainted)])
+        _ = try startTerminal(in: "work", colours: Self.light)
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        publishers[0].reportColours(toWindow: try windowID("paint:^"))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
+
+        for answer in [painted.0, painted.1] {
+            try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
+            XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
+        }
+        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: unpainted) }
+        XCTAssertNotEqual(try String(contentsOfFile: unpainted, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
+                          "a Pane of another Window got the colours")
+    }
+
     // MARK: - Helpers
+
+    /// What the publisher told its in-process subscriber of focus: `focus @w` and `taken @w`.
+    private final class NewsLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [String] = []
+        var lines: [String] { lock.lock(); defer { lock.unlock() }; return log }
+        func clear() { lock.lock(); log = []; lock.unlock() }
+        func add(_ news: EnvironmentPublisher.News) {
+            let line: String
+            switch news {
+            case .focusChanged(let window): line = "focus " + window
+            case .taken(let window): line = "taken " + window
+            case .heard, .readFailed: return
+            }
+            lock.lock(); log.append(line); lock.unlock()
+        }
+    }
+
+    private func windowID(_ target: String) throws -> String {
+        try server.run(["display-message", "-p", "-t", target, "#{window_id}"]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A control Client of another screen, as Muxify Mobile is one, attached to `session`.
+    private func controlClient(attachingTo session: String) throws -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: try XCTUnwrap(server.binary))
+        process.arguments = ["-S", socket, "-f", "/dev/null", "-C", "attach-session", "-t", session]
+        var environment = ProcessInfo.processInfo.environment
+        environment["TMUX"] = nil
+        environment["TMUX_PANE"] = nil
+        process.environment = environment
+        process.standardInput = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        return process
+    }
 
     /// What the Listener sent, line by line.
     private final class SentLines: @unchecked Sendable {
@@ -413,9 +519,9 @@ final class EnvironmentPublisherTests: XCTestCase {
     /// A publisher with a Client marker, a Terminal's Client attached to `session` that the marker names, and the
     /// colours of the key App Window, or none.
     private func startTerminal(in session: String, colours: TerminalColours?,
-                               sent: SentLines? = nil) throws -> ViewCommandExecutor.Client {
+                               sent: SentLines? = nil, news: NewsLog? = nil) throws -> ViewCommandExecutor.Client {
         let marker = ClientMarker.option(nonce: "terminal")
-        _ = start(clientMarker: marker, sent: sent)
+        _ = start(clientMarker: marker, sent: sent, news: news)
         publishers[0].reportColours(colours)
         let terminal = try attachClient(to: session)
         let value = [String(terminal.pid), terminal.tty, "/Users/u", "mac", "local"].joined(separator: Tmux.separator)
@@ -510,7 +616,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         func clear() { lock.lock(); log = []; lock.unlock() }
     }
 
-    private func start(clientMarker: String? = nil, sent: SentLines? = nil) -> Recorder {
+    private func start(clientMarker: String? = nil, sent: SentLines? = nil, news: NewsLog? = nil) -> Recorder {
         let recorder = Recorder()
         let startControlClient: TmuxControlClientStart = { invocation, environment, onLines, onExit in
             let client = try PipeControlClient.start(invocation, environment, onLines, onExit)
@@ -520,7 +626,11 @@ final class EnvironmentPublisherTests: XCTestCase {
                                              delivery: DispatchQueue(label: "test.environment-events"),
                                              startControlClient: startControlClient, clientMarker: clientMarker)
         publishers.append(publisher)
-        publisher.start(recorder.add)
+        if let news {
+            publisher.start(news: news.add) { changes, _ in recorder.add(changes) }
+        } else {
+            publisher.start(recorder.add)
+        }
         return recorder
     }
 

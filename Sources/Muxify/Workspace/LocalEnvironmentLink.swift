@@ -52,6 +52,8 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
                 switch news {
                 case .heard: self?.events.send(.changed)
                 case .readFailed(let error): self?.events.send(.unreachable(error))
+                case .focusChanged(let window): self?.events.send(.focusChanged(window: window))
+                case .taken(let window): self?.events.send(.windowTaken(window: window))
                 }
             }
         }, { [weak self] changes, afterNotification in
@@ -104,6 +106,10 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
 
     func reportColours(_ colours: TerminalColours?) {
         publisher.reportColours(colours)
+    }
+
+    func reportColours(toWindow window: String) {
+        publisher.reportColours(toWindow: window)
     }
 
     func git(_ read: GitRead) async throws -> GitAnswer {

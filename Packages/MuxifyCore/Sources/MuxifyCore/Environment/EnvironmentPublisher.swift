@@ -23,6 +23,10 @@ import Foundation
 /// when another screen's control Client, one without `ignore-size`, detaches; and before Muxify types into a Session
 /// that it made. It sends them and returns at once: nothing waits for tmux's answer, so a switch never waits for one.
 ///
+/// It does not decide whose screen changed the focus, which tmux does not say: it tells an in-process subscriber that
+/// the focus changed in the Window that the Terminal shows, or that another screen took that Window, and writes a
+/// Window's Panes when the subscriber asks (`reportColours(toWindow:)`). The subscriber decides.
+///
 /// The Listener follows the Terminal: it sits in the Session that the Client of `clientMarker` shows and moves there
 /// each time that Client does, as Muxify Mobile's control Client does. Before that Client attaches, it sits in the
 /// Session that tmux picks. It never makes a Session, so the server exits with the last one, and the Listener with it;
@@ -82,6 +86,9 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     /// notification does not forget the screen.
     private var screens: Set<String> = []
     private var earlierScreens: Set<String> = []
+    /// The names of the control Clients with `ignore-size` at the last read: Listeners, such as another App Window's,
+    /// whose move into the Terminal's Session takes no Window.
+    private var listeners: Set<String> = []
     private let listener = ListenerCommands()
 
     private let lock = NSLock()
@@ -141,6 +148,12 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         case heard
         /// A read of the server failed, such as one that timed out on a stopped server.
         case readFailed(Error)
+        /// The focus changed in `window`, the Window that the Terminal shows: its active Pane, or the Window that its
+        /// Session shows. tmux does not say whose screen changed it, so the subscriber decides whether to write it.
+        case focusChanged(window: String)
+        /// Another screen took `window`, the Window that the Terminal shows: another Client moved into the Terminal's
+        /// Session, or the Window took a size that is not the Terminal's.
+        case taken(window: String)
     }
 
     /// `start` for an in-process subscriber that reads the server itself: `news` runs on the delivery queue as soon
@@ -241,6 +254,12 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     /// program that starts there.
     public func reportColours(beforeTypingInto target: String) {
         reportColours(toPanesIn: ["display-message", "-p", "-t", target, "#{pane_id}"])
+    }
+
+    /// Writes the colours to every Pane of `window`, as the subscriber decided after `focusChanged` or `taken`. The
+    /// caller does not wait for tmux.
+    public func reportColours(toWindow window: String) {
+        queue.async { [self] in reportColours(toPanesIn: ["list-panes", "-t", window, "-F", "#{pane_id}"]) }
     }
 
     /// `listing` prints one Pane id on each line. Off `queue`, so a read in progress does not hold the report up.
@@ -344,6 +363,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         if snapshot.serverRunning { leftoverGone = true }
         earlierScreens = screens
         screens = Set(snapshot.clients.filter { $0.isControl && !$0.ignoresSize }.map(\.name))
+        listeners = Set(snapshot.clients.filter { $0.isControl && $0.ignoresSize }.map(\.name))
         keepListening(snapshot)
         return changes + (remember(snapshot) ? topicChanges() : [])
     }
@@ -499,6 +519,8 @@ public final class EnvironmentPublisher: @unchecked Sendable {
                 for name in lines.compactMap(Self.detachedClient(in:)) {
                     queue.async { self.clientDetached(name, from: number) }
                 }
+                let focus = lines.compactMap(Self.focusChange(in:))
+                if !focus.isEmpty { queue.async { self.heardFocus(focus, from: number) } }
                 if lines.contains(where: Self.isChange) { heardChange() }
             }, { [weak self] in
                 self?.queue.async { self?.clientExited(number) }
@@ -569,10 +591,67 @@ public final class EnvironmentPublisher: @unchecked Sendable {
                 // The Terminal moved, by a switch that Muxify started or one made inside tmux; the Listener follows.
                 terminalSession = session
                 terminalMoved(to: session)
+            case .client(let name, let session) where session == terminalSession && !listeners.contains(name):
+                // Another screen moved into the Terminal's Session, as Muxify Mobile does when its user opens it.
+                if let shown = shownWindow() { tell(.taken(window: shown.window)) }
             case .client: break
             }
         }
         follow()
+    }
+
+    /// What the Listener heard of the focus or the size of a Window.
+    public enum FocusChange: Equatable {
+        /// `%window-pane-changed`: the active Pane of `window` changed.
+        case pane(window: String)
+        /// `%session-window-changed`: `session` shows `window` now.
+        case window(session: String, window: String)
+        /// `%layout-change`: `window` is `width` by `height` now.
+        case layout(window: String, width: Int, height: Int)
+    }
+
+    public static func focusChange(in line: String) -> FocusChange? {
+        let words = line.split(separator: " ", omittingEmptySubsequences: false)
+        guard words.count >= 3 else { return nil }
+        switch words[0] {
+        case "%window-pane-changed": return .pane(window: String(words[1]))
+        case "%session-window-changed": return .window(session: String(words[1]), window: String(words[2]))
+        case "%layout-change":
+            // A layout starts `<checksum>,<width>x<height>,`.
+            let fields = words[2].split(separator: ",")
+            guard fields.count >= 2 else { return nil }
+            let size = fields[1].split(separator: "x")
+            guard size.count == 2, let width = Int(size[0]), let height = Int(size[1]) else { return nil }
+            return .layout(window: String(words[1]), width: width, height: height)
+        default: return nil
+        }
+    }
+
+    /// Tells the subscriber of a focus change, or of a size not the Terminal's, in the Window that the Terminal shows.
+    /// It does not decide whose screen made it.
+    private func heardFocus(_ changes: [FocusChange], from number: Int) {
+        guard number == clientNumber, client != nil, let session = terminalSession else { return }
+        for change in changes {
+            switch change {
+            case .window(let changed, let window):
+                if changed == session { tell(.focusChanged(window: window)) }
+            case .pane(let window):
+                if shownWindow()?.window == window { tell(.focusChanged(window: window)) }
+            case .layout(let window, let width, let height):
+                guard let shown = shownWindow(), shown.window == window else { continue }
+                if width != shown.width || height != shown.height { tell(.taken(window: window)) }
+            }
+        }
+    }
+
+    /// The Window that the Terminal shows, and the size that the Terminal gives it: its own, less tmux's status lines.
+    private func shownWindow() -> (window: String, width: Int, height: Int)? {
+        guard let tty = ownClient?.tty,
+              let fields = try? run(["display-message", "-p", "-c", tty, "#{window_id} #{client_width} #{client_height} #{status}"])
+                .trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " "),
+              fields.count == 4, let width = Int(fields[1]), let height = Int(fields[2]) else { return nil }
+        let statusLines = fields[3] == "off" ? 0 : Int(fields[3]) ?? 1
+        return (String(fields[0]), width, height - statusLines)
     }
 
     /// Moves the Listener to the Terminal's Session, on its own control connection.

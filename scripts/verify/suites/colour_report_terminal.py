@@ -154,6 +154,36 @@ class ColourReportTerminal(unittest.TestCase):
         wait(lambda: self.answers(session)[-1:] == [self.muxify],
              lambda: 'the other screen\'s detach did not give back Muxify\'s colours: %s' % self.lines(session)[-5:])
 
+    def test_the_terminals_next_click_takes_back_a_window_that_another_screen_took(self):
+        """Another screen in the Terminal's Session writes its colours and selects a Pane, as Muxify Mobile does when
+        its user taps one. tmux does not say whose focus change it was, and the Terminal had no input, so Muxify
+        writes nothing; its Terminal's next input writes the Window's Panes again, as it takes the Window's size back.
+        The driver types no key, so the input is a click: the Terminal's key and mouse input share one entry point."""
+        session = 'taken-colours'
+        self.start_probe(session)
+        self.sandbox.tmux('split-window', '-d', '-t', session + ':')
+        self.sandbox.show(self.window(session))
+        wait(lambda: self.answers(session)[-1:] == [self.muxify], 'the shown Session did not answer Muxify\'s colour')
+        screen = self.sandbox.tmux_control(session)
+        self.addCleanup(screen.terminate)
+        other_pane = self.sandbox.tmux('display-message', '-p', '-t', session + ':.1', '#{pane_id}').strip()
+        # A focus change within half a second of Muxify's switch counts as Muxify's own.
+        time.sleep(1)
+
+        self.report_other_colour(session, screen=screen)
+        screen.stdin.write(('select-pane -t %s\n' % other_pane).encode())
+        screen.stdin.flush()
+        wait(lambda: self.sandbox.tmux('display-message', '-p', '-t', session + ':', '#{pane_id}').strip() == other_pane,
+             'the other screen did not select its Pane')
+        time.sleep(2)
+        self.assertEqual(self.answers(session)[-1:], [OTHER],
+                         'Muxify wrote its colours for a focus change that another screen made: %s' % self.lines(session)[-5:])
+
+        self.sandbox.act('click', 'terminal-panel')
+
+        wait(lambda: self.answers(session)[-1:] == [self.muxify],
+             lambda: 'the Terminal\'s next input did not take the Window\'s colours back: %s' % self.lines(session)[-5:])
+
 
 if __name__ == '__main__':
     unittest.main()

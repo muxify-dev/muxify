@@ -1195,6 +1195,16 @@ final class WorkspaceStore {
     /// Whether this is the key App Window, whose Listener writes the Colour Reports (ADR 0095). Every App Window keeps
     /// its Listener for events; `AppWindows` moves this with focus.
     private(set) var writesColourReports = false
+    /// Set when another screen took the Window that the Terminal shows (ADR 0095): the Terminal's next key or click
+    /// writes its colours. The Terminal reads it on every key, so it is a plain Boolean that Observation does not track.
+    @ObservationIgnored private var isWindowTaken = false
+    /// The Window that another screen took, as the Listener named it last.
+    @ObservationIgnored private var takenWindow: String?
+    /// The Terminal's last key or click, and the last tmux command of Muxify's that can change the focus: a focus
+    /// change within `ownFocusChangeDelay` after either is this Mac's user's.
+    @ObservationIgnored private var lastTerminalInput = Date.distantPast
+    @ObservationIgnored private var lastFocusCommand = Date.distantPast
+    static let ownFocusChangeDelay: TimeInterval = 0.5
 
     /// The Sidebar mode the user picked. `TopicsModel.mode` is the one shown, because the Config can turn a mode off.
     var sidebarMode: SidebarMode {
@@ -1710,6 +1720,7 @@ final class WorkspaceStore {
     @discardableResult
     private func sendView(_ command: ViewCommand, completion: ((Result<String, Error>) -> Void)? = nil) -> Bool {
         guard isLinked, !isTransitioning, link.isOnThisMac || isConnected else { return false }
+        if Self.changesFocus(command) { lastFocusCommand = now() }
         send({ try await $0.view(command) }) { result in
             if case .failure(let error) = result { Diagnostics.report("tmux command failed: \(error)") }
             completion?(result)
@@ -1747,6 +1758,10 @@ final class WorkspaceStore {
             fallBack(reason)
         case .config(let config):
             apply(config)
+        case .focusChanged(let window):
+            focusChanged(in: window)
+        case .windowTaken(let window):
+            markTaken(window)
         }
     }
 
@@ -3440,7 +3455,69 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
     func setWritesColourReports(_ writes: Bool) {
         guard writes || writesColourReports else { return }
         writesColourReports = writes
+        // The write covers every Pane of the Terminal's Session, so a taken Window has its colours back.
+        if writes { isWindowTaken = false; takenWindow = nil }
         reportColours()
+    }
+
+    // MARK: - The screen in use writes the colours (ADR 0095)
+
+    // The Mac app decides; the Listener only reports what it heard and writes when asked. tmux does not say which
+    // Client changed the focus, so only the screen whose user made the change knows it.
+
+    /// The Terminal's key or mouse input. When no other screen took the shown Window, it notes the time and reads one
+    /// Boolean: no tmux call, lock or allocation, so typing costs nothing more. Otherwise it writes that Window once,
+    /// as the next key takes the Window's size back.
+    func ghosttyTerminalInput() {
+        lastTerminalInput = now()
+        guard isWindowTaken else { return }
+        takeWindowBack()
+    }
+
+    private func takeWindowBack() {
+        isWindowTaken = false
+        guard let window = takenWindow else { return }
+        takenWindow = nil
+        writeColours(to: window)
+    }
+
+    /// A focus change in the Window that the Terminal shows: this Mac's user's when Muxify started it or the Terminal
+    /// had input within `ownFocusChangeDelay`, which writes the Window; another screen's otherwise, such as Muxify
+    /// Mobile's, which marks the Window taken.
+    private func focusChanged(in window: String) {
+        let time = now()
+        let own = [lastTerminalInput, lastFocusCommand].contains { time.timeIntervalSince($0) <= Self.ownFocusChangeDelay }
+        if own {
+            isWindowTaken = false
+            takenWindow = nil
+            writeColours(to: window)
+        } else {
+            markTaken(window)
+        }
+    }
+
+    private func markTaken(_ window: String) {
+        takenWindow = window
+        isWindowTaken = true
+    }
+
+    /// Only the key App Window writes.
+    private func writeColours(to window: String) {
+        guard writesColourReports else { return }
+        link.reportColours(toWindow: window)
+    }
+
+    /// Whether `command` can change the focus in the Terminal's Session, so that a focus change right after it is
+    /// Muxify's own.
+    private static func changesFocus(_ command: ViewCommand) -> Bool {
+        switch command {
+        case .selectPane, .switchClient, .splitPane:
+            true
+        case .resizePane, .selectLayout, .setLastWindow, .setAgentUnread, .setBrowser, .clearOpenRequests,
+             .setBrowserSocket, .activePane, .paneIsActive, .findInPane, .cancelFind, .capturePane, .sendKeys,
+             .newWindow, .killSession, .clientPane, .paste:
+            false
+        }
     }
 
     /// Tells the link the Terminal's colours while this is the key App Window, so programs in the Terminal's Session

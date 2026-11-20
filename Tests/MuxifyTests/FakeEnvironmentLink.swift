@@ -69,6 +69,9 @@ final class FakeEnvironmentLink: EnvironmentLink {
     /// Every colours report the store sent, in order: nil when it writes none.
     private(set) var reportedColours: [TerminalColours?] = []
     func reportColours(_ colours: TerminalColours?) { reportedColours.append(colours) }
+    /// Every Window whose Panes the store asked to write, in order.
+    private(set) var reportedWindows: [String] = []
+    func reportColours(toWindow window: String) { reportedWindows.append(window) }
 
     private(set) var configReloads = 0
     func reloadConfig() { configReloads += 1 }
