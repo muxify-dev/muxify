@@ -112,6 +112,10 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         publisher.reportColours(toWindow: window)
     }
 
+    func hideStatusLine(_ hides: Bool) {
+        publisher.hideStatusLine(hides)
+    }
+
     func git(_ read: GitRead) async throws -> GitAnswer {
         try await EnvironmentLinks.readGit(read)
     }

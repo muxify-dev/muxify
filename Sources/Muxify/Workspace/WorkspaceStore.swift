@@ -1314,6 +1314,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var isLinked = false
     @ObservationIgnored private var linkSubscription: EnvironmentSubscription?
     @ObservationIgnored private var generation = UUID()
+    /// What the link was last told of `ui.status_line`, so a Config change elsewhere tells it nothing.
+    @ObservationIgnored private var toldHidesStatusLine: Bool?
     /// Why this attachment shows Sessions only, once its Host Server could not run; nil until then.
     private(set) var topicsUnavailableReason: HostServerUnavailable?
     /// When the Host Server stopped during this attachment, to count 3 within 60 s.
@@ -1549,6 +1551,8 @@ final class WorkspaceStore {
     private func subscribeToLink() {
         let current = generation
         reportColours()
+        toldHidesStatusLine = nil
+        followStatusLineSetting()
         linkSubscription = link.subscribe { [weak self] event in
             guard let self, self.generation == current else { return }
             self.receive(event)
@@ -3173,6 +3177,8 @@ final class WorkspaceStore {
         case .focusBrowser: focus(.browser)
         case .toggleFocus: toggleFocus()
         case .toggleZoomPane: toggleZoomOfCurrentPane()
+        case .splitPaneRight: splitCurrentPane(.right)
+        case .splitPaneDown: splitCurrentPane(.down)
         case .resizePaneLeft: resizeCurrentPane(.left)
         case .resizePaneRight: resizeCurrentPane(.right)
         case .resizePaneUp: resizeCurrentPane(.up)
@@ -3260,6 +3266,12 @@ final class WorkspaceStore {
 
     func toggleZoomOfCurrentPane() {
         runOnCurrentPane { pane, _ in .resizePane(target: pane, by: .zoom) }
+    }
+
+    /// Splits the current Pane with tmux's own `split-window`, whatever the tmux config binds, so the new Pane is on
+    /// `side` and starts in the current Pane's folder.
+    func splitCurrentPane(_ side: PaneDirection) {
+        runOnCurrentPane { pane, _ in .splitPane(target: pane, side: side) }
     }
 
     /// Moves the current Pane's border by 10 cells, as Ghostty's resize_split does.
@@ -3520,6 +3532,24 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
         }
     }
 
+    /// Tells the link whether the header shows the Session and its Windows (`ui.status_line`), so that tmux's status line
+    /// does not show them a second time (ADR 0099): now, and again each time this App Window's Config changes it.
+    private func followStatusLineSetting() {
+        let current = generation
+        let hides = withObservationTracking { config.statusLine.enabled } onChange: { [weak self] in
+            // Called before the change is stored: read the new Config on the next turn.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.generation == current else { return }
+                    self.followStatusLineSetting()
+                }
+            }
+        }
+        guard hides != toldHidesStatusLine else { return }
+        toldHidesStatusLine = hides
+        link.hideStatusLine(hides)
+    }
+
     /// Tells the link the Terminal's colours while this is the key App Window, so programs in the Terminal's Session
     /// get them as the answer to a colour question (ADR 0095), and no colours otherwise, so it writes none. The key App
     /// Window calls it again when it becomes key: the screen in use writes last.
@@ -3541,7 +3571,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
         case GHOSTTY_SPLIT_DIRECTION_UP: .up
         default: .right
         }
-        runOnCurrentPane { pane, _ in .splitPane(target: pane, side: side) }
+        splitCurrentPane(side)
     }
 
     func ghosttyGotoSplit(_ direction: ghostty_action_goto_split_e) {

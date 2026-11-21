@@ -56,7 +56,7 @@ public struct HostServerContext: @unchecked Sendable {
 /// `muxify server`: the Host Server's requests (ADR 0087). It serves `ping` and `shutdown`, the `environment`,
 /// `config`, `repository`, `topic`, `snapshot` and `focus` subscriptions, `environment` requests, `mark_read`, the view
 /// commands, the Topic and Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads,
-/// writes and network commands, `session_paths`, `visit_session_path`, `upload`, `browser_tabs` and `colours`. Programs on the Host reach its
+/// writes and network commands, `session_paths`, `visit_session_path`, `upload`, `browser_tabs`, `colours` and `status_line`. Programs on the Host reach its
 /// Mac through its own socket, whose requests it sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask`
 /// goes to the network command that runs it, which asks the Mac.
 public enum HostServer {
@@ -198,6 +198,8 @@ public enum HostServer {
                 host.browserTabs(tabs, for: request)
             case .colours(let colours):
                 host.colours(colours, for: request, nonce: nonce)
+            case .statusLine(let statusLine):
+                host.statusLine(statusLine, for: request, nonce: nonce)
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -312,6 +314,8 @@ final class HostEnvironment: @unchecked Sendable {
     private var stopped = false
     /// The id of the `colours` request whose colours the publisher has.
     private var coloursID = 0
+    /// The id of the `status_line` request that the publisher follows.
+    private var statusLineID = 0
 
     // Only `delivery` touches these.
     private var state = EnvironmentState()
@@ -568,6 +572,21 @@ final class HostEnvironment: @unchecked Sendable {
             case (false, nil): break
             }
             lock.unlock()
+            request.finish()
+        }
+    }
+
+    /// The Mac's header shows the Session and its Windows, or no longer does: the publisher's Listener hides tmux's
+    /// status line in the Terminal's Sessions, or gives it back (ADR 0099). The Mac sends it after each `hello` and
+    /// when its Config changes; the last request's answer is what holds.
+    func statusLine(_ statusLine: StatusLineRequest, for request: ProtocolIncomingRequest, nonce: String?) {
+        Task {
+            let publisher = await self.publisher(nonce: nonce)
+            lock.withLock {
+                guard request.id > statusLineID else { return }
+                statusLineID = request.id
+                publisher.hideStatusLine(statusLine.hidden)
+            }
             request.finish()
         }
     }

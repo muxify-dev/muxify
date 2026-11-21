@@ -23,6 +23,9 @@ import MuxifyCore
 /// as the App Window becomes key or Ghostty's colours change. The server's Listener writes them as on this Mac. What it
 /// hears of the focus comes back on the `focus` subscription, and the store decides, as for this Mac, whether to write
 /// a Window, which goes in `colours` too.
+///
+/// Whether the header shows the Session goes to the server in `status_line` (ADR 0099), on each `hello` and when it
+/// changes, to a server that declared `status-line`; an older server's Sessions keep tmux's status line.
 @MainActor
 final class HostEnvironmentLink: EnvironmentLink {
     let isOnThisMac = false
@@ -76,6 +79,8 @@ final class HostEnvironmentLink: EnvironmentLink {
     private var toldConsumes: Bool?
     /// The Terminal's colours as the store last reported them, which each new server gets after its `hello`.
     private var colours: TerminalColours?
+    /// Whether the store last asked for no tmux status line, which each new server gets after its `hello`.
+    private var hidesStatusLine: Bool?
     private var focusSubscription: Task<Void, Never>?
 
     init(environmentName: String, inner: EnvironmentLink, build: String = AppBuild.line, nonce: @escaping () -> String?,
@@ -184,7 +189,8 @@ final class HostEnvironmentLink: EnvironmentLink {
         let errors = HostServerErrors()
         errors.read(channel.errors)
         self.errors = errors
-        let client = ProtocolClient(input: channel.input, output: channel.output, build: build, helloTimeout: helloTimeout,
+        let client = ProtocolClient(input: channel.input, output: channel.output, build: build,
+                                    capabilities: HostProtocol.macCapabilities, helloTimeout: helloTimeout,
                                     nonce: nonce(), onRequest: { [weak self] request in
                                         Task { @MainActor in
                                             guard let self else { return request.fail(.channelEnded) }
@@ -245,6 +251,7 @@ final class HostEnvironmentLink: EnvironmentLink {
             } catch {}
         }
         if colours != nil { sendColours(window: nil) }
+        sendStatusLine()
         startPinging(client)
         adoptWaitingWorktrees(on: client)
     }
@@ -276,6 +283,22 @@ final class HostEnvironmentLink: EnvironmentLink {
         guard let client, session != nil else { return }
         lastSent = Date()
         _ = client.begin(HostRequest.colours(ColoursRequest(colours, window: window)), as: ProtocolEmpty.self)
+    }
+
+    // MARK: tmux's status line (ADR 0099)
+
+    func hideStatusLine(_ hides: Bool) {
+        guard hides != hidesStatusLine else { return }
+        hidesStatusLine = hides
+        sendStatusLine()
+    }
+
+    /// Nothing waits for the answer; a server that has not answered gets it after its `hello`.
+    private func sendStatusLine() {
+        guard let client, let session, session.supports(HostCapability.statusLine.rawValue),
+              let hidesStatusLine else { return }
+        lastSent = Date()
+        _ = client.begin(HostRequest.statusLine(StatusLineRequest(hidden: hidesStatusLine)), as: ProtocolEmpty.self)
     }
 
     /// Once after each `hello`: the Mac's Muxify Worktree rows that wait for this Environment go to the Host, which

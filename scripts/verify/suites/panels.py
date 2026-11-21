@@ -82,6 +82,17 @@ class Panels(unittest.TestCase):
         wait(lambda: self.s.tmux('display-message', '-p', '-t', target, '#{window_zoomed_flag}') == '0',
              'the Zoom Pane Command did not show all the Panes again')
 
+    def test_the_split_pane_commands_split_the_current_pane_with_no_tmux_binding(self):
+        # The sandbox's tmux server runs with no config, so no key of tmux's splits; Muxify runs split-window itself.
+        target = 'panels:' + self.id().rsplit('.', 1)[-1][:24]
+        panes = lambda: self.s.tmux('list-panes', '-t', target, '-F', '#{pane_left} #{pane_top}').splitlines()
+        self.s.run_command('Split Pane Right')
+        wait(lambda: len(panes()) == 2, 'the Split Pane Right Command did not split the current Pane')
+        self.assertEqual(len({pane.split()[0] for pane in panes()}), 2, 'the new Pane is not beside the current one: %s' % panes())
+        self.s.run_command('Split Pane Down')
+        wait(lambda: len(panes()) == 3, 'the Split Pane Down Command did not split the current Pane')
+        self.assertEqual(len({pane.split()[1] for pane in panes()}), 2, 'no new Pane is below the current one: %s' % panes())
+
     def wait_toggles(self, expected, message):
         values = lambda rs: {key: self.s.row(key, rs).get('accessibilityValue') for key in expected}
         return self.s.wait_rows(lambda rs: values(rs) == expected, '%s: %s' % (message, values(self.s.rows())))

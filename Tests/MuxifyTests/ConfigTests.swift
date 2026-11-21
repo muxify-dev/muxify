@@ -575,6 +575,8 @@ final class ConfigTests: XCTestCase {
         let config = try load("")
         let expected: [(ConfigAction, [String], PanelLayout.Side)] = [
             (.toggleZoomPane, ["cmd+m"], .terminal),
+            (.splitPaneRight, ["cmd+d"], .terminal),
+            (.splitPaneDown, ["cmd+shift+d"], .terminal),
             (.resizePaneLeft, [], .terminal),
             (.resizePaneRight, [], .terminal),
             (.resizePaneUp, [], .terminal),

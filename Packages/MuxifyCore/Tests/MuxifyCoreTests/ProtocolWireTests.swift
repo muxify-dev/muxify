@@ -9,12 +9,26 @@ final class ProtocolWireTests: XCTestCase {
 
     private static let requestID = RequestID("3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c")!
 
-    /// This release's messages, in the order of the newest fixtures folder: protocol 2, which adds the Mac's colours
-    /// and the `focus` subscription (ADR 0098).
+    /// This release's messages, in the order of the newest fixtures folder: the `status-line` capability, which the Mac
+    /// declares too, and its `status_line` request (ADR 0099).
     private func thisReleasesFrames() throws -> [Data] {
-        let light = ColourProbes.light
-        return [
+        [
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: HostProtocol.capabilities)),
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, build: Self.build, capabilities: HostProtocol.macCapabilities,
+                                                 nonce: "0a1b2c3d")),
+            try ProtocolLine.request(id: 1, HostRequest.statusLine(StatusLineRequest(hidden: true))),
+            try ProtocolLine.ok(id: 1, ProtocolEmpty()),
+            try ProtocolLine.request(id: 2, HostRequest.statusLine(StatusLineRequest(hidden: false))),
+            try ProtocolLine.ok(id: 2, ProtocolEmpty()),
+        ]
+    }
+
+    /// Protocol 2's release, pinned in `3-colour-reports`: the Mac's colours and the `focus` subscription (ADR 0098).
+    private func colourReportsFrames() throws -> [Data] {
+        let light = ColourProbes.light
+        let capabilities = ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs"]
+        return [
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: capabilities)),
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, build: Self.build, nonce: "0a1b2c3d")),
             try ProtocolLine.request(id: 1, HostRequest.subscribe(.focus)),
             try ProtocolLine.request(id: 2, HostRequest.colours(ColoursRequest(light))),
@@ -31,11 +45,12 @@ final class ProtocolWireTests: XCTestCase {
     /// The phone's release, pinned in `2-phone`: the capabilities that the phone uses.
     private func phonesFrames() throws -> [Data] {
         let id = Self.requestID
+        let capabilities = ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs"]
         let created = EnvironmentResponse.changed(TopicChange(topicID: id.rawValue, created: true))
         func failed(_ failure: TopicFailure) -> ProtocolError { ProtocolError(.failed, failure.message, topicFailure: failure) }
         return [
-            try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, minProtocol: 1, build: Self.build, capabilities: HostProtocol.capabilities)),
-            try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, build: Self.build, capabilities: HostProtocol.capabilities)),
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, minProtocol: 1, build: Self.build, capabilities: capabilities)),
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, build: Self.build, capabilities: capabilities)),
             try ProtocolLine.request(id: 1, HostRequest.environment(EnvironmentRequest(.create(title: "T"), request: id))),
             try ProtocolLine.ok(id: 1, created),
             try ProtocolLine.ok(id: 2, created),
@@ -305,7 +320,7 @@ final class ProtocolWireTests: XCTestCase {
 
     func testTheRequestCapabilityIsPinned() throws {
         func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
-        XCTAssertEqual(HostProtocol.capabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs"])
+        XCTAssertEqual(HostProtocol.capabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs", "status-line"])
         let request = HostRequest.environment(EnvironmentRequest(.create(title: "T"), request: Self.requestID))
         let line = text(try ProtocolLine.request(id: 1, request))
         XCTAssertEqual(line, #"{"id":1,"kind":"request","request":{"environment":{"command":{"create":{"title":"T"}},"request":"3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c","version":2}}}"# + "\n")
@@ -407,6 +422,18 @@ final class ProtocolWireTests: XCTestCase {
         }
     }
 
+    func testTheStatusLineRequestRoundTripsAndNeedsItsCapability() throws {
+        for (hidden, pinned) in [(true, #"{"status_line":{"hidden":true}}"#), (false, #"{"status_line":{"hidden":false}}"#)] {
+            let request = HostRequest.statusLine(StatusLineRequest(hidden: hidden))
+            let line = try ProtocolLine.request(id: 3, request)
+            XCTAssertEqual(String(decoding: line, as: UTF8.self), #"{"id":3,"kind":"request","request":"# + pinned + "}\n")
+            XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(line.dropLast())).payload(HostRequest.self), request)
+            XCTAssertEqual(request.capability, .statusLine)
+        }
+        XCTAssertTrue(HostProtocol.capabilities.contains("status-line"), "the server declares it")
+        XCTAssertEqual(HostProtocol.macCapabilities, ["status-line"], "the Mac declares it, so the server serves it")
+    }
+
     func testAnUnknownRequestCaseThrowsUnsupported() {
         XCTAssertThrowsError(try JSONDecoder().decode(HostRequest.self, from: Data(#"{"frob":{}}"#.utf8))) { error in
             XCTAssertEqual((error as? ProtocolError)?.code, .unsupported)
@@ -419,7 +446,7 @@ final class ProtocolWireTests: XCTestCase {
         let root = try XCTUnwrap(Bundle.module.url(forResource: "Protocol", withExtension: nil, subdirectory: "Fixtures"))
         let folders = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        XCTAssertEqual(folders.map(\.lastPathComponent).suffix(3), ["1-first-server", "2-phone", "3-colour-reports"])
+        XCTAssertEqual(folders.map(\.lastPathComponent).suffix(4), ["1-first-server", "2-phone", "3-colour-reports", "4-status-line"])
         for folder in folders {
             let text = try String(contentsOf: folder.appendingPathComponent("frames.jsonl"), encoding: .utf8)
             let lines = text.split(separator: "\n").map { Data($0.utf8) }
@@ -443,6 +470,9 @@ final class ProtocolWireTests: XCTestCase {
             }
             if folder.lastPathComponent == "2-phone" {
                 XCTAssertEqual(lines, try phonesFrames().map { $0.dropLast() }, "the phone's messages still encode as pinned")
+            }
+            if folder.lastPathComponent == "3-colour-reports" {
+                XCTAssertEqual(lines, try colourReportsFrames().map { $0.dropLast() }, "protocol 2's messages still encode as pinned")
             }
         }
     }

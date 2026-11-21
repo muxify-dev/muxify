@@ -91,8 +91,9 @@ set -ga update-environment ' MUXIFY_TERMINAL'
 ```
 
 This records the attaching terminal, not which terminal is currently showing a
-Pane. It is not a per-client status-bar setting; tmux's `status` option belongs
-to the Session.
+Pane. tmux's `status` option belongs to the Session; Muxify hides it itself
+while the header shows the Session (see [Header](#header)), so a tmux config
+needs no hook for that.
 
 ## Remote Environments
 
@@ -461,6 +462,20 @@ Set it to `false` to hide only those two controls; the Git/branch button,
 Environment selector and panel controls stay visible. Changes apply live.
 Removing the setting restores the default. Invalid values use the default and
 appear in the Config problems banner.
+
+While `status_line.enabled` is on, tmux shows no status line of its own in the
+Session that the Terminal shows, on this Mac and on a Remote Environment's host,
+so the Session and its Windows do not show twice. You need no tmux config for
+it. tmux's `status` belongs to a Session, not to a terminal, so the last
+terminal to arrive in a Session wins: when another terminal, such as iTerm or
+Ghostty.app, attaches to or switches into a Session that Muxify hid the status
+line in, that Session gets it back, also after Muxify quits. Muxify only ever
+undoes its own change, never a `status` that your tmux config sets. Turning
+`status_line.enabled` off gives every such Session its status line back. On tmux
+before 3.8, tmux cannot tell a Muxify Terminal from another terminal, so the
+status line can flash for a moment when the Terminal moves. A Remote Environment
+in Sessions-only mode keeps tmux's status line. See
+[ADR 0099](adr/0099-the-header-hides-tmuxs-status-line-where-the-terminal-is.md).
 
 `status_line.session.wrap` keeps the Session name over the sidebar: a name
 wider than that room is cut with "…" in the middle, as the branch is, and its

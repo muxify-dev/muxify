@@ -257,6 +257,10 @@ protocol EnvironmentLink: AnyObject {
     /// Writes the colours to every Pane of `window`, as the store decided after a `focusChanged` or a `windowTaken`
     /// event, without waiting. It writes nothing while no colours were reported.
     func reportColours(toWindow window: String)
+    /// While `hides`, tmux shows no status line in the Session that this App Window's Terminal shows, nor in each one
+    /// it moves to, because the header shows the Session and its Windows (ADR 0099); false gives it back. The Local
+    /// Environment's publisher hides it; a Host's link sends it to its Host Server. A Sessions-only link does nothing.
+    func hideStatusLine(_ hides: Bool)
 
     // MARK: Git
 
@@ -340,6 +344,7 @@ extension EnvironmentLink {
     func setOpenConsumer(_ consumes: Bool) {}
     func reportColours(_ colours: TerminalColours?) {}
     func reportColours(toWindow window: String) {}
+    func hideStatusLine(_ hides: Bool) {}
 }
 
 /// What answers a Host Server's request for its App Window: a Browser command's reply, `done` for a `select`, or

@@ -328,6 +328,7 @@ public struct Config: Equatable {
         #   header_height: 30
         #   status_line:
         #     # Show the Session name and Window selector. Git and other controls stay visible.
+        #     # While on, tmux shows no status line of its own where the Terminal is.
         #     enabled: true
         #     session:
         #       # A long Session name is cut with "…" in the middle to stay over
@@ -582,7 +583,9 @@ public struct Config: Equatable {
         #   # Cmd+backquote stays available for macOS App Window switching.
         #   # select_card_1 through select_card_9 Jump To Topic or Session cards.
         #   # select_tab_1 through select_tab_9 select Tabs and show the Browser.
-        #   # toggle_zoom_pane, resize_pane_* and find_in_pane act only while
+        #   # split_pane_right (Cmd+D) and split_pane_down (Cmd+Shift+D) run
+        #   # tmux's split-window themselves, so they need no tmux key binding.
+        #   # toggle_zoom_pane, split_pane_*, resize_pane_* and find_in_pane act only while
         #   # the Terminal has Focus. find_in_page, select_next_tab, select_prev_tab,
         #   # browser_back and browser_forward act only while the Browser has Focus. With Focus
         #   # elsewhere, their keys go on to Ghostty, the page or the menu.

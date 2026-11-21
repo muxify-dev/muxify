@@ -67,6 +67,8 @@ public enum ConfigAction: String, KeybindAction {
     case focusBrowser = "focus_browser"
     case toggleFocus = "toggle_focus"
     case toggleZoomPane = "toggle_zoom_pane"
+    case splitPaneRight = "split_pane_right"
+    case splitPaneDown = "split_pane_down"
     case resizePaneLeft = "resize_pane_left"
     case resizePaneRight = "resize_pane_right"
     case resizePaneUp = "resize_pane_up"
@@ -149,6 +151,8 @@ public enum ConfigAction: String, KeybindAction {
         .focusBrowser: ["cmd+shift+b"],
         .toggleFocus: ["cmd+0"],
         .toggleZoomPane: ["cmd+m"],
+        .splitPaneRight: ["cmd+d"],
+        .splitPaneDown: ["cmd+shift+d"],
         .resizePaneLeft: [],
         .resizePaneRight: [],
         .resizePaneUp: [],
@@ -205,7 +209,7 @@ public enum ConfigAction: String, KeybindAction {
     /// from the Browser, and a Tab key does not take one from the Terminal.
     public var requiredFocus: PanelLayout.Side? {
         switch self {
-        case .toggleZoomPane, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown, .findInPane: .terminal
+        case .toggleZoomPane, .splitPaneRight, .splitPaneDown, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown, .findInPane: .terminal
         case .findInPage, .selectNextTab, .selectPrevTab, .browserBack, .browserForward, .closeTab, .reopenClosedTab: .browser
         default: nil
         }
