@@ -1,6 +1,6 @@
 # The Topic records
 
-Every Topic record and the Open Places are rows in the state database, the
+Every Topic record, the Open Places and the Guest Sessions are rows in the state database, the
 SQLite file `$XDG_STATE_HOME/muxify/muxify.db`. If `XDG_STATE_HOME` is absent,
 use `~/.local/state/muxify/muxify.db`. The Mac and each Host have their own. The
 database is in WAL mode; read it with the `sqlite3` command line tool:
@@ -31,6 +31,11 @@ bytes.
 
 `open_places` holds one row for each Open Place of the Topics list: its `id`
 and its `order`, in the scale of the records' `order`.
+
+`guest_sessions` holds one row for each Guest Session, its Lock: its `id`, its
+`order` in the scale of the records' `order`, and its Remembered Session in
+`session`, JSON text in the shape of one entry of a record's `sessions`. See
+[Guest Sessions](#guest-sessions).
 
 `sessions` and `tags` are JSON, and Muxify writes each one whole. A remembered
 Session and its Windows are open JSON: Muxify keeps a key that it does not know.
@@ -258,28 +263,44 @@ Windows.
 
 ## Guest Sessions
 
-A Guest Session has no record. It is a No Topic Session with a Lock (ADR 0018).
-tmux keeps the Lock in the Session option
-`@muxify_lock`. Its value is the place of the Session's card in the Topics list,
-in the same scale as the `order` of the Topic records:
+A Guest Session has no Topic record. It is a No Topic Session with a Lock: a
+row of the `guest_sessions` table. The live Session points at its Lock with the
+tmux Session option `@muxify_session_id`, whose value is the Lock's `id`:
 
 ```sh
-tmux set-option -t notes @muxify_lock 3.5
+sqlite3 ~/.local/state/muxify/muxify.db 'SELECT id, "order", session FROM guest_sessions'
 ```
 
-Only a No Topic Session can have a Lock. Muxify ignores the option on a Session
-whose `@muxify_topic` names an open Topic. A Lock is never Pinned, and its
-Session is always a Guest, so its card shows in the Guests. When a move
-renumbers the list, Muxify writes the new `order` values to the records and the
-new `@muxify_lock` values to tmux. A new Lock goes to the end of the Guests.
-The Lock ends when the user Benches the Guest Session, when the Session ends,
-and when the Session goes into a Topic. A Topic that the user makes from a
-Guest Session takes the Lock's value as its `order`, and the Guest mark.
+Only a No Topic Session can be a Guest Session: a Session whose `@muxify_topic`
+names an open Topic is not one, whatever its `@muxify_session_id`. A Lock is
+never Pinned, and its Session is always a Guest, so its card shows in the
+Guests. A new Lock goes to the end of the Guests. Its `id` is the Session's
+`@muxify_session_id`, or an id that tmux gives the Session when it has none,
+which Muxify then writes to the option. Each read of the server writes the live
+Session's Windows, Panes, Tabs and Agents to `session`, as it does for a Topic's
+Remembered Sessions.
+
+When tmux has no Session for a Lock, as after a tmux restart, the Guest Session
+is Dormant: its card stays at its place, dimmed. Going to it Reopens it: Muxify
+creates the Session again in its folder, with its Windows, Panes, Tabs and
+Agents, and sets `@muxify_session_id` on it. The Lock ends when the user Benches
+the Guest Session, live or Dormant, when Muxify kills it, when it goes into a
+Topic, and when it ends on the same tmux server while Muxify watches. A tmux
+restart and a Muxify launch do not end it. A Topic that the user makes from a
+Guest Session takes the Lock's `order`, and the Guest mark.
 
 `muxify topic make-guest --session <name>` and `muxify topic bench --session
-<name>` set and end a Lock through the Topic service. `muxify session lock`,
-`muxify session unlock` and the URLs `muxify://topic/lock` and
-`muxify://topic/unlock` are gone.
+<name>` write and end a Lock through the Topic service. `muxify topic reopen
+--guest-session <id>` and `muxify topic bench --guest-session <id>` take a
+Guest Session by its Lock id, also a Dormant one, which `muxify environment
+show` gives on its `dormant session` line. `muxify session lock`, `muxify
+session unlock` and the URLs `muxify://topic/lock` and `muxify://topic/unlock`
+are gone.
+
+An older Muxify kept the Lock in the tmux Session option `@muxify_lock`. When
+Muxify reads a Session that still has the option, it makes the Lock's row with
+the option's value as its `order`, points the Session at it, and removes the
+option.
 
 An older Muxify kept a Locked Session among the Topics while the Config did not
 set `topics.in_play`. When the app starts and finds a Lock outside the Guests,

@@ -246,10 +246,11 @@ topics:
 ```
 
 After a computer restart, tmux comes back with none of your Sessions, so every
-open Topic is Dormant until you go to it. With `true`, Muxify Reopens every
-Dormant Topic by itself when it launches: Pinned, In Play, Guests and the Bench.
-It is the same Reopen as going to the Topic, so the remembered Sessions,
-Windows, Panes, Tabs and Agents are created again, one Topic after another.
+open Topic and every Guest Session is Dormant until you go to it. With `true`,
+Muxify Reopens every Dormant Topic by itself when it launches: Pinned, In Play,
+Guests and the Bench, and then every Dormant Guest Session. It is the same
+Reopen as going to the card, so the remembered Sessions, Windows, Panes, Tabs
+and Agents are created again, one card after another.
 Settled Topics stay Settled, Empty Topics create nothing, and a Topic that
 already has a live Session is left as it is. A Topic whose Reopen fails stays
 Dormant, shows the failure as a Reopen does, and the others still Reopen.
