@@ -214,8 +214,16 @@ final class EnvironmentPublisherTests: XCTestCase {
 
     func testAListenersDetachWritesNothing() async throws {
         let work = try probe(session: "work")
-        _ = try startTerminal(in: "work", colours: Self.light)
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        let sent = SentLines()
+        _ = try startTerminal(in: "work", colours: Self.light, sent: sent)
+        // The Listener sits in `work` before the Terminal attaches, then starts again after it and reports there: the
+        // screen writes after that report, or a slow start again writes over the screen's colours.
+        try await wait("the Listener did not start again after the Terminal's Client") {
+            try self.server.run(["list-clients", "-F", "#{client_control_mode}"]).split(separator: "\n") == ["0", "1"]
+        }
+        try await wait("the Listener's start in the Terminal's Session did not report") {
+            sent.lines.contains { $0.hasPrefix("refresh-client -r") }
+        }
         try await Task.sleep(nanoseconds: 300_000_000)
 
         try await screenWritesAndDetaches(in: "work", flags: "ignore-size,no-output")
