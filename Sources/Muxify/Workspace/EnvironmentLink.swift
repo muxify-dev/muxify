@@ -210,7 +210,7 @@ protocol EnvironmentLink: AnyObject {
     /// Returns once every read and write asked for before has sent its event.
     func topicsCaughtUp() async
     /// Writes the Topic records, then returns once the event of what it left was sent.
-    func writeTopics<T>(locks: [SessionLock], _ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T
+    func writeTopics<T>(_ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T
     /// The service that runs Environment requests there; nil while the link cannot run one.
     func environmentService(sessionPaths: [SessionPath], topics: Config.Topics, notifications: Config.Notifications,
                             worktreesRoot: String?) -> EnvironmentService?
@@ -289,10 +289,6 @@ protocol EnvironmentLink: AnyObject {
 }
 
 extension EnvironmentLink {
-    func writeTopics<T>(_ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
-        try await writeTopics(locks: [], body)
-    }
-
     // A link whose requests run on this Mac, through the store's `EnvironmentService`, takes these.
 
     func run(_ request: EnvironmentRequest, client: String?, local: EnvironmentService?) async -> EnvironmentResponse? {
@@ -485,7 +481,7 @@ class TmuxConnectionLink {
     func topicsReloaded() async {}
     func topicsCaughtUp() async {}
 
-    func writeTopics<T>(locks: [SessionLock], _ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
+    func writeTopics<T>(_ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
         throw EnvironmentLinkError.unsupported("Topics")
     }
 

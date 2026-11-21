@@ -32,7 +32,9 @@ public struct TopicMembershipPlan: Sendable {
 
     public let record: TopicRecord?
     public let commands: [TopicPlan.Command]
-    private(set) var endedLockOf: String? = nil
+    /// The Lock that the move ends, when the source is a Guest Session that goes into a Topic or ends. A Session in no
+    /// Topic may have no Lock, and the write that ends this one then changes nothing.
+    private(set) var endedLock: String? = nil
     private(set) var leftTopic: TopicRecord? = nil
 
     init(removingSession window: TmuxWindow, records: [TopicRecord], sessionPaths: [SessionPath], windows: [TmuxWindow] = []) {
@@ -66,7 +68,6 @@ public struct TopicMembershipPlan: Sendable {
             commands.append(.tmux(["set-option", "-t", window.sessionID, "@muxify_session_id", window.sessionRecordID]))
             if let destination { commands.append(.tmux(["set-option", "-t", window.sessionID, "@muxify_topic", destination.id])) }
             else { commands.append(.tmux(["set-option", "-u", "-t", window.sessionID, "@muxify_topic"])) }
-            if window.lockOrder != nil { commands.append(.tmux(SessionLock.unsetOption(window.sessionID))) }
             var fields = sourceTopic?.session(of: window)?.object ?? [:]
             fields["id"] = .string(window.sessionRecordID)
             fields["name"] = .string(name)
@@ -108,9 +109,8 @@ public struct TopicMembershipPlan: Sendable {
             }
         }
         let ends = Self.ends(source, windows: windows)
-        // A new Topic takes the place of the Guest Session that the move ends. A Window or Pane source needs no unset
-        // of the Lock: tmux ends the Session with its last Window, and the Lock with it.
-        if ends, window.lockOrder != nil { endedLockOf = window.sessionID }
+        // A new Topic takes the place of the Guest Session that the move ends.
+        if ends, sourceTopic == nil, !window.savedSessionID.isEmpty { endedLock = window.savedSessionID }
         if ends, let sourceTopic,
            let left = sourceTopic.forgetting(window) {
             if left.id == saved?.id { saved = saved?.forgetting(window) ?? saved }

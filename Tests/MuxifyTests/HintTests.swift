@@ -209,11 +209,12 @@ final class HintTests: XCTestCase {
         }
     }
 
-    /// Window `@<id>`, alone in Session `$<id>` unless `session` names another.
-    private func window(_ id: String, session: String? = nil, index: Int = 0, topic: String? = nil, lock: Double? = nil) -> TmuxWindow {
+    /// Window `@<id>`, alone in Session `$<id>` unless `session` names another. A `guest` one points at the Lock whose id
+    /// is the Session's tmux id.
+    private func window(_ id: String, session: String? = nil, index: Int = 0, topic: String? = nil, guest: Bool = false) -> TmuxWindow {
         let session = session ?? id
         return .fixture(id: "@" + id, sessionID: "$" + session, sessionName: "session-" + session, index: index, paneTitle: "shell",
-                        path: "/tmp", isActive: index == 0, topicID: topic, lockOrder: lock)
+                        path: "/tmp", isActive: index == 0, topicID: topic, savedSessionID: guest ? "$" + session : "")
     }
 
     func testTopicsModeCardsArePinnedThenDormantTopicsWithoutNoTopicSessions() {
@@ -246,11 +247,12 @@ final class HintTests: XCTestCase {
         first.order = 0
         var last = TopicRecord(id: "last")
         last.order = 2
-        let windows = [window("1", lock: 1), window("2", lock: nil)]
+        let windows = [window("1", guest: true), window("2")]
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
         var selection = TopicSelection()
         selection.windowID = "@1"
-        let topics = TopicsModel(records: [last, first, pinned], windows: windows, config: Config(), selection: selection,
+        let topics = TopicsModel(records: [last, first, pinned], locks: [SessionLock(id: "$1", order: 1)], windows: windows, config: Config(),
+                                 selection: selection,
                         location: selection.windowLocation)
         XCTAssertEqual(QuickSwitchTargets(model: topics, sessions: sessions, windows: windows, tabIDs: []).cards,
                        [.topic("pinned"), .topic("first"), .topic("last"), .locked("$1")],
@@ -290,13 +292,13 @@ final class HintTests: XCTestCase {
         work.order = 0
         var dormant = TopicRecord(id: "dormant")
         dormant.order = 2
-        let windows = [window("1", topic: "work"), window("2"), window("3", topic: "work"), window("4", lock: 3),
+        let windows = [window("1", topic: "work"), window("2"), window("3", topic: "work"), window("4", guest: true),
                        window("5", topic: "pinned"), window("6")]
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
         func targets(selecting windowID: String?, mode: SidebarMode = .topics) -> QuickSwitchTargets {
             var selection = TopicSelection()
             selection.windowID = windowID
-            let model = TopicsModel(records: [dormant, work, pinned], windows: windows, config: Config(),
+            let model = TopicsModel(records: [dormant, work, pinned], locks: [SessionLock(id: "$4", order: 3)], windows: windows, config: Config(),
                                     selection: selection,
                                                     location: selection.windowLocation, mode: mode)
             return QuickSwitchTargets(model: model, sessions: sessions, windows: [], tabIDs: [])

@@ -63,7 +63,7 @@ enum StepDirection {
 }
 
 enum QuickSwitchTarget: Hashable {
-    /// `locked` is a Locked Session's card in Topics mode, by Session ID. `openPlace` is an Open Place, by its In Play
+    /// `locked` is a Guest Session's card in Topics mode, by its Lock id. `openPlace` is an Open Place, by its In Play
     /// place counted from 1: going there shows its Open Place page.
     case topic(String), locked(String), openPlace(Int), session(String), window(String), tab(UUID), terminal
 

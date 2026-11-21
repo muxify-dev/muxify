@@ -5,7 +5,7 @@ extension TopicGroupID {
     var accessibilityID: String {
         switch self {
         case .topic(let id): return "topic-\(id)"
-        case .locked(let sessionID): return "locked-\(sessionID)"
+        case .locked(let lock): return "locked-\(lock)"
         case .noTopic: return "no-topic"
         }
     }
@@ -14,7 +14,7 @@ extension TopicGroupID {
     var listID: TopicListID? {
         switch self {
         case .topic(let id): return .topic(id)
-        case .locked(let sessionID): return .lock(sessionID: sessionID)
+        case .locked(let lock): return .lock(lock)
         case .noTopic: return nil
         }
     }
@@ -22,7 +22,7 @@ extension TopicGroupID {
     init?(_ listID: TopicListID) {
         switch listID {
         case .topic(let id): self = .topic(id)
-        case .lock(let sessionID): self = .locked(sessionID)
+        case .lock(let lock): self = .locked(lock)
         case .openPlace: return nil
         }
     }
@@ -489,8 +489,10 @@ struct TopicsModel {
 
     /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.
     let noTopicSessions: [Session]
-    /// The Locked Sessions, by Session ID.
+    /// The live Guest Sessions, by Session ID.
     let lockedSessionIDs: Set<String>
+    /// The Lock of each live Guest Session, by Session ID.
+    let locksBySession: [String: String]
     /// The No Topic Session of the selected Window. The Topic list shows it as one card after the open Topics, or under
     /// the Bench line.
     /// Nil while the Active Topic is a Topic.
@@ -534,7 +536,8 @@ struct TopicsModel {
     let showsInPlay: Bool
     var showsToggle: Bool { topicsEnabled && sessionsEnabled }
 
-    init(records: [TopicRecord], openPlaces: [OpenPlace] = [], windows: [TmuxWindow], config: Config, selection: TopicSelection,
+    init(records: [TopicRecord], openPlaces: [OpenPlace] = [], locks: [SessionLock] = [], windows: [TmuxWindow], config: Config,
+         selection: TopicSelection,
          location: Location? = nil,
          mode: SidebarMode = .topics, groups groupsState: TopicGroupsState = TopicGroupsState(), benchShown: Bool = false,
          benchPeek: BenchPeek? = nil,
@@ -544,8 +547,9 @@ struct TopicsModel {
         tags = config.topics.tags
         self.mode = config.sidebar.shownMode(chosen: mode)
         let marks = AgentMarks(agents, notifications: config.notifications)
-        let topicsList = TopicsList(records: records, openPlaces: openPlaces, windows: windows, marks: marks, topics: config.topics)
+        let topicsList = TopicsList(records: records, openPlaces: openPlaces, locks: locks, windows: windows, marks: marks, topics: config.topics)
         lockedSessionIDs = topicsList.lockedSessionIDs
+        locksBySession = topicsList.locksBySession
         cards = topicsList.order
         inPlayInTopicsMode = self.mode == .topics ? config.topics.inPlay : nil
         let groupID = topicsList.group(of:)

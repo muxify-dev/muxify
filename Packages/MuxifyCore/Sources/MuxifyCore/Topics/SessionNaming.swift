@@ -54,7 +54,6 @@ extension TopicRecord {
                                            taken: taken)
         taken.insert(name)
         return [.tmux(["rename-session", "-t", window.sessionID, name]),
-                .tmux(["set-option", "-u", "-t", window.sessionID, "@muxify_topic"]),
-                .tmux(SessionLock.unsetOption(window.sessionID))]
+                .tmux(["set-option", "-u", "-t", window.sessionID, "@muxify_topic"])]
     }
 }

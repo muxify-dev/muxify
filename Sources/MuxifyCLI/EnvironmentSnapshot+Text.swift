@@ -16,6 +16,7 @@ extension EnvironmentSnapshot {
                 return line(["topic", topic.id, topic.label, topic.state.rawValue, mark?.rawValue ?? "",
                              topic.tags.map(\.description).joined(separator: " "), sessions.map { names[$0] ?? $0 }.joined(separator: ",")])
             case .session(let session, let mark): return line(["session", session, names[session] ?? session, mark?.rawValue ?? ""])
+            case .dormantSession(let id, let name): return line(["dormant session", id, name])
             case .openPlace(let id): return line(["open place", id])
             }
         }

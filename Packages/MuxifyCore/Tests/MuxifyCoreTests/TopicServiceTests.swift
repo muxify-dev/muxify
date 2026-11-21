@@ -74,19 +74,21 @@ class TopicServiceTestCase: XCTestCase {
         guard socket.hasPrefix(root.path + "/") else { throw CancellationError() }
     }
 
-    /// The Topics list as the app orders it: Topic ids, `lock:` with the Session name for a Locked Session, and `_` for
+    /// The Topics list as the app orders it: Topic ids, `lock:` with the Session name for a Guest Session, and `_` for
     /// an Open Place.
     fileprivate func topicList() throws -> [String] {
         let windows = try server.snapshot().windows
-        let openPlaces = try TopicStore(paths: paths).read().openPlaces
-        return TopicOrder.sorted(TopicListEntry.all(records: try records(), windows: windows, openPlaces: openPlaces)).map { entry in
+        let contents = try TopicStore(paths: paths).read()
+        return TopicOrder.sorted(TopicListEntry.all(records: contents.records, locks: contents.locks, openPlaces: contents.openPlaces)).map { entry in
             switch entry {
             case .topic(let record): return record.title ?? record.id
-            case .lock(let lock): return "lock:" + (windows.first { $0.sessionID == lock.sessionID }?.sessionName ?? "?")
+            case .lock(let lock): return "lock:" + (windows.first { $0.savedSessionID == lock.id }?.sessionName ?? lock.name)
             case .openPlace: return "_"
             }
         }
     }
+
+    fileprivate func locks() throws -> [SessionLock] { try TopicStore(paths: paths).read().locks }
 
     /// A Topic with a Session in game and one in tools.
     fileprivate func twoSessionPathTopic(_ title: String) throws -> String {
@@ -887,7 +889,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
         _ = try change(service().handle(EnvironmentRequest(.benchTopic, target: .sessionName("notes"))))
         XCTAssertEqual(try topicList(), ["First", "Second", "Third"])
-        XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "notes", SessionLock.option]), "")
+        XCTAssertEqual(try locks(), [], "Bench ends the Lock")
     }
 
     func testALockedSessionThatGoesIntoATopicLosesItsLock() throws {
@@ -907,7 +909,70 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         let chores = try XCTUnwrap(SessionID(rawValue: try server.snapshot().windows.first { $0.sessionName == "chores" }!.sessionID))
         _ = try change(service().handle(EnvironmentRequest(.move(to: .topic(.named("Second"))), target: .session(chores))))
         XCTAssertEqual(try topicList(), ["First", "Second", "Notes work"], "the Topic that the Session moves to keeps its place")
-        XCTAssertTrue(try server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
+        XCTAssertEqual(try locks(), [], "each Lock ends")
+    }
+
+    func testKillingAGuestSessionOrItsOnlyWindowEndsItsLock() throws {
+        for name in ["notes", "chores"] { try server.run(["new-session", "-d", "-s", name, "-c", sessionPath.folder.path]) }
+        for name in ["notes", "chores"] { _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName(name)))) }
+        XCTAssertEqual(try locks().count, 2)
+        _ = try change(service().handle(EnvironmentRequest(.killSession, target: .sessionName("notes"))))
+        XCTAssertEqual(try locks().map(\.name), ["chores"], "Kill Session ends the Lock")
+        let window = try XCTUnwrap(WindowID(rawValue: try server.snapshot().windows.first { $0.sessionName == "chores" }!.id))
+        _ = try change(service().handle(EnvironmentRequest(.killWindow, target: .window(window))))
+        XCTAssertEqual(try locks(), [], "a kill of the only Window ends the Session, and its Lock")
+    }
+
+    func testAGuestSessionCardMoveWritesItsOrder() throws {
+        try regularTopic("First", using: service())
+        for name in ["notes", "chores"] {
+            try server.run(["new-session", "-d", "-s", name, "-c", sessionPath.folder.path])
+            _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName(name))))
+        }
+        XCTAssertEqual(try topicList(), ["First", "lock:notes", "lock:chores"])
+        _ = try change(service().handle(EnvironmentRequest(.moveSession(to: .up), target: .sessionName("chores"))))
+        XCTAssertEqual(try topicList(), ["First", "lock:chores", "lock:notes"], "the order is in the Locks, so it survives a restart")
+    }
+
+    func testALockThatAnOlderMuxifyKeptInTmuxIsImportedByARequest() throws {
+        try regularTopic("First", using: service())
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        try server.run(["set-option", "-t", "notes", SessionLock.legacyOption, "5"])
+        guard case .snapshot(let shown) = service().handle(EnvironmentRequest(.environmentShow)) else { return XCTFail("no snapshot") }
+        let notes = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "notes" })
+        XCTAssertEqual(shown.cards.last, .session(notes.sessionID, mark: nil), "the Guest Session keeps its card")
+        XCTAssertEqual(try locks().map(\.order), [5])
+        XCTAssertEqual(try locks().first?.id, notes.savedSessionID, "the Session points at its new Lock")
+        XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "notes", SessionLock.legacyOption]).trimmingCharacters(in: .whitespacesAndNewlines), "")
+    }
+
+    func testADormantGuestSessionReopensWithItsWindowsAtItsPlaceAndBenchEndsIt() throws {
+        try regularTopic("First", using: service())
+        for name in ["notes", "chores"] { try server.run(["new-session", "-d", "-s", name, "-c", sessionPath.folder.path]) }
+        try server.run(["new-window", "-d", "-t", "notes:", "-n", "logs", "-c", tools.folder.path])
+        for name in ["notes", "chores"] { _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName(name)))) }
+        let lock = try XCTUnwrap(try locks().first { $0.name == "notes" })
+        // The Session ends with no Muxify to see it, as when tmux stops: its Lock stays, Dormant.
+        try server.run(["kill-session", "-t", "notes"])
+        guard case .snapshot(let dormant) = service().handle(EnvironmentRequest(.environmentShow)) else { return XCTFail("no snapshot") }
+        let chores = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "chores" }?.sessionID)
+        guard case .inPlay(_, _, let guests, _) = dormant.unpinned else { return XCTFail("no In Play") }
+        XCTAssertEqual(guests, [.dormantSession(id: lock.id, name: "notes"), .session(chores, mark: nil)], "the Dormant card keeps its place")
+
+        let reopened = try change(service().handle(EnvironmentRequest(.reopen, target: .guestSession(lock.id))))
+        let session = try XCTUnwrap(reopened.session?.rawValue)
+        let windows = try server.snapshot().windows.filter { $0.sessionID == session }
+        XCTAssertEqual(windows.map(\.name), [windows.first?.name ?? "", "logs"], "Reopen creates its Windows")
+        XCTAssertEqual(windows.first?.sessionName, "notes")
+        XCTAssertEqual(windows.first?.savedSessionID, lock.id, "the new Session points at the same Lock")
+        XCTAssertEqual(try topicList(), ["First", "lock:notes", "lock:chores"], "the card is live again, at its place")
+
+        try server.run(["kill-session", "-t", session])
+        _ = try change(service().handle(EnvironmentRequest(.moveSession(to: .down), target: .guestSession(lock.id))))
+        XCTAssertEqual(try topicList(), ["First", "lock:chores", "lock:notes"], "a Dormant card moves too")
+        _ = try change(service().handle(EnvironmentRequest(.benchTopic, target: .guestSession(lock.id))))
+        XCTAssertEqual(try topicList(), ["First", "lock:chores"], "Bench of a Dormant Guest Session ends its Lock")
+        XCTAssertEqual(try failure(service().handle(EnvironmentRequest(.reopen, target: .guestSession(lock.id)))).kind, .sourceUnavailable)
     }
 
     func testANewTopicFromTheLastWindowOrPaneOfAGuestSessionTakesItsPlace() throws {
@@ -945,12 +1010,11 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         let returning = try regularTopic("Returning", using: one)
         XCTAssertEqual(try topicList(), ["First", "Returning"])
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        try server.run(["set-option", "-t", "notes", SessionLock.option, String(Double.greatestFiniteMagnitude)])
+        try server.run(["set-option", "-t", "notes", SessionLock.legacyOption, String(Double.greatestFiniteMagnitude)])
         try TopicStore(paths: paths).write { try $0.update(returning) { $0.settledAt = "2026-10-01T00:00:00Z" } }
         _ = try change(one.handle(EnvironmentRequest(.reopen, target: .topic(.id(returning)))))
         XCTAssertEqual(try topicList(), ["First", "lock:notes", "Returning"])
-        let lockOrder = try XCTUnwrap(Double(server.run(["show-options", "-qv", "-t", "notes", SessionLock.option]).trimmingCharacters(in: .whitespacesAndNewlines)))
-        XCTAssertLessThan(lockOrder, Double.greatestFiniteMagnitude, "Reopen must save normalized Lock ranks to tmux")
+        XCTAssertLessThan(try XCTUnwrap(locks().first).order, Double.greatestFiniteMagnitude, "Reopen must save normalized Lock ranks")
         try TopicStore(paths: paths).write { try $0.update(returning) { $0.settledAt = "2026-10-01T00:00:00Z" } }
         _ = try change(one.handle(EnvironmentRequest(.startFresh, target: .topic(.id(returning)))))
         XCTAssertEqual(try topicList(), ["First", "lock:notes", "Returning"])
@@ -1032,7 +1096,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         XCTAssertEqual(came.topicID, try records().first { $0.title == "C" }?.id)
         XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "C", "D"], "the Lock of a Guest Session ends")
         XCTAssertEqual(try guests(), ["C"], "the card that comes In Play takes the Guest mark")
-        XCTAssertTrue(try server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
+        XCTAssertEqual(try locks(), [])
 
         let refused: [(EnvironmentService, EnvironmentTarget, TopicListRef, TopicFailure.Kind)] = [
             (inPlay, .topic(.named("D")), .topic(.named("B")), .cardNotInPlay),
@@ -1147,10 +1211,10 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         XCTAssertEqual(down.kind, .cardHidden)
         XCTAssertTrue(down.message.contains("Make it a Guest first: muxify topic make-guest --session"), down.message)
 
-        XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionName == "notes" && $0.lockOrder != nil })
+        XCTAssertEqual(try locks(), [])
         _ = try change(wide.handle(EnvironmentRequest(.moveSession(to: .up), target: .sessionName("notes"))))
         XCTAssertEqual(try topicList(), ["A", "B", "C", "lock:notes"], "Up on an unlocked Session is Make a Guest")
-        XCTAssertTrue(try server.snapshot().windows.contains { $0.sessionName == "notes" && $0.lockOrder != nil })
+        XCTAssertEqual(try locks().count, 1)
     }
 
     func testTheSidebarDragPutsAnInPlayCardNextToAnOpenPlace() throws {

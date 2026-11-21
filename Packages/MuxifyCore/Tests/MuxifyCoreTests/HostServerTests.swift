@@ -159,7 +159,7 @@ final class HostServerTests: XCTestCase {
         let client = try await connect()
         let session = try await client.connect()
         XCTAssertEqual(session.peerCapabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs",
-                                                  "status-line"])
+                                                  "status-line", "guest-sessions"])
         let recorder = subscribe(client)
         try await wait("no first item") { !recorder.items.isEmpty }
         let before = try windows(of: "work")
@@ -392,6 +392,28 @@ final class HostServerTests: XCTestCase {
         }
         XCTAssertEqual(recorder.items.last?.sidebar.topics, true)
         XCTAssertEqual(recorder.items.last?.snapshot.cards, recorder.items.first?.snapshot.cards, "only the sidebar changed")
+    }
+
+    func testOnlyAClientThatDeclaredGuestSessionsGetsTheLocksAndTheDormantCards() async throws {
+        let dormant = SessionLock(id: "gone", order: 0, session: .object(["name": .string("notes"), "directory": .string("/tmp")]))
+        try TopicStore(paths: paths).write { $0.lock(dormant) }
+
+        let newer = try await connect(capabilities: ["snapshot", "guest-sessions"])
+        let locks = subscribe(newer)
+        let shown = subscribeSnapshot(newer)
+        let older = try await connect(capabilities: ["snapshot"])
+        let plain = subscribe(older)
+        let olderShown = subscribeSnapshot(older)
+        try await wait("no first items") { !locks.items.isEmpty && !plain.items.isEmpty && !shown.items.isEmpty && !olderShown.items.isEmpty }
+
+        XCTAssertTrue(locks.keys.contains("guest_sessions"))
+        XCTAssertFalse(plain.keys.contains("guest_sessions"), "an older Mac shows a Guest Session as a No Topic Session")
+        XCTAssertEqual(shown.items.last?.snapshot.cards, [.dormantSession(id: "gone", name: "notes")])
+        XCTAssertEqual(olderShown.items.last?.snapshot.cards, [], "an older phone gets no card that it does not know")
+
+        let answer = try await older.call(HostRequest.environment(EnvironmentRequest(.environmentShow)), as: EnvironmentResponse.self)
+        guard case .snapshot(let snapshot) = answer else { return XCTFail("\(answer)") }
+        XCTAssertEqual(snapshot.cards, [])
     }
 
     func testAClientThatDidNotDeclareSnapshotGetsUnsupportedForTheSubscription() async throws {

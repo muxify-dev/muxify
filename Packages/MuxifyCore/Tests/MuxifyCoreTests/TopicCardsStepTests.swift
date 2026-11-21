@@ -11,7 +11,7 @@ final class TopicCardsStepTests: XCTestCase {
     private let places = 2
 
     private var cards: [TopicListEntry] {
-        TopicCards.order(records: ["a", "b", "c", "d", "e"].enumerated().map { topic($1, order: Double($0)) }, windows: [])
+        TopicCards.order(records: ["a", "b", "c", "d", "e"].enumerated().map { topic($1, order: Double($0)) })
     }
 
     func testAShownBenchReordersAndItsTopMakesAGuest() {
@@ -38,7 +38,7 @@ final class TopicCardsStepTests: XCTestCase {
     private func cards(_ list: String) -> [TopicListEntry] {
         list.split(separator: " ").filter { $0 != "+" && $0 != "|" }.enumerated().map { order, card in
             if card == "_" { return .openPlace(OpenPlace(id: "open", order: Double(order))) }
-            if card.hasPrefix("~") { return .lock(SessionLock(sessionID: String(card.dropFirst()), order: Double(order))) }
+            if card.hasPrefix("~") { return .lock(SessionLock(id: String(card.dropFirst()), order: Double(order))) }
             var record = topic(String(card).replacingOccurrences(of: "📌", with: "").replacingOccurrences(of: "(G)", with: ""), order: Double(order))
             record.isPinned = card.hasPrefix("📌")
             record.isGuest = card.hasSuffix("(G)")
@@ -65,7 +65,7 @@ final class TopicCardsStepTests: XCTestCase {
             ("a b + ~s | c", "~s", .down, .bench, "Down from the last Guest Unlocks the Session"),
         ]
         for (list, card, step, outcome, why) in cases {
-            let id: TopicListID = card.hasPrefix("~") ? .lock(sessionID: String(card.dropFirst())) : .topic(card)
+            let id: TopicListID = card.hasPrefix("~") ? .lock(String(card.dropFirst())) : .topic(card)
             XCTAssertEqual(TopicCards.step(id, step, in: cards(list), inPlay: places), outcome, "\(list): \(card) \(step): \(why)")
         }
     }

@@ -63,10 +63,14 @@ public enum EnvironmentTarget: Codable, Hashable, Sendable {
     case sessionName(String)
     case window(WindowID)
     case pane(PaneID)
+    /// A Guest Session, live or Dormant, by its Lock id: Reopen, Bench and the card moves take it, also when tmux has no
+    /// Session for it.
+    case guestSession(String)
 
     private enum CodingKeys: String, CodingKey {
         case topic, session, window, pane
         case sessionName = "session_name"
+        case guestSession = "guest_session"
     }
 
     public init(from decoder: Decoder) throws {
@@ -75,6 +79,7 @@ public enum EnvironmentTarget: Codable, Hashable, Sendable {
         else if let session = try values.decodeIfPresent(SessionID.self, forKey: .session) { self = .session(session) }
         else if let name = try values.decodeIfPresent(String.self, forKey: .sessionName) { self = .sessionName(name) }
         else if let window = try values.decodeIfPresent(WindowID.self, forKey: .window) { self = .window(window) }
+        else if let lock = try values.decodeIfPresent(String.self, forKey: .guestSession) { self = .guestSession(lock) }
         else { self = .pane(try values.decode(PaneID.self, forKey: .pane)) }
     }
 
@@ -86,6 +91,7 @@ public enum EnvironmentTarget: Codable, Hashable, Sendable {
         case .sessionName(let name): try values.encode(name, forKey: .sessionName)
         case .window(let window): try values.encode(window, forKey: .window)
         case .pane(let pane): try values.encode(pane, forKey: .pane)
+        case .guestSession(let lock): try values.encode(lock, forKey: .guestSession)
         }
     }
 }
@@ -220,16 +226,23 @@ public enum CardMove: Codable, Hashable, Sendable {
     private enum TradeCodingKeys: String, CodingKey { case _0 = "card" }
 }
 
-/// A card on the wire: a Topic, a Locked Session by its tmux id, or an Open Place by its id. An Open Place is only an
-/// anchor: the Sidebar drag puts a card before or after it.
+/// A card on the wire: a Topic, a live Guest Session by its tmux id, a Guest Session, live or Dormant, by its Lock id, or
+/// an Open Place by its id. An Open Place is only an anchor: the Sidebar drag puts a card before or after it.
 public enum TopicListRef: Codable, Hashable, Sendable {
     case topic(TopicRef)
     case lock(SessionID)
     case openPlace(String)
+    case guestSession(String)
+
+    private enum CodingKeys: String, CodingKey {
+        case topic, lock, openPlace
+        case guestSession = "guest_session"
+    }
 
     private enum TopicCodingKeys: String, CodingKey { case _0 = "ref" }
     private enum LockCodingKeys: String, CodingKey { case _0 = "session" }
     private enum OpenPlaceCodingKeys: String, CodingKey { case _0 = "id" }
+    private enum GuestSessionCodingKeys: String, CodingKey { case _0 = "id" }
 }
 
 /// Where `move` puts its target.
@@ -303,14 +316,15 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// one that the Topic made for that Session, as Forget does.
     case removeAndKill(worktrees: [String])
     case rename(title: String)
-    /// Creates the remembered Sessions, Windows, Tabs and Agents of a Dormant or Settled Topic again.
+    /// Creates the remembered Sessions, Windows, Tabs and Agents of a Dormant or Settled Topic again. With a
+    /// `guest_session` target, it creates the Session of a Dormant Guest Session again, and shows a live one.
     case reopen
     /// Creates one Session with one shell Window in each SessionPath that a Dormant or Settled Topic remembers.
     case startFresh
     /// Puts the target Session before or after another Session of its Topic, or one place up or down. From then on
-    /// the Topic keeps its Sessions in the order the user gave them. `up` and `down` on a Locked Session, which is in
-    /// no Topic, move its card, as `moveCard` does. `up` on a Session in no Topic that is not Locked Locks it, which
-    /// makes it a Guest.
+    /// the Topic keeps its Sessions in the order the user gave them. `up` and `down` on a Guest Session, which is in
+    /// no Topic, move its card, as `moveCard` does, also when a `guest_session` target names a Dormant one. `up` on a
+    /// Session in no Topic that is not Locked Locks it, which makes it a Guest.
     case moveSession(to: TopicSessionPlacement)
     /// The target Topic lists its Sessions by when tmux created them again, in the Config's order.
     case sortSessions
@@ -343,7 +357,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// Pins or unpins the target's open Topic. A Topic that already has that Pin does not change.
     case pin
     case unpin
-    /// Moves the card of the target's Topic, or of the target's Locked Session, among the cards with its Pin, or across the In Play lines.
+    /// Moves the card of the target's Topic, or of the target's Guest Session, among the cards with its Pin, or across the In Play lines.
     case moveCard(CardMove)
     /// Choose In Play: the first `topics.in_play` of `cards` fill the In Play places in this order, and the places after
     /// the last of them are Open Places. A Guest Topic that fills a place loses its Guest mark. Of the other cards, the
@@ -354,12 +368,12 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// to the end of the Bench.
     case replaceFromBench(with: TopicListRef)
     /// Make a Guest: the target's Benched Topic goes to the end of the Guests with the Guest mark, and no card goes to
-    /// the Bench for it. A target Session in no Topic gets a Lock, which makes it a Guest Session at the end of the
-    /// Guests (ADR 0018, ADR 0061). A Guest does not change.
+    /// the Bench for it. A target Session in no Topic gets a Lock in the state database, which makes it a Guest Session
+    /// at the end of the Guests (ADR 0061). A Guest does not change.
     case makeGuest
     /// Bench: the target's In Play Topic goes to the top of the Bench without a Guest mark. A Topic in an In Play
-    /// place leaves an Open Place there; a Guest Topic leaves none. Bench of a target Guest Session ends its Lock, and
-    /// the other Guests keep their positions.
+    /// place leaves an Open Place there; a Guest Topic leaves none. Bench of a target Guest Session, live or Dormant,
+    /// ends its Lock, and the other Guests keep their positions.
     case benchTopic
     /// The target's Guest Topic or Benched Topic fills the Open Place at In Play place `place`, counted from 1, and
     /// loses its Guest mark. No other card moves.

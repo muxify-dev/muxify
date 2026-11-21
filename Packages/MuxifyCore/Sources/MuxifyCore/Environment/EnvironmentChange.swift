@@ -9,15 +9,18 @@ public enum EnvironmentChange: Equatable {
     case topic(String, TopicRecord?)
     /// The Open Places of the Topics list.
     case openPlaces([OpenPlace])
+    /// The Locks of the Topics list, live or Dormant.
+    case locks([SessionLock])
     /// The server as a whole: its Clients, the last Window, whether it runs, its socket and home.
     case server(EnvironmentServer)
 
-    /// What the event replaces: `session <id>`, `topic <id>`, `open_places` or `server`.
+    /// What the event replaces: `session <id>`, `topic <id>`, `open_places`, `guest_sessions` or `server`.
     public var key: String {
         switch self {
         case .session(let id, _): "session \(id)"
         case .topic(let id, _): "topic \(id)"
         case .openPlaces: "open_places"
+        case .locks: "guest_sessions"
         case .server: "server"
         }
     }
@@ -73,13 +76,14 @@ public struct EnvironmentState: Equatable {
     public private(set) var sessions: [String: EnvironmentSession] = [:]
     public private(set) var topics: [String: TopicRecord] = [:]
     public private(set) var openPlaces: [OpenPlace] = []
+    public private(set) var locks: [SessionLock] = []
     public private(set) var server: EnvironmentServer?
 
     public init() {}
 
-    /// The Topic records in id order, as the state database lists them, and the Open Places.
+    /// The Topic records in id order, as the state database lists them, the Open Places and the Locks.
     public var topicContents: TopicContents {
-        TopicContents(records: topics.values.sorted { $0.id < $1.id }, openPlaces: openPlaces)
+        TopicContents(records: topics.values.sorted { $0.id < $1.id }, openPlaces: openPlaces, locks: locks)
     }
 
     /// The server as these events show it, in tmux's order: Sessions by name, each with its Windows and Panes in
@@ -102,7 +106,7 @@ public struct EnvironmentState: Equatable {
     public var all: [EnvironmentChange] {
         sessions.sorted { $0.key < $1.key }.map { .session($0.key, $0.value) }
             + topics.values.sorted { $0.id < $1.id }.map { .topic($0.id, $0) }
-            + [.openPlaces(openPlaces)]
+            + [.openPlaces(openPlaces), .locks(locks)]
             + (server.map { [.server($0)] } ?? [])
     }
 
@@ -112,6 +116,7 @@ public struct EnvironmentState: Equatable {
             case .session(let id, let session): sessions[id] = session
             case .topic(let id, let record): topics[id] = record
             case .openPlaces(let places): openPlaces = places
+            case .locks(let locks): self.locks = locks
             case .server(let server): self.server = server
             }
         }
@@ -138,7 +143,7 @@ public struct EnvironmentState: Equatable {
     }
 
     /// The events that bring this state to `contents`: a record that differs, one that is gone, and the Open Places
-    /// when they differ. With `all`, every record and the Open Places.
+    /// and the Locks when they differ. With `all`, every record, the Open Places and the Locks.
     public func changes(to contents: TopicContents, all: Bool = false) -> [EnvironmentChange] {
         var changes: [EnvironmentChange] = []
         let ids = Set(contents.records.map(\.id))
@@ -149,6 +154,7 @@ public struct EnvironmentState: Equatable {
             changes.append(.topic(id, nil))
         }
         if all || openPlaces != contents.openPlaces { changes.append(.openPlaces(contents.openPlaces)) }
+        if all || locks != contents.locks { changes.append(.locks(contents.locks)) }
         return changes
     }
 

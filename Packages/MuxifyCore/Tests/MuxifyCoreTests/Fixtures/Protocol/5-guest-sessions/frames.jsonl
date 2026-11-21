@@ -1,0 +1,10 @@
+{"hello":{"build":"muxify 1a2b3c4 1763100000","capabilities":["request","snapshot","topic-detail","ranked-session-paths","browser-tabs","status-line","guest-sessions"],"min_protocol":2,"protocol":2},"id":0,"kind":"hello"}
+{"hello":{"build":"muxify 1a2b3c4 1763100000","capabilities":["status-line","guest-sessions"],"nonce":"0a1b2c3d","protocol":2},"id":0,"kind":"hello"}
+{"id":1,"kind":"request","request":{"subscribe":{"environment":{}}}}
+{"id":1,"item":{"changes":[{"guest_sessions":[{"id":"s1","order":3,"session":{"base_name":"notes","directory":"/work/notes","id":"s1","name":"notes","windows":[]}}]}]},"kind":"item"}
+{"id":2,"kind":"request","request":{"environment":{"command":{"reopen":{}},"target":{"guest_session":"s1"},"version":2}}}
+{"end":{"ok":{"changed":{"created":false,"session":"$4","session_name":"notes"}}},"id":2,"kind":"end"}
+{"id":3,"kind":"request","request":{"environment":{"command":{"move_card":{"move":{"after":{"card":{"guest_session":{"id":"s1"}}}}}},"target":{"guest_session":"s2"},"version":2}}}
+{"end":{"ok":{"changed":{"created":false}}},"id":3,"kind":"end"}
+{"id":4,"kind":"request","request":{"subscribe":{"snapshot":{}}}}
+{"id":4,"item":{"no_topic":[],"pinned":[],"sessions":[],"sidebar":{"sessions":true,"topics":true},"tags":[],"unpinned":{"bench":[],"guests":[{"id":"s1","kind":"dormant_session","name":"notes","sessions":[]}],"kind":"in_play","limit":3,"places":[]}},"kind":"item"}

@@ -1,60 +1,49 @@
 import Foundation
 
-/// One card of the Topics list: an open Topic, a Locked Session or an Open Place.
+/// One card of the Topics list: an open Topic, a Lock or an Open Place.
 public enum TopicListID: Hashable, Sendable {
     case topic(String)
-    case lock(sessionID: String)
+    /// A Lock, by its id: the row id of the `guest_sessions` table.
+    case lock(String)
     case openPlace(String)
 }
 
-/// A Locked Session's place in the Topics list (ADR 0018). tmux keeps it in the Session option `@muxify_lock`, in the
-/// same order scale as the Topic records.
-public struct SessionLock: Hashable, Sendable {
-    public static let option = "@muxify_lock"
+/// A Lock: the row of the `guest_sessions` table that makes a No Topic Session a Guest Session. It keeps the card's
+/// order, in the same scale as the Topic records, and the Session's Remembered Session, in the shape of one entry of a
+/// Topic record's `sessions`. The live Session points at it with `@muxify_session_id`, so a tmux restart does not end
+/// it: with no such Session, the Guest Session is Dormant, and Reopen creates its Session again.
+public struct SessionLock: Codable, Equatable, Sendable {
+    /// The tmux option where an older Muxify kept a Lock's order. Muxify reads it once, to import that Lock.
+    public static let legacyOption = "@muxify_lock"
 
-    public let sessionID: String
+    public let id: String
     public var order: Double
+    public var session: JSONValue
 
-    public init(sessionID: String, order: Double) {
-        self.sessionID = sessionID
+    public init(id: String, order: Double, session: JSONValue = .object([:])) {
+        self.id = id
         self.order = order
+        self.session = session
     }
 
-    /// The Locks of the Sessions in `windows`. Only a No Topic Session can be Locked, so a Session in an open Topic
-    /// has no Lock, whatever its option says.
-    public static func locks(in windows: [TmuxWindow], records: [TopicRecord]) -> [SessionLock] {
-        let open = Set(records.filter { $0.settledAt == nil }.map(\.id))
-        var seen: Set<String> = []
-        return windows.compactMap { window in
-            guard seen.insert(window.sessionID).inserted, let order = window.lockOrder,
-                  window.topicID.map({ !open.contains($0) }) ?? true else { return nil }
-            return SessionLock(sessionID: window.sessionID, order: order)
-        }
+    /// The Session's name when Muxify last saw it live.
+    public var name: String { session["name"]?.string ?? id }
+
+    /// The Windows of the live Guest Session: those of the first Session that points at this Lock and is in no open
+    /// Topic, `open`. A Session in an open Topic is never a Guest Session, whatever its `@muxify_session_id` says.
+    public func windows(in windows: [TmuxWindow], open: Set<String>) -> [TmuxWindow] {
+        let linked = windows.filter { $0.savedSessionID == id && $0.topicID.map { !open.contains($0) } ?? true }
+        guard let first = linked.first else { return [] }
+        return linked.filter { $0.sessionID == first.sessionID }
     }
 
-    public var setOption: [String] { ["set-option", "-t", sessionID, Self.option, String(order)] }
+    private enum CodingKeys: String, CodingKey { case id, order, session }
 
-    /// The tmux command that ends the Lock of a Session.
-    public static func unsetOption(_ sessionID: String) -> [String] { ["set-option", "-u", "-t", sessionID, option] }
-}
-
-/// What a write of the Topics list changes in tmux: a Lock gets a new order, or a Lock ends.
-public enum SessionLockChange: Equatable, Sendable {
-    case set(SessionLock)
-    case end(sessionID: String)
-
-    public var sessionID: String {
-        switch self {
-        case .set(let lock): return lock.sessionID
-        case .end(let sessionID): return sessionID
-        }
-    }
-
-    public var command: [String] {
-        switch self {
-        case .set(let lock): return lock.setOption
-        case .end(let sessionID): return SessionLock.unsetOption(sessionID)
-        }
+    /// As every key of the `environment` subscription, each one but the id decodes when it is missing.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try values.decode(String.self, forKey: .id), order: try values.decodeIfPresent(Double.self, forKey: .order) ?? 0,
+                  session: try values.decodeIfPresent(JSONValue.self, forKey: .session) ?? .object([:]))
     }
 }
 
@@ -76,16 +65,15 @@ public enum TopicListEntry: Equatable, Sendable {
     case lock(SessionLock)
     case openPlace(OpenPlace)
 
-    /// The open and Settled Topics of `records`, the Locks of the Sessions in `windows`, and the Open Places.
-    public static func all(records: [TopicRecord], windows: [TmuxWindow], openPlaces: [OpenPlace] = []) -> [TopicListEntry] {
-        records.map(TopicListEntry.topic) + SessionLock.locks(in: windows, records: records).map(TopicListEntry.lock)
-            + openPlaces.map(TopicListEntry.openPlace)
+    /// The open and Settled Topics of `records`, the Locks, live or Dormant, and the Open Places.
+    public static func all(records: [TopicRecord], locks: [SessionLock] = [], openPlaces: [OpenPlace] = []) -> [TopicListEntry] {
+        records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) + openPlaces.map(TopicListEntry.openPlace)
     }
 
     public var id: TopicListID {
         switch self {
         case .topic(let record): return .topic(record.id)
-        case .lock(let lock): return .lock(sessionID: lock.sessionID)
+        case .lock(let lock): return .lock(lock.id)
         case .openPlace(let place): return .openPlace(place.id)
         }
     }
@@ -132,7 +120,7 @@ public enum TopicListEntry: Equatable, Sendable {
     fileprivate var tieBreak: String {
         switch self {
         case .topic(let record): return record.id
-        case .lock(let lock): return lock.sessionID
+        case .lock(let lock): return lock.id
         case .openPlace(let place): return place.id
         }
     }
@@ -237,8 +225,8 @@ public enum TopicPlacement: Equatable, Sendable {
     }
 }
 
-/// What a change of the Topics list writes: the entries with a new order or a new mark, the Locks that end, and the
-/// Open Places that close.
+/// What a change of the Topics list writes: the entries with a new order or a new mark, the ids of the Locks that end,
+/// and the Open Places that close.
 public struct TopicListChange: Equatable, Sendable {
     public var entries: [TopicListEntry]
     public var endedLocks: [String]
@@ -389,7 +377,7 @@ public enum TopicOrder {
         var zone = inPlay + cut.bench.filter { $0.id != benched }
         var ended: [String] = []
         switch replaced {
-        case .lock(let lock): ended.append(lock.sessionID)
+        case .lock(let lock): ended.append(lock.id)
         case .openPlace: break
         case .topic: zone.append(replaced.guest(false))
         }
@@ -416,7 +404,7 @@ public enum TopicOrder {
         func landing(_ entry: TopicListEntry, in section: Section) throws -> TopicListEntry? {
             switch (entry, section) {
             case (.lock, .places): throw Failure.guestSession
-            case (.lock(let lock), .bench): ended.append(lock.sessionID); return nil
+            case (.lock(let lock), .bench): ended.append(lock.id); return nil
             case (.openPlace, .guests), (.openPlace, .bench): return nil
             default: return entry.guest(section == .guests)
             }
@@ -526,10 +514,12 @@ public enum TopicOrder {
         sorted(entries).filter { !$0.isPinned }.map(\.id) == layout(entries, inPlay: inPlay).map(\.id)
     }
 
-    /// Locks the Session at the end of the Guests.
-    static func appendingLock(of sessionID: String, inPlay: Int, in entries: [TopicListEntry]) -> [TopicListEntry] {
+    /// Puts a new Lock at the end of the Guests.
+    static func appendingLock(_ lock: SessionLock, inPlay: Int, in entries: [TopicListEntry]) -> [TopicListEntry] {
+        var lock = lock
         // NaN is never an index, so a renumber gives the new Lock its order too.
-        let source = TopicListEntry.lock(SessionLock(sessionID: sessionID, order: .nan))
+        lock.order = .nan
+        let source = TopicListEntry.lock(lock)
         let cut = cut(entries, inPlay: inPlay)
         return normalized(cut.places + cut.guests + [source] + cut.bench, from: layout(entries, inPlay: inPlay))
     }

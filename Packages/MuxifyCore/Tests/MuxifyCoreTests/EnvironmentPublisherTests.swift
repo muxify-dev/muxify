@@ -56,7 +56,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         try await wait("no first item") { !recorder.items.isEmpty }
         let first = try XCTUnwrap(recorder.items.first)
         XCTAssertEqual(Set(first.map(\.key)), ["session \(try sessionID("work"))", "session \(try sessionID("other"))",
-                                               "topic first", "open_places", "server"])
+                                               "topic first", "open_places", "guest_sessions", "server"])
         guard case .server(let state)? = first.first(where: { $0.key == "server" }) else { return XCTFail("no server event") }
         XCTAssertTrue(state.isRunning)
         XCTAssertEqual(state.socketPath, socket)
@@ -593,6 +593,55 @@ final class EnvironmentPublisherTests: XCTestCase {
 
     private func probeCommand(_ answer: String) -> String {
         colourProbes.probeCommand(answer)
+    }
+
+    // MARK: - Guest Sessions
+
+    func testAGuestSessionThatEndsOnTheSameServerEndsItsLockAndATmuxRestartKeepsItDormant() async throws {
+        for name in ["work", "notes", "scratch"] { try server.run(["new-session", "-d", "-s", name]) }
+        try server.run(["new-window", "-d", "-t", "=scratch:"])
+        let service = EnvironmentService(paths: paths, server: server)
+        for name in ["notes", "scratch"] {
+            guard case .changed = service.handle(EnvironmentRequest(.makeGuest, target: .sessionName(name))) else { return XCTFail(name) }
+        }
+        let store = TopicStore(paths: paths)
+        let recorder = start()
+        try await wait("no first item") { recorder.server?.isRunning == true }
+        let first = try XCTUnwrap(recorder.server?.serverID)
+
+        try server.run(["kill-session", "-t", "=notes"])
+        try await wait("the Lock of a Guest Session that ended on the same server stayed", seconds: 10) {
+            try store.read().locks.map(\.name) == ["scratch"]
+        }
+
+        try server.run(["kill-server"])
+        try server.run(["new-session", "-d", "-s", "work"])
+        try await wait("the publisher did not read the new server", seconds: 10) {
+            recorder.server?.isRunning == true && recorder.server?.serverID != first
+        }
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        let dormant = try XCTUnwrap(store.read().locks.first, "a tmux restart ended the Lock")
+        XCTAssertEqual(dormant.name, "scratch")
+        XCTAssertEqual(dormant.session["windows"]?.array?.count, 2, "the Lock keeps the Windows to Reopen")
+        XCTAssertTrue(recorder.items.joined().contains { if case .locks(let locks) = $0 { locks.map(\.id) == [dormant.id] } else { false } },
+                      "the Locks go out on the subscription")
+    }
+
+    func testALockThatAnOlderMuxifyKeptInTmuxIsImportedOnce() async throws {
+        try server.run(["new-session", "-d", "-s", "work"])
+        try server.run(["new-session", "-d", "-s", "notes"])
+        try server.run(["set-option", "-t", "=notes:", SessionLock.legacyOption, "7"])
+        let store = TopicStore(paths: paths)
+        _ = start()
+        try await wait("the Lock was not imported", seconds: 10) { try store.read().locks.count == 1 }
+        let lock = try XCTUnwrap(store.read().locks.first)
+        XCTAssertEqual(lock.order, 7, "the Lock keeps its order")
+        XCTAssertEqual(lock.name, "notes")
+        try await wait("the option stayed", seconds: 5) {
+            try self.server.run(["show-options", "-qv", "-t", "=notes:", SessionLock.legacyOption]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "=notes:", "@muxify_session_id"]).trimmingCharacters(in: .whitespacesAndNewlines),
+                       lock.id, "the Session points at its new Lock")
     }
 
     private final class Recorder: @unchecked Sendable {

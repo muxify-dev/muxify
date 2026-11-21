@@ -17,6 +17,7 @@ extension EnvironmentChange: Codable {
     private enum CodingKeys: String, CodingKey {
         case session, topic, value
         case openPlaces = "open_places"
+        case locks = "guest_sessions"
         case server
     }
 
@@ -28,6 +29,8 @@ extension EnvironmentChange: Codable {
             self = .topic(id, try values.decodeIfPresent(TopicRecord.self, forKey: .value))
         } else if let places = try values.decodeIfPresent([OpenPlace].self, forKey: .openPlaces) {
             self = .openPlaces(places)
+        } else if let locks = try values.decodeIfPresent([SessionLock].self, forKey: .locks) {
+            self = .locks(locks)
         } else if let server = try values.decodeIfPresent(EnvironmentServer.self, forKey: .server) {
             self = .server(server)
         } else {
@@ -45,6 +48,7 @@ extension EnvironmentChange: Codable {
             try values.encode(id, forKey: .topic)
             try values.encode(record, forKey: .value)
         case .openPlaces(let places): try values.encode(places, forKey: .openPlaces)
+        case .locks(let locks): try values.encode(locks, forKey: .locks)
         case .server(let server): try values.encode(server, forKey: .server)
         }
     }
@@ -205,7 +209,9 @@ extension TmuxPane: Codable {
 }
 
 /// The fields that tmux and the Topic options give a Window. The Mac's own (`homeDirectory`, `hostName`,
-/// `isRemote`, `sourceID`) stay off the wire: it stamps them from the `server` event.
+/// `isRemote`, `sourceID`) stay off the wire: it stamps them from the `server` event. The Host imports a Lock that an
+/// older Muxify kept in `@muxify_lock` itself, so the option stays off the wire too, and an older Host's `lock_order`
+/// is a key that the Mac does not read.
 extension TmuxWindow: Codable {
     private enum CodingKeys: String, CodingKey {
         case id
@@ -223,7 +229,6 @@ extension TmuxWindow: Codable {
         case openRequests = "open_requests"
         case topicID = "topic_id"
         case savedSessionID = "saved_session_id"
-        case lockOrder = "lock_order"
         case sessionPath = "session_path"
         case activePaneID = "active_pane_id"
         case startCommand = "start_command"
@@ -252,7 +257,6 @@ extension TmuxWindow: Codable {
                   openRequests: try values.decodeIfPresent([String].self, forKey: .openRequests) ?? [],
                   topicID: try values.decodeIfPresent(String.self, forKey: .topicID),
                   savedSessionID: try values.decodeIfPresent(String.self, forKey: .savedSessionID) ?? "",
-                  lockOrder: try values.decodeIfPresent(Double.self, forKey: .lockOrder),
                   sessionPath: try values.decodeIfPresent(String.self, forKey: .sessionPath) ?? "",
                   activePaneID: try values.decodeIfPresent(String.self, forKey: .activePaneID) ?? "",
                   startCommand: try values.decodeIfPresent(String.self, forKey: .startCommand) ?? "",
@@ -281,7 +285,6 @@ extension TmuxWindow: Codable {
         try values.encode(openRequests, forKey: .openRequests)
         try values.encodeIfPresent(topicID, forKey: .topicID)
         try values.encode(savedSessionID, forKey: .savedSessionID)
-        try values.encodeIfPresent(lockOrder, forKey: .lockOrder)
         try values.encode(sessionPath, forKey: .sessionPath)
         try values.encode(activePaneID, forKey: .activePaneID)
         try values.encode(startCommand, forKey: .startCommand)

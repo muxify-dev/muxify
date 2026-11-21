@@ -141,8 +141,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var topicRequests: [TopicIntent] = []
     /// The card whose queued step is running; a failure of it drops that card's other queued steps.
     @ObservationIgnored private var stepInFlight: GuestCard?
-    /// A Topic change ended and no snapshot after it is applied yet. Locks are tmux options, so until then the model
-    /// can show a Session's Lock as it was before the change, and a queued step waits.
+    /// A Topic change ended and no snapshot after it is applied yet. A Session points at its Lock with a tmux option,
+    /// so until then the model can show a new Guest Session as Dormant, and a queued step waits.
     @ObservationIgnored private var topicSnapshotPending = false
     private static let queuedMoveLimit = 4
 
@@ -211,14 +211,18 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.newSession(sessionPath: directory.path, name: name)), presenting: .newSession(directory))
     }
 
-    /// Goes to the Topic because the user asked to: a click, a Hint key, ↩ on its palette row or Go to Topic.
-    /// A Dormant Topic that remembers a Session is Reopened at once; any other Topic shows as in `showTopic`.
+    /// Goes to the Topic because the user asked to: a click, a Hint key, ↩ on its palette row, Go to Topic or Next
+    /// Topic. A Dormant Topic that remembers a Session and a Dormant Guest Session are Reopened at once; any other card
+    /// shows as in `showTopic`.
     func goToTopic(_ id: TopicGroupID) {
-        if case .topic(let topicID) = id, entryWindow(of: id) == nil, !changingTopic, reopensOnArrival(topicID) {
-            reopenTopic(topicID, .reopen)
-        } else {
-            showTopic(id)
+        if entryWindow(of: id) == nil, !changingTopic {
+            switch id {
+            case .topic(let topicID) where reopensOnArrival(topicID): return reopenTopic(topicID, .reopen)
+            case .locked(let lock) where locks.contains(where: { $0.id == lock }): return reopenGuestSession(lock)
+            case .topic, .locked, .noTopic: break
+            }
         }
+        showTopic(id)
     }
 
     /// Shows the Topic without creating anything, as Next Topic does: its entry Window, or its Reopen choice when it
@@ -283,10 +287,7 @@ final class WorkspaceStore {
     private func entryWindow(of id: TopicGroupID) -> TmuxWindow? {
         if id == .noTopic {
             let open = Set(records.filter { $0.settledAt == nil }.map(\.id))
-            let locked = Set(topics.rows.compactMap { row -> String? in
-                if case .locked(let sessionID) = row.id { return sessionID }
-                return nil
-            })
+            let locked = topics.lockedSessionIDs
             let members = windows.filter { ($0.topicID.map { !open.contains($0) } ?? true) && !locked.contains($0.sessionID) }
             if let last = members.first(where: { $0.id == topicSelection.lastWindowByGroup[.noTopic] }) { return last }
             return EntryWindow.ofSession(members)
@@ -374,10 +375,12 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.moveCard(step == .up ? .up : .down), target: target))
     }
 
+    /// A Guest Session's card goes by its Lock id, live or Dormant. Only a server that sends Locks gives the Sidebar a
+    /// Guest Session's card, and such a server takes the `guest_session` target and card.
     private static func target(of card: TopicListID) -> EnvironmentTarget? {
         switch card {
         case .topic(let id): return .topic(.id(id))
-        case .lock(let sessionID): return SessionID(rawValue: sessionID).map(EnvironmentTarget.session)
+        case .lock(let lock): return .guestSession(lock)
         case .openPlace: return nil
         }
     }
@@ -385,7 +388,7 @@ final class WorkspaceStore {
     private static func ref(of card: TopicListID) -> TopicListRef? {
         switch card {
         case .topic(let id): return .topic(.id(id))
-        case .lock(let sessionID): return SessionID(rawValue: sessionID).map(TopicListRef.lock)
+        case .lock(let lock): return .guestSession(lock)
         case .openPlace(let id): return .openPlace(id)
         }
     }
@@ -394,23 +397,28 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(pinned ? .pin : .unpin, target: .topic(.id(id))))
     }
 
-    /// A card that Make a Guest and Bench act on: a Topic, or a No Topic Session, which is a Guest through its Lock.
+    /// A card that Make a Guest and Bench act on: a Topic, a live No Topic Session by its tmux id, which is a Guest
+    /// through its Lock, or a Guest Session, live or Dormant, by its Lock id.
     enum GuestCard: Equatable {
         case topic(String)
         case session(String)
-
-        var id: TopicGroupID {
-            switch self {
-            case .topic(let id): .topic(id)
-            case .session(let id): .locked(id)
-            }
-        }
+        case lock(String)
 
         var target: EnvironmentTarget? {
             switch self {
             case .topic(let id): .topic(.id(id))
             case .session(let id): SessionID(rawValue: id).map(EnvironmentTarget.session)
+            case .lock(let id): .guestSession(id)
             }
+        }
+    }
+
+    /// The card that `card` is in the Topics list; a No Topic Session that is not a Guest has none of its own.
+    private func group(of card: GuestCard) -> TopicGroupID {
+        switch card {
+        case .topic(let id): .topic(id)
+        case .session(let id): topics.locksBySession[id].map(TopicGroupID.locked) ?? .noTopic
+        case .lock(let id): .locked(id)
         }
     }
 
@@ -423,6 +431,7 @@ final class WorkspaceStore {
             guard let window = windows.first(where: { $0.sessionID == id }) else { return nil }
             if let topic = window.topicID, records.contains(where: { $0.id == topic && $0.settledAt == nil }) { return nil }
             return topics.lockedSessionIDs.contains(id)
+        case .lock(let id): return locks.contains { $0.id == id } ? true : nil
         case .topic(let id): return topics.split.bench.contains { $0.id == .topic(id) } ? false : nil
         }
     }
@@ -433,7 +442,7 @@ final class WorkspaceStore {
         guard link.features.contains(.topics), topics.topicsEnabled else { return false }
         switch card {
         case .topic(let id): return topics.split.inPlay.contains { $0.id == .topic(id) }
-        case .session: return guestState(of: card) == true
+        case .session, .lock: return guestState(of: card) == true
         }
     }
 
@@ -445,7 +454,7 @@ final class WorkspaceStore {
         guard canBench(card), !changingTopic else { return }
         guard let target = card.target else { return }
         let request = EnvironmentRequest(.benchTopic, target: target)
-        if let next = nextCard(leaving: card.id), topics.shows(next) { perform(request, presenting: .goTo(next)) } else { perform(request) }
+        if let next = nextCard(leaving: group(of: card)), topics.shows(next) { perform(request, presenting: .goTo(next)) } else { perform(request) }
     }
 
     /// The card that opens when `card` leaves the Sidebar while the user is on it: the Next Topic. Nil while the user
@@ -497,7 +506,8 @@ final class WorkspaceStore {
         switch card {
         case .topic(let id): group = .topic(id)
         case .session(let id):
-            group = topics.lockedSessionIDs.contains(id) ? .locked(id) : topics.openedNoTopicSession?.id.session == id ? .noTopic : nil
+            group = topics.locksBySession[id].map(TopicGroupID.locked) ?? (topics.openedNoTopicSession?.id.session == id ? .noTopic : nil)
+        case .lock(let id): group = .locked(id)
         }
         guard let group, topics.steps(of: group).canMove(step) else {
             topicRequests.removeAll { $0.isMove(of: card) }
@@ -662,7 +672,7 @@ final class WorkspaceStore {
     /// the list says when there is one to gather, so a list that is already in its three sections is not written again.
     private func gatherGuests() {
         guard link.features.contains(.topics), topics.topicsEnabled, !changingTopic else { return }
-        let cards = TopicCards.order(records: records, windows: windows, openPlaces: openPlaces)
+        let cards = TopicCards.order(records: records, locks: locks, openPlaces: openPlaces)
         guard !TopicOrder.isInSections(cards, inPlay: topicConfig.inPlay) else { return }
         let service = environmentService()
         guard service != nil || link.runsRequests else { return }
@@ -720,6 +730,11 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(command, target: .topic(.id(id))))
     }
 
+    /// Creates the Session of a Dormant Guest Session again, with its Windows, Panes, Tabs and Agents, and shows it.
+    func reopenGuestSession(_ id: String) {
+        perform(EnvironmentRequest(.reopen, target: .guestSession(id)))
+    }
+
     /// The open Topic has a Session to create, the same test that makes the empty-Topic view offer the Reopen choice.
     /// An Empty Topic remembers no Session, so going to it offers Add a Session and creates nothing implicitly.
     private func reopensOnArrival(_ id: String) -> Bool {
@@ -758,18 +773,21 @@ final class WorkspaceStore {
 
     /// The process's one answer per Environment, shared by every App Window.
     private static var reopenAtLaunch = ReopenAtLaunch()
-    /// The Topics that Reopen at launch has asked for and that have not finished.
-    @ObservationIgnored private var launchReopens: Set<String> = []
+    /// The cards that Reopen at launch has asked for and that have not finished.
+    @ObservationIgnored private var launchReopens: Set<TopicListID> = []
 
-    /// `topics.reopen_at_launch`: the first snapshot of this launch Reopens every Dormant open Topic, one after another
-    /// through the Topic request path, as going to each would, without moving the Location. A Remote Environment has
-    /// no Topics: they stay on this Mac (ADR 0062).
+    /// `topics.reopen_at_launch`: the first snapshot of this launch Reopens every Dormant open Topic and every Dormant
+    /// Guest Session, one after another through the Topic request path, as going to each would, without moving the
+    /// Location. A Remote Environment has no Topics: they stay on this Mac (ADR 0062).
     private func reopenDormantTopicsAtLaunch() {
         guard link.features.contains(.topics) else { return }
-        let ids = Self.reopenAtLaunch.topics(in: environmentName, enabled: topicConfig.reopenAtLaunch,
-                                             records: records, windows: windows)
-        launchReopens.formUnion(ids)
-        for id in ids { enqueueTopicRequest(EnvironmentRequest(.reopen, target: .topic(.id(id))), presenting: .reopenedAtLaunch(id)) }
+        let cards = Self.reopenAtLaunch.cards(in: environmentName, enabled: topicConfig.reopenAtLaunch,
+                                              contents: TopicContents(records: records, openPlaces: openPlaces, locks: locks), windows: windows)
+        launchReopens.formUnion(cards)
+        for card in cards {
+            guard let target = Self.target(of: card) else { continue }
+            enqueueTopicRequest(EnvironmentRequest(.reopen, target: target), presenting: .reopenedAtLaunch(card))
+        }
     }
 
     /// How the app shows a finished Topic request.
@@ -788,7 +806,7 @@ final class WorkspaceStore {
         /// Forget Settled Older Than… answers with the Topics it forgot, and the palette closes.
         case forgetSettled
         /// Reopen at launch: the Location stays. Once the last one finishes, the App Window attaches as at any launch.
-        case reopenedAtLaunch(String)
+        case reopenedAtLaunch(TopicListID)
     }
 
     /// The one path for every Topic edit that the user asks for in the app. The app's unsaved memory goes to disk and to tmux first,
@@ -1001,9 +1019,10 @@ final class WorkspaceStore {
         (try? visitStore.times(environment: environment?.name)) ?? [:]
     }
 
-    /// The Topic records and the Open Places, as the link's last `topics` event left them.
+    /// The Topic records, the Open Places and the Locks, as the link's last `topics` event left them.
     private(set) var records: [TopicRecord] = []
     private(set) var openPlaces: [OpenPlace] = []
+    private(set) var locks: [SessionLock] = []
     var topicSelection = TopicSelection()
     private(set) var topicBranches = TopicBranches()
     /// The last read, so a refresh runs `ps` only when a Topic Pane starts another program.
@@ -1024,7 +1043,7 @@ final class WorkspaceStore {
         var config = self.config
         // Topic records and SessionPaths are on this Mac; a Remote App Window shows Sessions only.
         if !link.features.contains(.topics) { config.sidebar.topics = false }
-        return TopicsModel(records: records, openPlaces: openPlaces, windows: windows, config: config,
+        return TopicsModel(records: records, openPlaces: openPlaces, locks: locks, windows: windows, config: config,
                            selection: topicSelection, location: location, mode: sidebarMode, groups: topicGroups, benchShown: benchShown,
                            benchPeek: benchPeek, agents: agents,
                            panes: panesVisible ? panes : nil)
@@ -1624,6 +1643,7 @@ final class WorkspaceStore {
         link = next
         records = []
         openPlaces = []
+        locks = []
         subscribeToLink()
         startPolling()
         refresh()
@@ -1736,9 +1756,10 @@ final class WorkspaceStore {
     private func receive(_ event: EnvironmentEvent) {
         switch event {
         case .topics(let contents):
-            guard records != contents.records || openPlaces != contents.openPlaces else { return }
+            guard records != contents.records || openPlaces != contents.openPlaces || locks != contents.locks else { return }
             if records != contents.records { records = contents.records }
             if openPlaces != contents.openPlaces { openPlaces = contents.openPlaces }
+            if locks != contents.locks { locks = contents.locks }
             // A page whose Topic or Open Place is gone leaves now, not at the next change in tmux.
             route(.topicsChanged)
         case .snapshot(let snapshot):

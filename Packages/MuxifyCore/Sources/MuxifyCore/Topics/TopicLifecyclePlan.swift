@@ -202,7 +202,7 @@ public struct TopicReopening: Hashable {
         Set(topic.sessions.compactMap { $0["worktree_path"]?.string }.filter { FileManager.default.fileExists(atPath: $0) })
     }
 
-    private static func window(_ window: JSONValue, directory: String) -> Window {
+    static func window(_ window: JSONValue, directory: String) -> Window {
         let tabs = window["browser_tabs"]?.array?.compactMap(\.string) ?? []
         let active: Int
         if case .integer(let value)? = window["browser_active_tab"] { active = Int(value) } else { active = 0 }
@@ -267,23 +267,8 @@ struct TopicReopenPlan {
                 commands.append(.restoreWorktree(.init(repositoryPath: repository, path: session.directory, branch: branch),
                                                  base: session.base))
             }
-            let target = "=" + session.name + ":"
-            let windowTarget = target + "$"
-            for (index, window) in session.windows.enumerated() {
-                let first = window.panes[0].directory
-                if index == 0 {
-                    commands.append(.reopenSession(name: session.name, directory: session.directory, windowName: window.name))
-                    commands.append(.tmux(["set-option", "-t", target, "@muxify_topic", topic.id]))
-                    commands.append(.tmux(["set-option", "-t", target, "@muxify_session_id", session.id]))
-                    if first != session.directory {
-                        commands.append(.tmux(["respawn-window", "-k", "-t", windowTarget, "-c", first]))
-                    }
-                } else {
-                    commands.append(.tmux(["new-window", "-d", "-a", "-t", windowTarget, "-c", first, "-n", window.name]))
-                }
-                commands.append(.tmux(window.browser.setOptionArgs(windowID: windowTarget)))
-                commands += Self.panes(of: window, target: windowTarget)
-            }
+            commands += Self.creating(session.name, in: session.directory, windows: session.windows,
+                                      options: [("@muxify_topic", topic.id), ("@muxify_session_id", session.id)])
         }
         var reopened = topic
         reopened.slug = slug
@@ -300,6 +285,30 @@ struct TopicReopenPlan {
 }
 
 extension TopicReopenPlan {
+    /// The commands that create the Session `name` in `directory` again with `windows`, each with its Browser and its
+    /// Panes, and set the Session `options` on it as soon as it exists.
+    static func creating(_ name: String, in directory: String, windows: [TopicReopening.Window],
+                         options: [(name: String, value: String)]) -> [TopicPlan.Command] {
+        var commands: [TopicPlan.Command] = []
+        let target = "=" + name + ":"
+        let windowTarget = target + "$"
+        for (index, window) in windows.enumerated() {
+            let first = window.panes[0].directory
+            if index == 0 {
+                commands.append(.reopenSession(name: name, directory: directory, windowName: window.name))
+                commands += options.map { .tmux(["set-option", "-t", target, $0.name, $0.value]) }
+                if first != directory {
+                    commands.append(.tmux(["respawn-window", "-k", "-t", windowTarget, "-c", first]))
+                }
+            } else {
+                commands.append(.tmux(["new-window", "-d", "-a", "-t", windowTarget, "-c", first, "-n", window.name]))
+            }
+            commands.append(.tmux(window.browser.setOptionArgs(windowID: windowTarget)))
+            commands += panes(of: window, target: windowTarget)
+        }
+        return commands
+    }
+
     /// The Window's first Pane exists. Each split puts the new Pane last and makes it active, so after the splits a
     /// `.+N` target, N Panes on from the active one with wrap, reaches each Pane whatever `pane-base-index` is. The
     /// layout comes last: a layout from a newer tmux also names its active Pane, and `select-layout` makes it active.
@@ -329,6 +338,32 @@ extension TopicReopenPlan {
         }
         if last > 0 { commands.append(.tmux(["select-layout", "-t", target, window.layout ?? "tiled"])) }
         return commands
+    }
+}
+
+/// What Reopen creates for a Dormant Guest Session: its Session again, in its folder, with its remembered Windows,
+/// Panes, Tabs and Agents, pointing at its Lock with `@muxify_session_id`. A name that a live Session has gets +2. A
+/// Guest Session that is live already is only shown.
+struct GuestSessionReopenPlan {
+    let edit: TopicEdit
+
+    init(lock: SessionLock, records: [TopicRecord], windows: [TmuxWindow]) throws {
+        let open = Set(records.filter { $0.settledAt == nil }.map(\.id))
+        if let live = lock.windows(in: windows, open: open).first {
+            edit = TopicEdit(record: nil, commands: [], selection: .sessionID(live.sessionID))
+            return
+        }
+        guard let directory = lock.session["directory"]?.string, !directory.isEmpty else { throw TopicEditFailure.invalidSessionPath }
+        try SessionNaming.validate(lock.name)
+        let name = SessionNaming.available(lock.name, taken: Set(windows.map(\.sessionName)))
+        let saved = lock.session["windows"]?.array ?? []
+        let reopened = saved.isEmpty
+            ? [TopicReopening.Window(name: "shell", directory: directory, browser: StoredBrowser(), layout: nil,
+                                     panes: [TopicReopening.Pane(directory: directory, isActive: true, start: .shell)])]
+            : saved.map { TopicReopening.window($0, directory: directory) }
+        edit = TopicEdit(record: nil, commands: TopicReopenPlan.creating(name, in: directory, windows: reopened,
+                                                                         options: [("@muxify_session_id", lock.id)]),
+                         selection: .sessionName(name))
     }
 }
 

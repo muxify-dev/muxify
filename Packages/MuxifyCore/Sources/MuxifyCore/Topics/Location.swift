@@ -5,10 +5,11 @@ public enum TopicGroupID: Hashable, Sendable {
     case locked(String)
     case noTopic
 
-    /// The card that a Window's Session is on: its open Topic, else its Lock, else none.
-    public init(_ window: TmuxWindow, open: Set<String>, locked: Set<String>) {
+    /// The card that a Window's Session is on: its open Topic, else its Lock, else none. `locks` has the Lock id of each
+    /// live Guest Session, by the Session's tmux id.
+    public init(_ window: TmuxWindow, open: Set<String>, locks: [String: String]) {
         if let id = window.topicID, open.contains(id) { self = .topic(id) }
-        else if locked.contains(window.sessionID) { self = .locked(window.sessionID) }
+        else if let lock = locks[window.sessionID] { self = .locked(lock) }
         else { self = .noTopic }
     }
 }

@@ -316,12 +316,12 @@ final class TopicStoreTests: XCTestCase {
             var pinned = record("p", order: 0)
             pinned.isPinned = true
             var transaction = TopicTransaction(records: [pinned, record("a", order: edge)])
-            transaction.locks = [SessionLock(sessionID: "$1", order: edge)]
-            let moved = try transaction.create(record("new", order: nil))
+            transaction.locks = [SessionLock(id: "guest", order: edge)]
+            try transaction.create(record("new", order: nil))
             let shown = TopicOrder.sorted(transaction.entries)
             XCTAssertEqual(shown.records.map(\.id), ["p", "a", "new"])
             XCTAssertTrue(shown.allSatisfy { $0.order?.isFinite == true })
-            XCTAssertEqual(moved, transaction.locks.filter { $0.order != edge }.map(SessionLockChange.set), "a Lock that got a new order goes to tmux")
+            XCTAssertTrue(transaction.locks.allSatisfy { $0.order.isFinite }, "a renumber gives the Lock a finite order too")
         }
     }
 

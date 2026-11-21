@@ -47,12 +47,16 @@ public struct EnvironmentService: Sendable {
             switch read {
             case .list: return list()
             case .show: return show(request, client: client)
-            case .environmentShow: return environmentShow()
+            case .environmentShow:
+                importLegacyLocks()
+                return environmentShow()
             case .listWorktrees(let all, let from): return listWorktrees(request, all: all, from: from, client: client)
             }
         case .records:
+            importLegacyLocks()
             return changeRecords(request, client: client)
         case .edit:
+            importLegacyLocks()
             switch request.command {
             case .moveSession(.up): return stepSession(request, .up, client: client)
             case .moveSession(.down): return stepSession(request, .down, client: client)
@@ -64,6 +68,14 @@ public struct EnvironmentService: Sendable {
             default: return edit(request, client: client)
             }
         }
+    }
+
+    /// Imports the Locks that an older Muxify kept in tmux (`SessionLock.importLegacy`) before a request that changes the
+    /// Topics list or shows it, so a Guest Session from before keeps its card. A failed import leaves the request as
+    /// it would be without one.
+    private func importLegacyLocks() {
+        guard let snapshot = try? server.snapshot() else { return }
+        _ = try? SessionLock.importLegacy(from: snapshot, into: store) { try server.run($0) }
     }
 
     /// The Sessions the Settle sheet offers, as the Topic's live Sessions are now. It reads and writes nothing else.
@@ -127,9 +139,14 @@ public struct EnvironmentService: Sendable {
     }
 
     /// A window of the Session that the target names, or of the Session of the Pane that the target or the caller names.
+    /// A Guest Session named by its Lock id names its live Session.
     func sessionWindow(_ target: EnvironmentTarget?, caller: TopicCaller?, snapshot: TmuxSnapshot, client: String?) throws -> TmuxWindow {
         let sessionID: String
         if case .session(let id)? = target { sessionID = id.rawValue }
+        else if case .guestSession(let lock)? = target {
+            guard let live = snapshot.windows.first(where: { $0.savedSessionID == lock }) else { throw TopicRequestError.guestSessionDormant(lock) }
+            sessionID = live.sessionID
+        }
         else if case .sessionName(let name)? = target {
             guard let named = snapshot.windows.first(where: { $0.sessionName == name }) else { throw TopicRequestError.sessionUnavailable(name) }
             sessionID = named.sessionID
@@ -191,7 +208,7 @@ public struct EnvironmentService: Sendable {
         switch target {
         case .pane(let id)?: return .pane(id.rawValue)
         case .window(let id)?: return .window(id.rawValue)
-        case .topic?, .session?, .sessionName?: return nil
+        case .topic?, .session?, .sessionName?, .guestSession?: return nil
         case nil: break
         }
         switch caller {
@@ -256,6 +273,7 @@ public struct EnvironmentService: Sendable {
             case .sessionAtEnd: return .sessionAtEnd
             case .cardHidden: return .cardHidden
             case .windowNotInSession: return .windowNotInSession
+            case .guestSessionUnavailable, .guestSessionDormant: return .sourceUnavailable
             }
         case let error as TopicEditFailure:
             switch error {
@@ -489,6 +507,10 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case sessionAtEnd(session: String, topic: String, up: Bool)
     case cardHidden(String)
     case windowNotInSession(window: String, anchor: String)
+    /// No Lock has this id: the Guest Session was Benched or ended.
+    case guestSessionUnavailable(String)
+    /// The Guest Session with this Lock id has no live Session, so a command that needs one cannot run.
+    case guestSessionDormant(String)
     /// An old form of a request that now fails, with the message that names the new form.
     case removedForm(String)
 
@@ -522,6 +544,9 @@ public enum TopicRequestError: Error, CustomStringConvertible {
             return "The Session \(session) is the \(up ? "first" : "last") Session of the Topic \(topic)."
         case .cardHidden(let message): return message
         case .windowNotInSession(let window, let anchor): return "The Window \(anchor) is not in the Session of the Window \(window)."
+        case .guestSessionUnavailable(let id): return "No Guest Session has the id \(id)."
+        case .guestSessionDormant(let id):
+            return "The Guest Session \(id) is Dormant: it has no live Session. Reopen it first: muxify topic reopen --guest-session \(id)."
         case .sessionNameInvalid(let name): return "\(name) cannot name a tmux Session: it is empty, or it has a period, a colon or a control character."
         case .sessionNameTaken(let name): return "A tmux Session that is not in the Topic has the name \(name)."
         case .branchUnavailable(let branch, let worktree): return "No local branch \(branch) is in the repository of \(worktree)."

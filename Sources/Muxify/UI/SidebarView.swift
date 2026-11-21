@@ -293,8 +293,8 @@ private struct TopicsSection: View {
     private func listCard(_ topic: TopicsModel.Row, order: [StackSlot<TopicListID>]) -> some View {
         let state = store.topicCardState(topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
                                          showsAllRows: showingAllRows.contains(topic.id), showsTags: true)
-        if case .locked(let sessionID) = topic.id {
-            LockedCard(store: store, state: state, sessionID: sessionID,
+        if case .locked(let lock) = topic.id {
+            LockedCard(store: store, state: state, lock: lock,
                        onShowAllRows: { showingAllRows.insert(topic.id) },
                        drag: drag, order: order, steps: model.steps(of: topic.id))
                 .equatable()
@@ -1022,14 +1022,15 @@ private struct LockedCard: View, Equatable {
     let store: WorkspaceStore
     /// What the card shows, which its list reads from the store: see SidebarCardState.swift.
     let state: TopicCardState
-    let sessionID: String
+    /// The id of the Guest Session's Lock.
+    let lock: String
     let onShowAllRows: () -> Void
     let drag: ListDrag<TopicListID>
     let order: [StackSlot<TopicListID>]
     let steps: CardSteps
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.store === rhs.store && lhs.state == rhs.state && lhs.sessionID == rhs.sessionID && lhs.drag === rhs.drag
+        lhs.store === rhs.store && lhs.state == rhs.state && lhs.lock == rhs.lock && lhs.drag === rhs.drag
             && lhs.order == rhs.order && lhs.steps == rhs.steps
     }
 
@@ -1038,14 +1039,17 @@ private struct LockedCard: View, Equatable {
     private var holdsSelection: Bool { state.holdsSelection }
     private var showsAllRows: Bool { state.showsAllRows }
 
-    private var id: TopicListID { .lock(sessionID: sessionID) }
+    private var id: TopicListID { .lock(lock) }
     private var window: TmuxWindow? { row.sessions.first?.windows.first }
+    /// tmux has no Session for it, as after a tmux restart: a press creates the Session again.
+    private var isDormant: Bool { row.state == .dormant }
+    private var goTitle: String { isDormant ? "Reopen" : "Go to Session" }
 
     private var formatted: SidebarFormats.Text { state.formatted }
 
     var body: some View {
         SidebarCard(isOpen: row.isExpanded, holdsSelection: holdsSelection, mark: row.mark, viewport: TopicCard.viewport,
-                    identifier: row.id.accessibilityID) {
+                    restingOpacity: isDormant ? 0.55 : 1, identifier: row.id.accessibilityID) {
             header
         } content: {
             CardList(blocks: row.sessions.compactMap { session in
@@ -1060,7 +1064,7 @@ private struct LockedCard: View, Equatable {
                              isDimmed: false)
             }
         } menu: {
-            Button("Go to Session") { store.goToTopic(row.id) }
+            Button(goTitle) { store.goToTopic(row.id) }
             Divider()
             actions
         }
@@ -1069,7 +1073,7 @@ private struct LockedCard: View, Equatable {
 
     private var header: some View {
         CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isGuest: true,
-                   hintTarget: .locked(sessionID), notes: ["Guest"], summary: formatted.summary) {
+                   hintTarget: .locked(lock), notes: ["Guest"] + (row.idleLabel.map { [$0] } ?? []), summary: formatted.summary) {
             if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
                 BellMark()
             }
@@ -1082,15 +1086,16 @@ private struct LockedCard: View, Equatable {
         .accessibilityAction(.default, press)
         .accessibilityIdentifier(row.id.accessibilityID)
         .accessibilityActions {
-            Button("Go to Session") { store.goToTopic(row.id) }
+            Button(goTitle) { store.goToTopic(row.id) }
             actions
         }
     }
 
-    /// The Actions of a Guest Session. It is not a Topic, so it has no Settle, Pin or Forget.
+    /// The Actions of a Guest Session. It is not a Topic, so it has no Settle, Pin or Forget. A Dormant one has no
+    /// Session to rename, move or kill.
     @ViewBuilder
     private var actions: some View {
-        Button("Bench") { store.bench(.session(sessionID)) }
+        Button("Bench") { store.bench(.lock(lock)) }
             .disabled(store.changingTopic)
         if let window {
             Button("Rename Session…") { store.palette.begin(.text(.renameSession(window)), text: window.sessionName) }

@@ -1,6 +1,6 @@
 """The Topic records of a sandbox: the `topics` and `open_places` tables of `state/muxify/muxify.db`, read and
 written with Python's `sqlite3`, as another process writes them. `worktrees()` reads the Muxify Worktree records of
-the `worktrees` table.
+the `worktrees` table, and `locks()` the Guest Sessions of the `guest_sessions` table.
 
 A record is a dict in the shape the old `topics.json` had: the columns by name, with `sessions` and `tags` as lists,
 `pinned`, `guest` and `unread` as `True` or left out, `session_order` as `'manual'` or left out, and every other
@@ -34,8 +34,15 @@ SCHEMA = [
     '''CREATE TABLE IF NOT EXISTS browser_history (
         key TEXT PRIMARY KEY NOT NULL, url TEXT NOT NULL, title TEXT NOT NULL, folded_score REAL, folded_at REAL,
         recent TEXT NOT NULL DEFAULT '[]', topics TEXT NOT NULL DEFAULT '[]')''',
+    '''CREATE TABLE IF NOT EXISTS applied_requests (
+        id TEXT PRIMARY KEY NOT NULL, verb TEXT NOT NULL, arguments TEXT NOT NULL, state TEXT NOT NULL, stdout TEXT,
+        stderr TEXT, exit_code INTEGER, created_at REAL NOT NULL)''',
+    '''CREATE TABLE IF NOT EXISTS visits (environment TEXT, place TEXT NOT NULL, visited_at REAL NOT NULL)''',
+    '''CREATE UNIQUE INDEX IF NOT EXISTS visits_place ON visits (IFNULL(environment, ''), place)''',
+    '''CREATE TABLE IF NOT EXISTS guest_sessions (
+        id TEXT PRIMARY KEY NOT NULL, "order" REAL NOT NULL, session TEXT NOT NULL DEFAULT '{}')''',
 ]
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 6
 
 
 class TopicRecords:
@@ -127,6 +134,14 @@ class TopicRecords:
     def open_places(self):
         return self.read()['open_places']
 
+    def locks(self):
+        """Every Guest Session's Lock, in id order, as a dict with its `id`, its `order` and its Remembered `session`."""
+        if not self.path.exists():
+            return []
+        with self._connection() as connection:
+            rows = connection.execute('SELECT id, "order", session FROM guest_sessions ORDER BY id').fetchall()
+        return [{'id': row[0], 'order': row[1], 'session': json.loads(row[2] or '{}')} for row in rows]
+
     def worktrees(self):
         """Every Muxify Worktree record, oldest first, as a dict in the shape the old `worktrees/<id>.json` had:
         the columns by name, with `environment` left out when it is NULL."""
@@ -189,3 +204,14 @@ class TopicRecords:
             connection.execute('DELETE FROM open_places')
             connection.executemany('INSERT INTO open_places (id, "order") VALUES (?, ?)',
                                    [(place['id'], place['order']) for place in places])
+
+    def put_lock(self, lock):
+        """Writes a Lock, a dict with `id`, `order` and `session`, in the place of the row with its id, or as a new row."""
+        with self._connection(write=True) as connection:
+            connection.execute('INSERT OR REPLACE INTO guest_sessions (id, "order", session) VALUES (?, ?, ?)',
+                               (lock['id'], lock['order'], json.dumps(lock.get('session') or {}, sort_keys=True)))
+
+    def remove_lock(self, lock_id):
+        """Removes the Lock with this id. Nothing happens when there is none."""
+        with self._connection(write=True) as connection:
+            connection.execute('DELETE FROM guest_sessions WHERE id = ?', (lock_id,))

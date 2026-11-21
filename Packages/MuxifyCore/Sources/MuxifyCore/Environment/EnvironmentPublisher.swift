@@ -15,6 +15,8 @@ import Foundation
 ///
 /// The Host Server's publisher also reads its Mac's Client marker, so its `server` event names that Mac's own Client,
 /// and writes the Sessions that each read gives the Topics onto their records, so the Mac writes no record itself.
+/// Every publisher writes the live Guest Sessions onto their Locks, ends the Lock of a Guest Session that ended on its
+/// server, and imports a Lock that an older Muxify kept in tmux (`SessionLock.importLegacy`).
 ///
 /// It also writes the Colour Reports of ADR 0098 through its Listener, while its App Window gives it colours, in the
 /// app or, on a Host, through the Host Server's `colours` request: to every Pane of the target's Session right before
@@ -236,10 +238,10 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     /// Writes the records, then reads them, and returns once the events of what it left were delivered. This
     /// process's own write does not move `data_version` on this connection, so the read after it sends its events.
     @discardableResult
-    public func write<T>(locks: [SessionLock] = [], _ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
+    public func write<T>(_ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                let result = Result { try self.topics.write(locks: locks, body) }
+                let result = Result { try self.topics.write(body) }
                 self.readTopics { continuation.resume(with: result) }
             }
         }
@@ -418,23 +420,44 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         screens = Set(snapshot.clients.filter { $0.isControl && !$0.ignoresSize }.map(\.name))
         listeners = Set(snapshot.clients.filter { $0.isControl && $0.ignoresSize }.map(\.name))
         keepListening(snapshot)
-        return changes + (remember(snapshot) ? topicChanges() : [])
+        let imported = importLegacyLocks(snapshot)
+        return changes + (remember(snapshot) || imported ? topicChanges() : [])
+    }
+
+    private func importLegacyLocks(_ snapshot: TmuxSnapshot) -> Bool {
+        do {
+            return try SessionLock.importLegacy(from: snapshot, into: topics) { _ = try run($0) }
+        } catch {
+            report("importing Locks: \(error)")
+            return false
+        }
     }
 
     /// Writes the Sessions that `snapshot` gives each Topic onto its record, as `WorkspaceStore` does for the Local
-    /// Environment: the last write wins (ADR 0080). True when it wrote.
+    /// Environment, and each live Guest Session onto its Lock: the last write wins (ADR 0080). A Guest Session that was
+    /// live in the last read of the same server and is gone now ends its Lock. True when it wrote.
     private func remember(_ snapshot: TmuxSnapshot) -> Bool {
-        guard let order = rememberingOrder else { return false }
         // A Window seen before counts only on the same server: on another, its id may name another Window.
         let continuous = snapshot.serverRunning && snapshot.serverID != nil && snapshot.serverID == rememberedServerID
         let previously = continuous ? rememberedWindows : []
         rememberedServerID = snapshot.serverRunning ? snapshot.serverID : nil
         rememberedWindows = snapshot.windows
         do {
-            let updates = try topics.read().records.compactMap { $0.remembering(snapshot, order: order, previously: previously) }
-            guard !updates.isEmpty else { return false }
+            let contents = try topics.read()
+            let updates = rememberingOrder.map { order in
+                contents.records.compactMap { $0.remembering(snapshot, order: order, previously: previously) }
+            } ?? []
+            let open = Set(contents.records.filter { $0.settledAt == nil }.map(\.id))
+            let memories = contents.locks.compactMap { lock in lock.remembering(snapshot, open: open, previously: previously).map { (lock.id, $0) } }
+            guard !updates.isEmpty || !memories.isEmpty else { return false }
             try topics.write { transaction in
                 for record in updates { _ = try transaction.remember(record.sessions, of: record.id) }
+                for (id, memory) in memories {
+                    switch memory {
+                    case .remembered(let session): _ = transaction.remember(session, ofLock: id)
+                    case .ended: transaction.unlock(id)
+                    }
+                }
             }
             return true
         } catch {

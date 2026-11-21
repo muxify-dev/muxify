@@ -29,9 +29,10 @@ final class OpenPlaceChoicesTests: XCTestCase {
         ]
         let windows: [TmuxWindow] = [
             .fixture(id: "@1", sessionID: "$1", sessionName: "deploy-scripts", topicID: "d"),
-            .fixture(id: "@2", sessionID: "$2", sessionName: "scratch", lockOrder: 2.5),
+            .fixture(id: "@2", sessionID: "$2", sessionName: "scratch", savedSessionID: "$2"),
         ]
-        return TopicsModel(records: records, openPlaces: [OpenPlace(id: "open", order: 1)], windows: windows, config: config,
+        return TopicsModel(records: records, openPlaces: [OpenPlace(id: "open", order: 1)], locks: [SessionLock(id: "$2", order: 2.5)],
+                           windows: windows, config: config,
                            selection: TopicSelection(), location: .openPlace("open"))
     }
 

@@ -59,12 +59,12 @@ final class NotificationsTests: XCTestCase {
 
     func testAnExpandedActiveLockedSessionMovesItsMarkOntoItsRowsAsATopicDoes() {
         var locked = window("@1", topic: nil)
-        locked.lockOrder = 1
+        locked.savedSessionID = "$1"
         var second = window("@2", topic: nil)
-        second.lockOrder = 1
+        second.savedSessionID = "$1"
         var selection = TopicSelection()
         selection.select(windowID: "@1", activeTopic: .locked("$1"))
-        let model = TopicsModel(records: [], windows: [locked, second], config: Config(), selection: selection,
+        let model = TopicsModel(records: [], locks: [SessionLock(id: "$1", order: 1)], windows: [locked, second], config: Config(), selection: selection,
                                 location: .window(WindowID(rawValue: "@1")!),
                                 agents: [agent(.done), agent(.blocked, id: "%2", window: "@2", unread: false)])
         let row = model.rows.first { $0.id == .locked("$1") }

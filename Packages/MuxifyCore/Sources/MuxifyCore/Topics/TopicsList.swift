@@ -4,7 +4,7 @@ import Foundation
 /// Sessions, mark, label, state, Tags and Guest flag, and the In Play cut. `muxify environment show` encodes it and the
 /// Sidebar draws it, so the two cannot disagree.
 public struct TopicsList {
-    /// A Topic or a Locked Session, as its card shows it.
+    /// A Topic or a Guest Session, live or Dormant, as its card shows it.
     public struct Card {
         public enum Subject {
             case topic(TopicRecord)
@@ -12,13 +12,13 @@ public struct TopicsList {
         }
 
         public let subject: Subject
-        /// The Topic's label, or the Locked Session's name.
+        /// The Topic's label, or the Guest Session's name: its live Session's, else the one it had when last seen.
         public let label: String
         /// The Topic Unread mark or the strongest Agent mark of its Sessions.
         public let mark: CardMark?
-        /// The live Sessions in the Topic's Session order; for a Locked Session, that Session.
+        /// The live Sessions in the Topic's Session order; for a Guest Session, its live Session, or none when Dormant.
         public let sessions: [String]
-        /// A Locked Session is always live.
+        /// A Guest Session is live or Dormant, never Empty.
         public let state: TopicState
         /// In Config order, then the Tags the Config no longer defines. None with Tags off, and none on a Locked Session.
         public let tags: [ShownTag]
@@ -28,7 +28,7 @@ public struct TopicsList {
         public var id: TopicGroupID {
             switch subject {
             case .topic(let record): return .topic(record.id)
-            case .locked(let lock): return .locked(lock.sessionID)
+            case .locked(let lock): return .locked(lock.id)
             }
         }
 
@@ -51,7 +51,7 @@ public struct TopicsList {
             case .card(let card):
                 switch card.subject {
                 case .topic(let record): return .topic(record.id)
-                case .locked(let lock): return .lock(sessionID: lock.sessionID)
+                case .locked(let lock): return .lock(lock.id)
                 }
             }
         }
@@ -76,26 +76,35 @@ public struct TopicsList {
     /// `topics.in_play` and the cards that are not Pinned, cut into the places, the Guests and the Bench.
     public let inPlay: (limit: Int, cut: InPlayCut<Entry>)
     public let labels: TopicLabels
-    public let lockedSessionIDs: Set<String>
+    /// The Lock id of each live Guest Session, by the Session's tmux id.
+    public let locksBySession: [String: String]
     private let openTopicIDs: Set<String>
+
+    /// The tmux ids of the live Guest Sessions.
+    public var lockedSessionIDs: Set<String> { Set(locksBySession.keys) }
 
     public var pinned: [Card] { entries.compactMap(\.card).filter(\.isPinned) }
 
-    public init(records: [TopicRecord], openPlaces: [OpenPlace], windows: [TmuxWindow], marks: AgentMarks, topics: Config.Topics) {
-        let order = TopicCards.order(records: records, windows: windows, openPlaces: openPlaces)
-        let open = Set(order.records.map(\.id)), locked = Set(order.locks.map(\.sessionID))
+    public init(records: [TopicRecord], openPlaces: [OpenPlace], locks: [SessionLock] = [], windows: [TmuxWindow], marks: AgentMarks,
+                topics: Config.Topics) {
+        let order = TopicCards.order(records: records, locks: locks, openPlaces: openPlaces)
+        let open = Set(order.records.map(\.id))
+        var locksBySession: [String: String] = [:]
+        for lock in order.locks {
+            if let session = lock.windows(in: windows, open: open).first?.sessionID { locksBySession[session] = lock.id }
+        }
         let labels = TopicLabels(records)
-        let members = Dictionary(grouping: windows) { TopicGroupID($0, open: open, locked: locked) }
+        let members = Dictionary(grouping: windows) { TopicGroupID($0, open: open, locks: locksBySession) }
         let entries = order.map { entry -> Entry in
             switch entry {
             case .openPlace(let place):
                 return .openPlace(id: place.id)
             case .lock(let lock):
-                let windows = members[.locked(lock.sessionID)] ?? []
+                let windows = members[.locked(lock.id)] ?? []
                 let sessions = TopicSessionOrder.firstWindows(windows, record: nil, order: topics.sessionOrder).map(\.sessionID)
-                return .card(Card(subject: .locked(lock), label: windows.first?.sessionName ?? lock.sessionID,
-                                  mark: marks.card(sessions: sessions).map(CardMark.agent), sessions: sessions, state: .live, tags: [],
-                                  isGuest: true))
+                return .card(Card(subject: .locked(lock), label: windows.first?.sessionName ?? lock.name,
+                                  mark: marks.card(sessions: sessions).map(CardMark.agent), sessions: sessions,
+                                  state: sessions.isEmpty ? .dormant : .live, tags: [], isGuest: true))
             case .topic(let record):
                 let sessions = TopicSessionOrder.firstWindows(members[.topic(record.id)] ?? [], record: record, order: topics.sessionOrder)
                     .map(\.sessionID)
@@ -110,12 +119,12 @@ public struct TopicsList {
         self.order = order
         inPlay = (topics.inPlay, InPlayCut(entries.filter { !($0.card?.isPinned ?? false) }, limit: topics.inPlay, slot: \.slot))
         self.labels = labels
-        lockedSessionIDs = locked
+        self.locksBySession = locksBySession
         openTopicIDs = open
     }
 
     /// The card that the Window's Session is on.
     public func group(of window: TmuxWindow) -> TopicGroupID {
-        TopicGroupID(window, open: openTopicIDs, locked: lockedSessionIDs)
+        TopicGroupID(window, open: openTopicIDs, locks: locksBySession)
     }
 }

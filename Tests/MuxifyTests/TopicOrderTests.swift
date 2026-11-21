@@ -15,12 +15,12 @@ final class TopicOrderTests: XCTestCase {
             + edits.filter { edit in !entries.contains { $0.id == edit.id } }
     }
 
-    /// Each entry's Topic id, or `lock:` and its Session ID.
+    /// Each entry's Topic id, or `lock:` and its Lock id.
     private func ids(_ entries: [TopicListEntry]) -> [String] {
         entries.map {
             switch $0.id {
             case .topic(let id): return id
-            case .lock(let sessionID): return "lock:" + sessionID
+            case .lock(let lock): return "lock:" + lock
             case .openPlace(let id): return "open:" + id
             }
         }
@@ -372,11 +372,11 @@ final class TopicOrderTests: XCTestCase {
         var pinned = record("p", order: 9)
         pinned.isPinned = true
         let entries = [pinned, record("a", order: 0), record("b", order: 1)].map(TopicListEntry.topic)
-            + [.lock(SessionLock(sessionID: "$1", order: 0.5))]
+            + [.lock(SessionLock(id: "$1", order: 0.5))]
         XCTAssertEqual(shown(entries), ["p", "a", "lock:$1", "b"])
-        let locked = applying(TopicOrder.appendingLock(of: "$2", inPlay: 5, in: entries), to: entries)
+        let locked = applying(TopicOrder.appendingLock(SessionLock(id: "$2", order: 0), inPlay: 5, in: entries), to: entries)
         XCTAssertEqual(shown(locked), ["p", "a", "b", "lock:$1", "lock:$2"], "the Lock that was among the Topics goes to the Guests too")
-        let moved = applying(try TopicOrder.moving(.lock(sessionID: "$2"), to: .before(.topic("p")), in: locked), to: locked)
+        let moved = applying(try TopicOrder.moving(.lock("$2"), to: .before(.topic("p")), in: locked), to: locked)
         XCTAssertEqual(shown(moved), ["p", "lock:$2", "a", "b", "lock:$1"], "a Lock is never Pinned, so it stays below the Pinned Topics")
         let added = applying(TopicOrder.inserting(record("new", order: nil), inPlay: 5, in: moved), to: moved)
         XCTAssertEqual(shown(added), ["p", "lock:$2", "a", "b", "new", "lock:$1"], "a returning Topic goes after the last place, and a Lock takes none")
@@ -384,10 +384,10 @@ final class TopicOrderTests: XCTestCase {
 
     func testARenumberGivesTheLocksTheirNewOrderToo() throws {
         let entries = [record("a", order: 0), record("b", order: Double(0).nextUp)].map(TopicListEntry.topic)
-            + [.lock(SessionLock(sessionID: "$1", order: 2))]
-        let edits = try TopicOrder.moving(.lock(sessionID: "$1"), to: .before(.topic("b")), in: entries)
+            + [.lock(SessionLock(id: "$1", order: 2))]
+        let edits = try TopicOrder.moving(.lock("$1"), to: .before(.topic("b")), in: entries)
         XCTAssertEqual(shown(applying(edits, to: entries)), ["a", "lock:$1", "b"])
-        XCTAssertEqual(edits.locks.map(\.sessionID), ["$1"])
+        XCTAssertEqual(edits.locks.map(\.id), ["$1"])
         XCTAssertTrue(edits.allSatisfy { $0.order?.isFinite == true })
     }
 }

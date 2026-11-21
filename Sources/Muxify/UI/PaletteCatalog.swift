@@ -6,6 +6,8 @@ struct PaletteItem: Equatable {
     enum Ref: Equatable {
         /// Nil `window`: Dormant or Settled, so ↩ shows the Topic's Reopen choice.
         case topic(id: String, window: TmuxWindow?)
+        /// A Dormant Guest Session, by its Lock id: ↩ creates its Session again.
+        case guestSession(lock: String)
         case session(SessionGroup)
         case sessionPath(OpenDirectory)
         case window(TmuxWindow)
@@ -152,6 +154,7 @@ struct PaletteCatalog {
     }
 
     private func topicCandidate(_ row: TopicsModel.Row) -> PickCandidate<PaletteItem>? {
+        if case .locked(let lock) = row.id { return dormantSessionCandidate(row, lock: lock) }
         guard case .topic(let id) = row.id else { return nil }
         let isCurrent = topics?.activeTopic == row.id
         let window = EntryWindow.of(row, lastWindowByGroup: lastWindowByGroup, visits: visits)
@@ -164,6 +167,17 @@ struct PaletteCatalog {
             lastVisit: visits.last(.topic(row.id)), isCurrent: isCurrent, unopened: row.state != .live,
             activity: row.sessions.flatMap(\.windows).map(\.sessionActivity).max() ?? 0,
             pick: .available(PaletteItem(ref: .topic(id: id, window: window))))
+    }
+
+    /// A Dormant Guest Session: its card is among the Topics, and it has no Session for the Sessions section to list.
+    /// A live one is a row of that section.
+    private func dormantSessionCandidate(_ row: TopicsModel.Row, lock: String) -> PickCandidate<PaletteItem>? {
+        guard row.state == .dormant else { return nil }
+        return PickCandidate(
+            id: row.id.accessibilityID, kind: .session, symbol: "□", title: row.title,
+            fields: [.typeWord("dormant"), .typeWord("session")], trailing: "Reopen", mark: row.mark,
+            lastVisit: visits.last(.session(name: row.title)), unopened: true,
+            pick: .available(PaletteItem(ref: .guestSession(lock: lock))))
     }
 
     private func settledCandidate(_ record: TopicRecord) -> PickCandidate<PaletteItem> {

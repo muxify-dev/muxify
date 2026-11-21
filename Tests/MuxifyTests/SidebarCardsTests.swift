@@ -4,10 +4,13 @@ import MuxifyTestSupport
 
 /// The Sidebar's sections, in order, with each card's label, state and mark, from the cards that `TopicsList` builds.
 final class SidebarCardsTests: XCTestCase {
-    private func window(_ session: String, topic: String? = nil, lock: Double? = nil) -> TmuxWindow {
+    /// A Window of `session`; a `guest` one points at the Lock whose id is the Session's tmux id.
+    private func window(_ session: String, topic: String? = nil, guest: Bool = false) -> TmuxWindow {
         .fixture(id: "@" + session.dropFirst(), sessionID: session, sessionName: "s" + session.dropFirst(), topicID: topic,
-                 lockOrder: lock)
+                 savedSessionID: guest ? session : "")
     }
+
+    private let locks = [SessionLock(id: "$4", order: 4)]
 
     private func agent(in session: String, _ status: AgentStatus, unread: Bool = false) -> TmuxPane {
         TmuxPane(id: "%" + session.dropFirst() + status.rawValue, windowID: "@" + session.dropFirst(), command: "claude", agent: "claude",
@@ -36,7 +39,7 @@ final class SidebarCardsTests: XCTestCase {
     private let openPlaces = [OpenPlace(id: "gap", order: 1)]
 
     private var tmux: TmuxSnapshot {
-        let windows = [window("$1", topic: "pinned"), window("$2", topic: "alpha"), window("$3", topic: "guest"), window("$4", lock: 4),
+        let windows = [window("$1", topic: "pinned"), window("$2", topic: "alpha"), window("$3", topic: "guest"), window("$4", guest: true),
                        window("$5", topic: "untitled-b"), window("$6"), window("$7", topic: "chores")]
         let panes = [agent(in: "$1", .working), agent(in: "$2", .blocked), agent(in: "$2", .done, unread: true),
                      agent(in: "$4", .failed, unread: true), agent(in: "$5", .done, unread: true), agent(in: "$7", .working)]
@@ -52,7 +55,7 @@ final class SidebarCardsTests: XCTestCase {
     /// Each section as lines of `kind id label state mark`, as the Sidebar lists its cards.
     private func sidebar(inPlay: Int) -> [String: [String]] {
         let tmux = tmux
-        let model = TopicsModel(records: records, openPlaces: openPlaces, windows: tmux.windows, config: config(inPlay: inPlay),
+        let model = TopicsModel(records: records, openPlaces: openPlaces, locks: locks, windows: tmux.windows, config: config(inPlay: inPlay),
                                 selection: TopicSelection(), benchShown: true, agents: tmux.agents)
         var sections: [String: [String]] = [:]
         var section = "pinned"

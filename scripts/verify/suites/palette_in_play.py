@@ -21,6 +21,15 @@ class PaletteInPlay(PaletteFixture):
     def config_text(cls, tags=None):
         return super().config_text(tags) + '  in_play: 2\n'
 
+    def base_lock(self):
+        """The Lock of the fixture's base Session in the state database, or None."""
+        return next((lock for lock in self.store.locks() if lock['session'].get('name') == 'base'), None)
+
+    def unlock_base(self):
+        for lock in self.store.locks():
+            if lock['session'].get('name') == 'base':
+                self.store.remove_lock(lock['id'])
+
     def order(self, prefix):
         """The ids of the check's Topics in the order of the Topics list."""
         records = [r for r in self.records() if r['id'].startswith(prefix) and not r.get('settled_at')]
@@ -165,13 +174,12 @@ class PaletteInPlay(PaletteFixture):
         self.topic('mns-a', order=0)
         s.wait_rows(lambda rs: s.has('topic-mns-a', rs), 'the Topics did not appear')
         self.select(self.base)
-        lock = lambda: s.tmux('show-options', '-qv', '-t', 'base', '@muxify_lock').strip()
-        self.addCleanup(s.tmux_ok, 'set-option', '-u', '-t', 'base', '@muxify_lock')
-        self.assertEqual(lock(), '', 'the No Topic Session starts Locked')
+        self.addCleanup(self.unlock_base)
+        self.assertIsNone(self.base_lock(), 'the No Topic Session starts Locked')
         self.assertTrue(self.absent('Move Topic Down'), 'Move Topic Down shows on the No Topic Session')
 
         self.s.run_command('Move Topic Up')
-        wait(lambda: lock() != '', 'Move Topic Up did not Lock the No Topic Session, which makes it a Guest')
+        wait(self.base_lock, 'Move Topic Up did not Lock the No Topic Session, which makes it a Guest')
         s.wait_shown(self.base)
 
     def test_fast_presses_of_move_topic_up_on_the_no_topic_session_make_it_a_guest_and_then_the_top_guest(self):
@@ -181,16 +189,15 @@ class PaletteInPlay(PaletteFixture):
         self.topic('fns-g', order=2, guest=True)
         s.wait_rows(lambda rs: s.has('topic-fns-g', rs), 'the Topics did not appear')
         self.select(self.base)
-        lock = lambda: s.tmux('show-options', '-qv', '-t', 'base', '@muxify_lock').strip()
-        self.addCleanup(s.tmux_ok, 'set-option', '-u', '-t', 'base', '@muxify_lock')
-        self.assertEqual(lock(), '', 'the No Topic Session starts Locked')
+        self.addCleanup(self.unlock_base)
+        self.assertIsNone(self.base_lock(), 'the No Topic Session starts Locked')
 
         self.press_key('⌥⌘↑')
         self.press_key('⌥⌘↑')
-        wait(lambda: lock() != '', 'the first press did not Lock the No Topic Session, which makes it a Guest')
-        wait(lambda: float(lock()) < self.record('fns-g')['order'],
-             'the second press, made while the Lock ran, did not move the Locked Session above the Guest fns-g: '
-             'Lock order %s, Guest order %s' % (lock(), self.record('fns-g')['order']))
+        wait(self.base_lock, 'the first press did not Lock the No Topic Session, which makes it a Guest')
+        wait(lambda: self.base_lock()['order'] < self.record('fns-g')['order'],
+             lambda: 'the second press, made while the Lock ran, did not move the Locked Session above the Guest fns-g: '
+             'Lock %s, Guest order %s' % (self.base_lock(), self.record('fns-g')['order']))
         self.assertEqual(self.order('fns-'), ['fns-a', 'fns-b', 'fns-g'], 'a press moved a card that is not the Session')
 
 

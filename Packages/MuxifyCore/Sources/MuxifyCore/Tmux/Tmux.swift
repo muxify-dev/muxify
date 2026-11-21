@@ -33,8 +33,9 @@ public struct TmuxWindow: Identifiable, Hashable {
     /// Durable remembered identity. New/restored Sessions carry it in a Session option.
     public var savedSessionID = ""
     public var sessionRecordID: String { savedSessionID.isEmpty ? sessionID : savedSessionID }
-    /// The Session's `@muxify_lock`: its place in the Topics list while it is Locked (ADR 0018).
-    public var lockOrder: Double? = nil
+    /// The Session's `@muxify_lock`, where an older Muxify kept the order of a Lock. Muxify reads it only to import
+    /// that Lock into the state database (`SessionLock.importLegacy`).
+    public var legacyLockOrder: Double? = nil
     public var sessionPath: String = ""
     public var activePaneID: String = ""
     public var startCommand: String = ""
@@ -418,7 +419,7 @@ public enum Tmux {
                     agent: f[18],
                     storedBrowser: StoredBrowser(tabs: f[13], activeTab: f[14], shown: f[15], maximized: field(23)),
                     openRequests: f[16].split(separator: " ").map(String.init),
-                    topicID: field(19).isEmpty ? nil : field(19), savedSessionID: field(27), lockOrder: Double(field(26)).flatMap { $0.isFinite ? $0 : nil },
+                    topicID: field(19).isEmpty ? nil : field(19), savedSessionID: field(27), legacyLockOrder: Double(field(26)).flatMap { $0.isFinite ? $0 : nil },
                     sessionPath: field(20),
                     activePaneID: field(21), startCommand: field(22), sessionCreated: Int(field(24)) ?? 0,
                     layout: field(25), isZoomed: field(28) == "1", isLastWindow: field(29) == "1"

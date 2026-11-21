@@ -9,13 +9,37 @@ final class ProtocolWireTests: XCTestCase {
 
     private static let requestID = RequestID("3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c")!
 
-    /// This release's messages, in the order of the newest fixtures folder: the `status-line` capability, which the Mac
-    /// declares too, and its `status_line` request (ADR 0099), and the `split_pane` View Command's optional `full` key.
+    /// This release's messages, in the order of the newest fixtures folder: the Guest Sessions that a tmux restart keeps
+    /// (`guest-sessions`). The Mac declares the capability, gets the Locks, Reopens a Dormant Guest Session by its Lock
+    /// id and drops a card next to it; the phone gets the Dormant one as a `dormant_session` card.
     private func thisReleasesFrames() throws -> [Data] {
-        [
+        let lock = SessionLock(id: "s1", order: 3, session: .object(["id": .string("s1"), "name": .string("notes"), "base_name": .string("notes"),
+                                                                     "directory": .string("/work/notes"), "windows": .array([])]))
+        let shown = EnvironmentShown(contents: TopicContents(records: [], locks: [lock]),
+                                     tmux: TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true), config: Config())
+        return [
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: HostProtocol.capabilities)),
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, build: Self.build, capabilities: HostProtocol.macCapabilities,
                                                  nonce: "0a1b2c3d")),
+            try ProtocolLine.request(id: 1, HostRequest.subscribe(.environment)),
+            try ProtocolLine.item(id: 1, EnvironmentItem(changes: [.locks([lock])])),
+            try ProtocolLine.request(id: 2, HostRequest.environment(EnvironmentRequest(.reopen, target: .guestSession("s1")))),
+            try ProtocolLine.ok(id: 2, EnvironmentResponse.changed(TopicChange(topicID: nil, session: SessionID(rawValue: "$4"), sessionName: "notes"))),
+            try ProtocolLine.request(id: 3, HostRequest.environment(EnvironmentRequest(.moveCard(.after(.guestSession("s1"))),
+                                                                                       target: .guestSession("s2")))),
+            try ProtocolLine.ok(id: 3, EnvironmentResponse.changed(TopicChange(topicID: nil))),
+            try ProtocolLine.request(id: 4, HostRequest.subscribe(.snapshot)),
+            try ProtocolLine.item(id: 4, shown),
+        ]
+    }
+
+    /// The status line's release, pinned in `4-status-line`: the `status-line` capability, which the Mac declares too,
+    /// and its `status_line` request (ADR 0099), and the `split_pane` View Command's optional `full` key.
+    private func statusLineFrames() throws -> [Data] {
+        let capabilities = ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs", "status-line"]
+        return [
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: capabilities)),
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, build: Self.build, capabilities: ["status-line"], nonce: "0a1b2c3d")),
             try ProtocolLine.request(id: 1, HostRequest.statusLine(StatusLineRequest(hidden: true))),
             try ProtocolLine.ok(id: 1, ProtocolEmpty()),
             try ProtocolLine.request(id: 2, HostRequest.statusLine(StatusLineRequest(hidden: false))),
@@ -303,7 +327,7 @@ final class ProtocolWireTests: XCTestCase {
                                 storedBrowser: StoredBrowser(tabURLs: ["https://a"], activeTab: 0), openRequests: ["https://b"])
         window.topicID = "t1"
         window.savedSessionID = "s1"
-        window.lockOrder = 1.5
+        window.legacyLockOrder = 1.5
         window.layout = "abcd,120x40,0,0"
         let pane = TmuxPane(id: "%3", windowID: "@2", index: 1, isActive: true, title: "t", path: "/w", command: "node",
                             agent: "", agentStatus: "", unread: true, tty: "/dev/pts/1")
@@ -312,6 +336,7 @@ final class ProtocolWireTests: XCTestCase {
         let changes: [EnvironmentChange] = [
             .session("$1", EnvironmentSession(windows: [window], panes: [pane])), .session("$9", nil),
             .topic("t1", record), .topic("t2", nil), .openPlaces([]),
+            .locks([SessionLock(id: "s1", order: 2, session: .object(["name": .string("work"), "directory": .string("/w")]))]),
             .server(EnvironmentServer(isRunning: false, home: "/home/u", hostName: "box")),
         ]
         let line = try ProtocolLine.item(id: 1, EnvironmentItem(changes: changes))
@@ -321,11 +346,20 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertEqual(session.panes, [pane])
         XCTAssertEqual(session.windows.first?.id, window.id)
         XCTAssertEqual(session.windows.first?.topicID, "t1")
-        XCTAssertEqual(session.windows.first?.lockOrder, 1.5)
+        XCTAssertNil(session.windows.first?.legacyLockOrder, "the Host imports an older Muxify's Lock itself, so the option stays off the wire")
         XCTAssertEqual(session.windows.first?.storedBrowser, window.storedBrowser)
         XCTAssertEqual(session.windows.first?.openRequests, ["https://b"])
         XCTAssertEqual(decoded.changes[2], .topic("t1", record))
-        XCTAssertEqual(decoded.changes[5], changes[5])
+        XCTAssertEqual(decoded.changes[5], changes[5], "the Locks come whole, with their Remembered Sessions")
+        XCTAssertEqual(decoded.changes[6], changes[6])
+    }
+
+    func testAWindowFromAnOlderHostWithALockOrderStillDecodes() throws {
+        let line = #"{"session":"$1","value":{"windows":[{"id":"@2","session_id":"$1","lock_order":1.5}],"panes":[]}}"#
+        let change = try JSONDecoder().decode(EnvironmentChange.self, from: Data(line.utf8))
+        guard case .session(_, let session?) = change else { return XCTFail("no session") }
+        XCTAssertEqual(session.windows.map(\.id), ["@2"])
+        XCTAssertNil(session.windows.first?.legacyLockOrder)
     }
 
     func testAFrameIsOneLineEvenWhenItsStringsHoldNewlines() throws {
@@ -348,7 +382,8 @@ final class ProtocolWireTests: XCTestCase {
 
     func testTheRequestCapabilityIsPinned() throws {
         func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
-        XCTAssertEqual(HostProtocol.capabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs", "status-line"])
+        XCTAssertEqual(HostProtocol.capabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs", "status-line",
+                                                   "guest-sessions"])
         let request = HostRequest.environment(EnvironmentRequest(.create(title: "T"), request: Self.requestID))
         let line = text(try ProtocolLine.request(id: 1, request))
         XCTAssertEqual(line, #"{"id":1,"kind":"request","request":{"environment":{"command":{"create":{"title":"T"}},"request":"3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c","version":2}}}"# + "\n")
@@ -398,6 +433,7 @@ final class ProtocolWireTests: XCTestCase {
         do { _ = try frame.payload(ProtocolChunk.self); return true } catch {}
         do { _ = try frame.payload(FocusEvent.self); return true } catch {}
         do { _ = try frame.payload(TopicDetailItem.self); return true } catch {}
+        do { _ = try frame.payload(EnvironmentItem.self); return true } catch {}
         do { _ = try frame.payload(EnvironmentShown.self); return true } catch { return false }
     }
 
@@ -459,7 +495,7 @@ final class ProtocolWireTests: XCTestCase {
             XCTAssertEqual(request.capability, .statusLine)
         }
         XCTAssertTrue(HostProtocol.capabilities.contains("status-line"), "the server declares it")
-        XCTAssertEqual(HostProtocol.macCapabilities, ["status-line"], "the Mac declares it, so the server serves it")
+        XCTAssertEqual(HostProtocol.macCapabilities, ["status-line", "guest-sessions"], "the Mac declares it, so the server serves it")
     }
 
     func testAnUnknownRequestCaseThrowsUnsupported() {
@@ -474,7 +510,8 @@ final class ProtocolWireTests: XCTestCase {
         let root = try XCTUnwrap(Bundle.module.url(forResource: "Protocol", withExtension: nil, subdirectory: "Fixtures"))
         let folders = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        XCTAssertEqual(folders.map(\.lastPathComponent).suffix(4), ["1-first-server", "2-phone", "3-colour-reports", "4-status-line"])
+        XCTAssertEqual(folders.map(\.lastPathComponent).suffix(5), ["1-first-server", "2-phone", "3-colour-reports", "4-status-line",
+                                                                     "5-guest-sessions"])
         for folder in folders {
             let text = try String(contentsOf: folder.appendingPathComponent("frames.jsonl"), encoding: .utf8)
             let lines = text.split(separator: "\n").map { Data($0.utf8) }
@@ -501,6 +538,9 @@ final class ProtocolWireTests: XCTestCase {
             }
             if folder.lastPathComponent == "3-colour-reports" {
                 XCTAssertEqual(lines, try colourReportsFrames().map { $0.dropLast() }, "protocol 2's messages still encode as pinned")
+            }
+            if folder.lastPathComponent == "4-status-line" {
+                XCTAssertEqual(lines, try statusLineFrames().map { $0.dropLast() }, "the status line's messages still encode as pinned")
             }
         }
     }

@@ -125,8 +125,11 @@ extension WorkspaceStore {
         var guest: Bool?
         var canBench = false
         switch topic.id {
-        case .locked(let sessionID):
-            formatted = sidebarText(.session, context: sidebarFormatContexts.sessions[sessionID])
+        case .locked:
+            // A Dormant Guest Session has no live Session to read: its card shows the name that the Session had.
+            let live = topic.sessions.first.flatMap { sidebarFormatContexts.sessions[$0.id.session] }
+            formatted = sidebarText(.session, context: live ?? SidebarFormat.Context(values: [.session_name: topic.title,
+                                                                                             .session_base_name: topic.title]))
         default:
             formatted = sidebarText(.topic, context: sidebarFormatContexts.topics[topic.id])
             if case .topic(let id) = topic.id {

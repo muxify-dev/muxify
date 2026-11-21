@@ -8,7 +8,7 @@ extension PaletteItem {
         case .session(let session): return .session(session.id)
         case .window(let window): return .window(window.id)
         case .agent(let agent): return .pane(agent.paneID)
-        case .sessionPath, .choice, .command, .tag: return nil
+        case .sessionPath, .guestSession, .choice, .command, .tag: return nil
         }
     }
 }
@@ -32,6 +32,10 @@ extension CommandPalette {
         if action == .markRead || action == .markUnread {
             close()
             store.changeRead(action == .markRead ? .read : .unread, in: item.readTarget)
+            return
+        }
+        if case .guestSession(let lock) = item.ref {
+            if action == .bench { close(); store.bench(.lock(lock)) }
             return
         }
         if case .topic(let id, _) = item.ref,

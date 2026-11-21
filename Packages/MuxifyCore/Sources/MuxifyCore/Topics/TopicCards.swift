@@ -30,9 +30,9 @@ public enum TopicCards {
         case hidden
     }
 
-    /// The open Topics, the Locked Sessions and the Open Places, in list order: Pinned first.
-    public static func order(records: [TopicRecord], windows: [TmuxWindow], openPlaces: [OpenPlace] = []) -> [TopicListEntry] {
-        TopicOrder.sorted(TopicListEntry.all(records: records, windows: windows, openPlaces: openPlaces))
+    /// The open Topics, the Locks, live or Dormant, and the Open Places, in list order: Pinned first.
+    public static func order(records: [TopicRecord], locks: [SessionLock] = [], openPlaces: [OpenPlace] = []) -> [TopicListEntry] {
+        TopicOrder.sorted(TopicListEntry.all(records: records, locks: locks, openPlaces: openPlaces))
     }
 
     /// What one step does to the card. A card that is not Pinned moves inside its section of the cut

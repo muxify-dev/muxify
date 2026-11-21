@@ -787,8 +787,7 @@ final class CLIWindowAndSessionIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(try sandbox.topicOption(of: session), record.id)
         XCTAssertEqual(try sandbox.tmux(["list-windows", "-t", "=" + session + ":", "-F", "#{window_id}"]).split(separator: "\n").count, 2,
                        "both Windows move with the Session")
-        XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "=" + session + ":", SessionLock.option]).trimmingCharacters(in: .whitespacesAndNewlines), "",
-                       "the Lock ends")
+        XCTAssertEqual(try sandbox.locks(), [], "the Lock ends")
 
         let id = try await newTopic("Ship", in: sandbox.tools, sandbox: sandbox)
         let moved = try await run(cli, arguments: ["session", "move", "--topic", id], environment: sandbox.cliEnvironment(pane: pane))
@@ -2462,6 +2461,11 @@ private final class TopicSandbox {
     /// The Topic records in the state database, in id order, as the CLI wrote them.
     func records() throws -> [TopicRecord] {
         try TopicStore(paths: paths).read().records
+    }
+
+    /// The Locks of the Guest Sessions in the state database, in id order.
+    func locks() throws -> [SessionLock] {
+        try TopicStore(paths: paths).read().locks
     }
 
     /// The Muxify Worktree records in the state database, oldest first.
