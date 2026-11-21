@@ -18,38 +18,22 @@ final class ColourReportTests: XCTestCase {
         XCTAssertEqual(ColourReport.commands(panes: ["%1\" ; kill-server", "", "@2"], colours: light), [])
     }
 
-    func testMuxifysClientsAreTheNormalClientsThatAMarkerNames() {
-        let clients = [
-            TmuxClient(tty: "/dev/ttys001", sessionID: "$1", windowID: "@1", pid: 10),
-            TmuxClient(tty: "/dev/ttys002", sessionID: "$2", windowID: "@2", pid: 20),
-            TmuxClient(tty: "/dev/ttys003", sessionID: "$3", windowID: "@3", pid: 30, isControl: true),
-            // A marker whose pid now belongs to another Client at another tty.
-            TmuxClient(tty: "/dev/ttys004", sessionID: "$4", windowID: "@4", pid: 40),
-        ]
-        let options = """
-            @muxify_browser_socket /tmp/b.sock
-            @muxify_client_a "10␟/dev/ttys001␟/Users/me␟My Mac␟local"
-            @muxify_client_b 30␟/dev/ttys003␟/h␟h␟local
-            @muxify_client_c 40␟/dev/ttys009␟/h␟h␟local
-            @muxify_last_window @1
-            """
-        XCTAssertEqual(ColourReport.shownSessions(clients: clients, serverOptions: options), ["$1"])
+    func testADetachNamesItsClientAsTmuxNamesIt() {
+        XCTAssertEqual(EnvironmentPublisher.detachedClient(in: "%client-detached client-4012"), "client-4012")
+        XCTAssertEqual(EnvironmentPublisher.detachedClient(in: "%client-detached /dev/ttys007"), "/dev/ttys007")
+        XCTAssertNil(EnvironmentPublisher.detachedClient(in: "%client-detached "))
+        XCTAssertNil(EnvironmentPublisher.detachedClient(in: "%client-session-changed /dev/ttys007 $1 work"))
+        XCTAssertEqual(TmuxClient(tty: "", sessionID: "$1", windowID: "@1", pid: 4012, isControl: true).name, "client-4012")
+        XCTAssertEqual(TmuxClient(tty: "/dev/ttys007", sessionID: "$1", windowID: "@1", pid: 4012).name, "/dev/ttys007")
     }
 
-    func testEverySwitchClientOfAnInvocationNamesItsTarget() {
-        XCTAssertEqual(ColourReport.switchTargets(in: ["switch-client", "-Z", "-c", "/dev/ttys001", "-t", "$1:@2"]), ["$1:@2"])
-        XCTAssertEqual(ColourReport.switchTargets(in: ["kill-window", "-t", "@1", ";", "switch-client", "-c", "/dev/x", "-t", "$2:@3"]),
-                       ["$2:@3"])
-        XCTAssertEqual(ColourReport.switchTargets(in: ["send-keys", "-t", "%1", "switch-client", "-t", "x"]), [])
-        XCTAssertEqual(ColourReport.switchTargets(in: ["switch-client", "-c", "/dev/x"]), [])
-    }
-
-    func testAReadReportsOnlyTheSessionsThatAreNewlyShownAndAForcedReadReportsAll() {
-        var state = ColourReportState()
-        XCTAssertEqual(state.sessionsToReport(shown: ["$1"], all: false), ["$1"])
-        XCTAssertEqual(state.sessionsToReport(shown: ["$1"], all: false), [], "nothing changed")
-        XCTAssertEqual(state.sessionsToReport(shown: ["$1", "$2"], all: false), ["$2"])
-        XCTAssertEqual(state.sessionsToReport(shown: ["$2"], all: false), [], "a Session that is no longer shown")
-        XCTAssertEqual(state.sessionsToReport(shown: ["$1", "$2"], all: true), ["$1", "$2"])
+    func testTheSnapshotTellsAListenerFromAScreenByIgnoreSize() {
+        let s = Tmux.separator
+        let snapshot = Tmux.parseSnapshot([
+            ["C", "", "$1", "@1", "10", "1", "attached,focused,control-mode,ignore-size,no-output,UTF-8"],
+            ["C", "", "$1", "@1", "20", "1", "attached,focused,control-mode,UTF-8"],
+            ["C", "/dev/ttys001", "$1", "@1", "30", "0"],
+        ].map { $0.joined(separator: s) }.joined(separator: "\n"))
+        XCTAssertEqual(snapshot.clients.map(\.ignoresSize), [true, false, false])
     }
 }

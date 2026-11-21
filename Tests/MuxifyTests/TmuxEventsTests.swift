@@ -1,5 +1,5 @@
 import XCTest
-import MuxifyCore
+@testable import MuxifyCore
 import MuxifyTestSupport
 
 /// Runs the events client against a throwaway tmux server.
@@ -32,15 +32,19 @@ final class TmuxEventsTests: XCTestCase {
         if let directory { try? FileManager.default.removeItem(at: directory) }
     }
 
-    func testTheEventsClientWatchesFromItsOwnSessionAndNeverAnswersAPanesColorQuery() throws {
+    /// tmux 3.8 answers a Pane's background question from a control Client in its Session as black, so the probe sits
+    /// in another Session than the one that tmux picks for the events client, the latest.
+    func testTheEventsClientWatchesFromASessionTmuxPicksAndNeverAnswersTheColorQueryOfAnotherSession() throws {
         try server.run(["new-session", "-d", "-s", "work", "-x", "80", "-y", "24"])
+        try server.run(["new-session", "-d", "-s", "spare"])
         try server.run(["set-option", "-g", "window-style", ""])
         let events = TmuxEvents()
         var changes: [String] = []
         events.onEvent = { if case .sessionWindowChanged(_, let window) = $0 { changes.append(window) } }
         defer { events.stop() }
         events.start(invocation: server.invocation)
-        try wait("the events client did not attach") { try self.controlClients() == [Tmux.watchSessionName] }
+        try wait("the events client did not attach") { try self.controlClients() == ["spare"] }
+        XCTAssertFalse(try sessions().contains(EnvironmentPublisher.leftoverWatchSession), "the events client made a Session")
 
         let reply = directory.appendingPathComponent("reply").path
         let probe = "stty raw -echo min 0 time 10; printf '\\033]11;?\\033\\\\'; head -c 64 > \(reply); touch \(reply).done"
@@ -54,12 +58,147 @@ final class TmuxEventsTests: XCTestCase {
         try server.run(["select-window", "-t", window])
         try wait("no session-window-changed from the user's Session") { changes.contains(window) }
 
-        try server.run(["kill-session", "-t", "=" + Tmux.watchSessionName])
+        let sitting = try XCTUnwrap(try controlClients().first)
+        try server.run(["kill-session", "-t", "=" + sitting])
         try wait("the events client outlived its Session") { !events.isRunning }
-        try wait("the events client did not come back with its Session", seconds: 5) {
+        try wait("the events client did not come back in the Session left", seconds: 5) {
             events.start(invocation: self.server.invocation)
-            return try self.controlClients() == [Tmux.watchSessionName]
+            return try self.controlClients().count == 1
         }
+    }
+
+    /// The Listener of a Sessions-only App Window, over SSH on the host: it attaches with no target, moves to the
+    /// Session that the Terminal's Client shows, and follows it on `%client-session-changed`.
+    func testTheListenerMovesToTheTerminalsSessionAndFollowsItWhereverItSwitches() throws {
+        try server.run(["new-session", "-d", "-s", "work"])
+        try server.run(["new-session", "-d", "-s", "other"])
+        try server.run(["new-session", "-d", "-s", "third"])
+        let terminal = try attachClient(to: "work")
+        defer { terminal.process.terminate() }
+        let session = { (name: String) in
+            try self.server.run(["display-message", "-p", "-t", "=" + name + ":", "#{session_id}"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let events = TmuxEvents()
+        defer { events.stop() }
+        events.follow(client: terminal.tty, session: try session("work"))
+        events.start(invocation: server.invocation)
+        try wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        XCTAssertEqual(try sessions().count, 3, "the Listener made a Session")
+
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
+        try wait("the Listener did not follow a switch made inside tmux") { try self.controlClients() == ["other"] }
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=third"])
+        try wait("the Listener did not follow the next switch") { try self.controlClients() == ["third"] }
+
+        // Another Client's switch is not the Terminal's.
+        let other = try attachClient(to: "work")
+        defer { other.process.terminate() }
+        try server.run(["switch-client", "-c", other.tty, "-t", "=other"])
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertEqual(try controlClients(), ["third"], "the Listener followed another Client")
+    }
+
+    func testAControlClientWritesABatchFarLargerThanItsPtyWholeAndInOrder() throws {
+        let python = "/usr/bin/python3"
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: python), "no python3 for the probe")
+        let script = directory.appendingPathComponent("probe.py").path
+        let go = directory.appendingPathComponent("go").path
+        // Waits for `go`, then asks for the background (OSC 11) and writes the answer's colour, or `none`.
+        try """
+            import os, re, select, sys, time, tty
+            answer, go = sys.argv[1], sys.argv[2]
+            tty.setraw(0)
+            while not os.path.exists(go): time.sleep(0.02)
+            os.write(1, b'\\x1b]11;?\\x1b\\\\')
+            reply, end = b'', time.time() + 2
+            while time.time() < end and not reply.endswith(b'\\x1b\\\\'):
+                if select.select([0], [], [], 0.05)[0]: reply += os.read(0, 256)
+            found = re.search(rb'rgb:[0-9a-f/]+', reply)
+            open(answer + '.part', 'w').write(found.group().decode() if found else 'none')
+            os.rename(answer + '.part', answer)
+            time.sleep(30)
+            """.write(toFile: script, atomically: true, encoding: .utf8)
+        let answers = (0..<16).map { directory.appendingPathComponent("answer-\($0)").path }
+        var panes: [String] = []
+        for (index, answer) in answers.enumerated() {
+            let place = index == 0 ? ["new-session", "-d", "-s", "work", "-x", "80", "-y", "24"] : ["new-window", "-d", "-t", "work:"]
+            panes.append(try server.run(place + ["-P", "-F", "#{pane_id}", "\(python) \(script) \(answer) \(go)"])
+                .trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        let invocation = try server.invocation(["-C", "attach-session", "-t", "work", "-f", "no-output,ignore-size"])
+        let client = try ControlClient(binary: invocation.executable, arguments: invocation.arguments,
+                                       onLines: { _ in }, onExit: {})
+        defer { client.stop() }
+        try wait("the control client did not attach") { try self.controlClients() == ["work"] }
+        let pid = try XCTUnwrap(pid_t(try server.run(["list-clients", "-f", "#{client_control_mode}", "-F", "#{client_pid}"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)))
+
+        // Each round reports another colour to every Pane, so a Pane answers its last round only when every line
+        // reached tmux whole and in order.
+        func colours(round: Int, pane: Int) -> TerminalColours {
+            TerminalColours(background: TerminalColour(red: UInt8(round), green: UInt8(pane), blue: 0x80),
+                            foreground: TerminalColour(red: 0x10, green: 0x20, blue: UInt8(round)))
+        }
+        let rounds = 16
+        let lines = (0..<rounds).flatMap { round in
+            panes.enumerated().flatMap { ColourReport.commands(panes: [$0.element], colours: colours(round: round, pane: $0.offset)) }
+        } + ["set-option -g @muxify_lossless done"]
+        XCTAssertGreaterThan(lines.reduce(0) { $0 + $1.utf8.count + 1 }, 16 * 1024, "the batch fits in the pty")
+
+        // A stopped client reads nothing, so the pty fills after its first few lines.
+        kill(pid, SIGSTOP)
+        defer { kill(pid, SIGCONT) }
+        let started = Date()
+        lines.forEach(client.send)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1, "a send waited for the pty")
+        kill(pid, SIGCONT)
+
+        try wait("tmux did not run the batch's last line", seconds: 10) {
+            (try? self.server.run(["show-options", "-gv", "@muxify_lossless"]))?
+                .trimmingCharacters(in: .whitespacesAndNewlines) == "done"
+        }
+        try "".write(toFile: go, atomically: true, encoding: .utf8)
+        try wait("a probe did not answer", seconds: 10) { answers.allSatisfy { FileManager.default.fileExists(atPath: $0) } }
+        for (index, answer) in answers.enumerated() {
+            XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8),
+                           colours(round: rounds - 1, pane: index).background.oscReply, "Pane \(panes[index])")
+        }
+    }
+
+    /// A Terminal's Client, attached through a pty of its own.
+    private func attachClient(to session: String) throws -> (tty: String, process: Process) {
+        let binary = try XCTUnwrap(server.binary)
+        let known = Set(try terminalClients())
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        process.arguments = ["-q", "/dev/null", binary, "-u", "-S", socket, "-f", "/dev/null", "attach-session", "-t", session]
+        var environment = ProcessInfo.processInfo.environment
+        environment["TMUX"] = nil
+        environment["TMUX_PANE"] = nil
+        environment["TERM"] = "xterm-256color"
+        process.environment = environment
+        process.standardInput = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            if let tty = try terminalClients().first(where: { !known.contains($0) }) { return (tty, process) }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        process.terminate()
+        throw TmuxError.timedOut
+    }
+
+    private func terminalClients() throws -> [String] {
+        ((try? server.run(["list-clients", "-f", "#{==:#{client_control_mode},0}", "-F", "#{client_tty}"])) ?? "")
+            .split(separator: "\n").map(String.init)
+    }
+
+    private func sessions() throws -> [String] {
+        try server.run(["list-sessions", "-F", "#{session_name}"]).split(separator: "\n").map(String.init)
     }
 
     private func controlClients() throws -> [String] {

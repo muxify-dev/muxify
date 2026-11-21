@@ -9,8 +9,27 @@ final class ProtocolWireTests: XCTestCase {
 
     private static let requestID = RequestID("3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c")!
 
-    /// This release's messages, in the order of the newest fixtures folder: the capabilities that the phone uses.
+    /// This release's messages, in the order of the newest fixtures folder: protocol 2, which adds the Mac's colours
+    /// and the `focus` subscription (ADR 0098).
     private func thisReleasesFrames() throws -> [Data] {
+        let light = ColourProbes.light
+        return [
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: HostProtocol.capabilities)),
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, build: Self.build, nonce: "0a1b2c3d")),
+            try ProtocolLine.request(id: 1, HostRequest.subscribe(.focus)),
+            try ProtocolLine.request(id: 2, HostRequest.colours(ColoursRequest(light))),
+            try ProtocolLine.ok(id: 2, ProtocolEmpty()),
+            try ProtocolLine.item(id: 1, FocusEvent.focusChanged(window: "@3")),
+            try ProtocolLine.request(id: 3, HostRequest.colours(ColoursRequest(light, window: "@3"))),
+            try ProtocolLine.ok(id: 3, ProtocolEmpty()),
+            try ProtocolLine.item(id: 1, FocusEvent.taken(window: "@3")),
+            try ProtocolLine.request(id: 4, HostRequest.colours(ColoursRequest(nil))),
+            try ProtocolLine.ok(id: 4, ProtocolEmpty()),
+        ]
+    }
+
+    /// The phone's release, pinned in `2-phone`: the capabilities that the phone uses.
+    private func phonesFrames() throws -> [Data] {
         let id = Self.requestID
         let created = EnvironmentResponse.changed(TopicChange(topicID: id.rawValue, created: true))
         func failed(_ failure: TopicFailure) -> ProtocolError { ProtocolError(.failed, failure.message, topicFailure: failure) }
@@ -329,11 +348,12 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(gone.dropLast().utf8))).payload(TopicDetailItem.self), .none)
     }
 
-    /// Whether an `item` decodes as one of the protocol's items: a chunk, a `topic` subscription's detail or null, or a
-    /// `snapshot` item.
+    /// Whether an `item` decodes as one of the protocol's items: a chunk, a `focus` event, a `topic` subscription's
+    /// detail or null, or a `snapshot` item.
     private static func decodesAsAnItem(_ frame: ProtocolFrame) -> Bool {
         // `try?` would flatten a null item into a failure.
         do { _ = try frame.payload(ProtocolChunk.self); return true } catch {}
+        do { _ = try frame.payload(FocusEvent.self); return true } catch {}
         do { _ = try frame.payload(TopicDetailItem.self); return true } catch {}
         do { _ = try frame.payload(EnvironmentShown.self); return true } catch { return false }
     }
@@ -356,6 +376,37 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertTrue(text(try ProtocolLine.item(id: 6, printed)).contains(#""capabilities":["request"]"#), "the CLI adds its own")
     }
 
+    func testTheColoursRequestWithAndWithoutAWindowAndTheFocusEventsRoundTrip() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        let light = ColourProbes.light
+        let requests: [(HostRequest, String)] = [
+            (.colours(ColoursRequest(light)), ##"{"colours":{"background":"#fbf1c7","foreground":"#3c3836"}}"##),
+            (.colours(ColoursRequest(light, window: "@3")), ##"{"colours":{"background":"#fbf1c7","foreground":"#3c3836","window":"@3"}}"##),
+            (.colours(ColoursRequest(nil)), #"{"colours":{}}"#),
+            (.subscribe(.focus), #"{"subscribe":{"focus":{}}}"#),
+        ]
+        for (request, pinned) in requests {
+            let line = try ProtocolLine.request(id: 3, request)
+            XCTAssertEqual(text(line), #"{"id":3,"kind":"request","request":"# + pinned + "}\n")
+            XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(line.dropLast())).payload(HostRequest.self), request)
+            XCTAssertNil(request.capability, "protocol 2's base needs no capability")
+        }
+        let events: [(FocusEvent, String)] = [
+            (.focusChanged(window: "@3"), #"{"id":1,"item":{"focus_changed":"@3"},"kind":"item"}"#),
+            (.taken(window: "@4"), #"{"id":1,"item":{"taken":"@4"},"kind":"item"}"#),
+        ]
+        for (event, pinned) in events {
+            let line = try ProtocolLine.item(id: 1, event)
+            XCTAssertEqual(text(line), pinned + "\n")
+            XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(line.dropLast())).payload(FocusEvent.self), event)
+        }
+        XCTAssertEqual([FocusEvent.focusChanged(window: "@3").key, FocusEvent.taken(window: "@3").key], ["focus_changed", "taken"],
+                       "a newer event replaces an unsent one of its own kind only")
+        for broken in [##"{"colours":{"background":"#fbf1c7"}}"##, ##"{"colours":{"background":"fbf1c7","foreground":"#3c3836"}}"##] {
+            XCTAssertThrowsError(try JSONDecoder().decode(HostRequest.self, from: Data(broken.utf8)), broken)
+        }
+    }
+
     func testAnUnknownRequestCaseThrowsUnsupported() {
         XCTAssertThrowsError(try JSONDecoder().decode(HostRequest.self, from: Data(#"{"frob":{}}"#.utf8))) { error in
             XCTAssertEqual((error as? ProtocolError)?.code, .unsupported)
@@ -368,7 +419,7 @@ final class ProtocolWireTests: XCTestCase {
         let root = try XCTUnwrap(Bundle.module.url(forResource: "Protocol", withExtension: nil, subdirectory: "Fixtures"))
         let folders = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        XCTAssertEqual(folders.map(\.lastPathComponent).suffix(2), ["1-first-server", "2-phone"])
+        XCTAssertEqual(folders.map(\.lastPathComponent).suffix(3), ["1-first-server", "2-phone", "3-colour-reports"])
         for folder in folders {
             let text = try String(contentsOf: folder.appendingPathComponent("frames.jsonl"), encoding: .utf8)
             let lines = text.split(separator: "\n").map { Data($0.utf8) }
@@ -389,6 +440,9 @@ final class ProtocolWireTests: XCTestCase {
             }
             if folder.lastPathComponent == "1-first-server" {
                 XCTAssertEqual(lines, try firstServersFrames().map { $0.dropLast() }, "the first server's messages still encode as pinned")
+            }
+            if folder.lastPathComponent == "2-phone" {
+                XCTAssertEqual(lines, try phonesFrames().map { $0.dropLast() }, "the phone's messages still encode as pinned")
             }
         }
     }

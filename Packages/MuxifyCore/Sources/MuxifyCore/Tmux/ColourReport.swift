@@ -12,6 +12,18 @@ public struct TerminalColour: Hashable, Sendable {
         self.blue = blue
     }
 
+    /// `#rrggbb`, the form that the Host Server protocol carries.
+    public var hex: String {
+        "#" + [red, green, blue].map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Reads `#rrggbb`; nil for anything else.
+    public init?(hex: String) {
+        let digits = hex.dropFirst()
+        guard hex.first == "#", digits.count == 6, digits.allSatisfy(\.isHexDigit), let value = UInt32(digits, radix: 16) else { return nil }
+        self.init(red: UInt8(value >> 16 & 0xff), green: UInt8(value >> 8 & 0xff), blue: UInt8(value & 0xff))
+    }
+
     /// The form of an OSC 10 or 11 reply: each channel written twice, `rgb:fbfb/f1f1/c7c7`.
     var oscReply: String {
         "rgb:" + [red, green, blue].map { String(format: "%02x%02x", $0, $0) }.joined(separator: "/")
@@ -43,45 +55,8 @@ enum ColourReport {
         }
     }
 
-    /// The Sessions that Muxify's own Clients show: each normal Client that a `@muxify_client_<nonce>` marker in
-    /// `serverOptions`, the output of `show-options -s`, names by pid and tty.
-    static func shownSessions(clients: [TmuxClient], serverOptions: String) -> Set<String> {
-        let prefix = ClientMarker.option(nonce: "")
-        let named = serverOptions.split(separator: "\n").compactMap { line -> ViewCommandExecutor.Client? in
-            guard line.hasPrefix(prefix), let space = line.firstIndex(of: " ") else { return nil }
-            let value = line[line.index(after: space)...].trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
-            return ClientMarker.named(by: value)
-        }
-        return Set(clients.filter { client in
-            !client.isControl && named.contains { $0.pid == client.pid && $0.tty == client.tty }
-        }.map(\.sessionID))
-    }
-
-    /// The `-t` target of each `switch-client` in one tmux invocation, whose commands `;` separates.
-    static func switchTargets(in arguments: [String]) -> [String] {
-        arguments.split(separator: ";").compactMap { command in
-            guard command.first == "switch-client", let flag = command.firstIndex(of: "-t"),
-                  command.index(after: flag) < command.endIndex else { return nil }
-            return command[command.index(after: flag)]
-        }
-    }
-
     static func isPaneID(_ value: String) -> Bool {
         value.count > 1 && value.first == "%" && value.dropFirst().allSatisfy(\.isASCIIDigit)
-    }
-}
-
-/// What the reads of one listener have reported, so that a read reports only the Sessions that became shown.
-struct ColourReportState: Sendable {
-    private var shown: Set<String> = []
-
-    init() {}
-
-    /// The Sessions to report for a read that finds `shown`: those that were not shown at the last read, or every
-    /// one with `all`.
-    mutating func sessionsToReport(shown: Set<String>, all: Bool) -> Set<String> {
-        defer { self.shown = shown }
-        return all ? shown : shown.subtracting(self.shown)
     }
 }
 

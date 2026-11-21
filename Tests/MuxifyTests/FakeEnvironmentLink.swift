@@ -63,8 +63,16 @@ final class FakeEnvironmentLink: EnvironmentLink {
     func startListening() { listening = true }
     func stopListening() { listening = false }
     var attachmentEnd: AttachmentEnd? { nil }
+    var localClientExitStatus: Int? { nil }
     func installHostCLI(environmentName: String) {}
     /// How many times the store asked for the Config again.
+    /// Every colours report the store sent, in order: nil when it writes none.
+    private(set) var reportedColours: [TerminalColours?] = []
+    func reportColours(_ colours: TerminalColours?) { reportedColours.append(colours) }
+    /// Every Window whose Panes the store asked to write, in order.
+    private(set) var reportedWindows: [String] = []
+    func reportColours(toWindow window: String) { reportedWindows.append(window) }
+
     private(set) var configReloads = 0
     func reloadConfig() { configReloads += 1 }
 

@@ -61,16 +61,16 @@ _Avoid_: split, terminal
 A terminal attached to a tmux server, showing one of its Sessions. Each App Window's Terminal is one Client; Ghostty.app or another terminal attached to the same server is another.
 _Avoid_: attachment, connection, viewer
 
+**Listener**:
+Muxify's control-mode Client. It hears every change on a tmux server and writes the Colour Reports of Muxify's Terminal. It sits in the Session that Muxify's Terminal shows and moves with it, on this Mac and on a Remote Environment's host; before the Terminal attaches, it sits in the Session that tmux picks. Each App Window has one.
+_Avoid_: watch Client, observer, control connection
+
 **Server binary**:
 The tmux program that a running tmux server was started from. Muxify and the `muxify` command run it for every command on that server, because a tmux of another release can fail on the server. With no server, they run the first tmux on `$PATH`, then one in the usual folders.
 _Avoid_: tmux path, tmux version setting
 
-**Watch Session**:
-The Session `muxify-watch`, where Muxify's control-mode Client listens for tmux changes. Muxify makes it while you have a Session of your own and kills it after your last one closes. It has no Window you can see in the Sidebar, the Command Palette or the CLI, and no Terminal attaches to it.
-_Avoid_: listener Session, infra Session, hidden Session
-
 **Colour Report**:
-The background and foreground colours that a screen tells tmux it paints a Pane with. A program in the Pane that asks for its background or foreground gets the last Colour Report that any screen wrote, before any other answer. Muxify writes the colours of its Terminal for the Sessions that it shows, so the screen in use writes last. Muxify Mobile writes its theme's colours.
+The background and foreground colours that a screen tells tmux it paints a Pane with. A program in the Pane that asks for its background or foreground gets the last Colour Report that any screen wrote, before any other answer. The Listener of the key App Window writes the colours of its Terminal when the Terminal shows another Session, when its user changes the focus or types first after another screen took the Window, and when another screen leaves the server, on this Mac and on a Remote Environment's host, so the screen in use writes last. Muxify Mobile writes its theme's colours.
 _Avoid_: theme report, colour override, OSC report
 
 **Find in Pane**:

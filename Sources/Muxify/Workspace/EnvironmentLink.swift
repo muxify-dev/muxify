@@ -37,6 +37,12 @@ enum EnvironmentEvent {
     case serverUnavailable(HostServerUnavailable)
     /// The Config the App Window runs with: it replaces the store's `remoteConfig` whole.
     case config(EnvironmentConfig)
+    /// The focus changed in `window`, the Window that the Terminal shows. tmux does not say whose screen changed it:
+    /// the store decides whether this Mac's user did, and then writes the Window's colours.
+    case focusChanged(window: String)
+    /// Another screen took `window`, the Window that the Terminal shows: the Terminal's next key or click writes its
+    /// colours again.
+    case windowTaken(window: String)
 }
 
 /// Which Config an App Window runs with (ADR 0010).
@@ -175,7 +181,7 @@ protocol EnvironmentLink: AnyObject {
                          newSession: RemoteSSH.NewSession?) throws -> String
     /// Marks the App Window's own Client on this Mac's server, or removes the mark with nil.
     func updateLocalClient(_ client: TmuxClient?)
-    /// Whether the link hears every change of the server and the records itself and keeps its own Watch Session, so
+    /// Whether the link hears every change of the server and the records itself and keeps its own Listener, so
     /// the store neither polls it nor starts its listening. The Local link's `EnvironmentPublisher` does; a
     /// Sessions-only link leaves both to the store.
     var publishesChanges: Bool { get }
@@ -185,6 +191,9 @@ protocol EnvironmentLink: AnyObject {
     func stopListening()
     /// How the attachment ended, for a link whose attachment owns its transport; nil on this Mac.
     var attachmentEnd: AttachmentEnd? { get }
+    /// The exit status of the Terminal's tmux Client on this Mac, once it exited: 0 after its Session ended or it
+    /// detached, 1 after the server was killed. Nil elsewhere.
+    var localClientExitStatus: Int? { get }
     /// Puts the Host CLI on the Environment's machine once it connects. Nothing waits for it.
     func installHostCLI(environmentName: String)
     /// Sends the Config again as a `config` event: on connecting, on Reload Config and when a Command Palette opens.
@@ -241,9 +250,13 @@ protocol EnvironmentLink: AnyObject {
     /// Whether this App Window consumes `@muxify_open` on its Environment, so that its Host Server names its own
     /// socket in `@muxify_browser_socket`: it sends `claim_open` or `release_open` when this changes.
     func setOpenConsumer(_ consumes: Bool)
-    /// Reports the Terminal's colours to the Panes of the Sessions that this App Window's Environment shows (ADR
-    /// 0095). Only the Local Environment reports: issue #149 is the remote one.
+    /// Reports the Terminal's colours to the Panes of the Session that this App Window's Terminal shows, and again
+    /// each time it moves (ADR 0098); nil writes none, as for an App Window that is not key. The Local Environment's
+    /// publisher writes them; a Host's link sends them to its Host Server, whose Listener writes them.
     func reportColours(_ colours: TerminalColours?)
+    /// Writes the colours to every Pane of `window`, as the store decided after a `focusChanged` or a `windowTaken`
+    /// event, without waiting. It writes nothing while no colours were reported.
+    func reportColours(toWindow window: String)
 
     // MARK: Git
 
@@ -326,6 +339,7 @@ extension EnvironmentLink {
     func serveHostRequests(_ handler: @escaping HostRequestHandler) {}
     func setOpenConsumer(_ consumes: Bool) {}
     func reportColours(_ colours: TerminalColours?) {}
+    func reportColours(toWindow window: String) {}
 }
 
 /// What answers a Host Server's request for its App Window: a Browser command's reply, `done` for a `select`, or
@@ -450,6 +464,8 @@ class TmuxConnectionLink {
         guard connection?.isOnThisMac == true else { return }
         ownClient = client.flatMap { $0.isControl || $0.pid <= 0 ? nil : ViewCommandExecutor.Client(tty: $0.tty, pid: $0.pid) }
     }
+
+    var localClientExitStatus: Int? { connection?.localClientExitStatus }
 
     var attachmentEnd: AttachmentEnd? {
         guard let connection, let remote = connection.remote else { return nil }

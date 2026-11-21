@@ -134,6 +134,7 @@ extension TmuxClient: Codable {
         case windowID = "window_id"
         case pid
         case isControl = "control"
+        case ignoresSize = "ignore_size"
     }
 
     public init(from decoder: Decoder) throws {
@@ -142,7 +143,8 @@ extension TmuxClient: Codable {
                   sessionID: try values.decodeIfPresent(String.self, forKey: .sessionID) ?? "",
                   windowID: try values.decodeIfPresent(String.self, forKey: .windowID) ?? "",
                   pid: try values.decodeIfPresent(Int.self, forKey: .pid) ?? 0,
-                  isControl: try values.decodeIfPresent(Bool.self, forKey: .isControl) ?? false)
+                  isControl: try values.decodeIfPresent(Bool.self, forKey: .isControl) ?? false,
+                  ignoresSize: try values.decodeIfPresent(Bool.self, forKey: .ignoresSize) ?? false)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -152,6 +154,7 @@ extension TmuxClient: Codable {
         try values.encode(windowID, forKey: .windowID)
         try values.encode(pid, forKey: .pid)
         try values.encode(isControl, forKey: .isControl)
+        if ignoresSize { try values.encode(ignoresSize, forKey: .ignoresSize) }
     }
 }
 

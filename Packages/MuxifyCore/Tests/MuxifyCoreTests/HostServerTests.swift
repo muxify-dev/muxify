@@ -49,7 +49,12 @@ final class HostServerTests: XCTestCase {
         consumers.forEach { $0.cancel() }
         clients.forEach { $0.close() }
         for server in servers { _ = await server.wait() }
-        if let clientProcess, clientProcess.isRunning { clientProcess.terminate(); clientProcess.waitUntilExit() }
+        if let clientProcess, clientProcess.isRunning {
+            clientProcess.terminate()
+            // `waitUntilExit` can miss the exit in an async tearDown and wait for ever: wait for the pid, a while at most.
+            let deadline = Date().addingTimeInterval(5)
+            while kill(clientProcess.processIdentifier, 0) == 0, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
         if let actual = try? tmux?.run(["display-message", "-p", "#{socket_path}"]),
            actual.trimmingCharacters(in: .whitespacesAndNewlines) == socket {
             _ = try? tmux.run(["kill-server"])
@@ -437,6 +442,91 @@ final class HostServerTests: XCTestCase {
         } catch let error as ProtocolError {
             XCTAssertEqual(error.code, .failed)
         }
+    }
+
+    // MARK: - The Mac's colours (ADR 0098)
+
+    private var colourProbes: ColourProbes { ColourProbes(directory: directory, server: tmux) }
+
+    /// A Mac whose Terminal's Client shows `session` on the Host, which the Mac's marker names, and that sent its
+    /// colours: the Host Server's Listener follows that Client.
+    private func macWithColours(showing session: String) async throws -> (ProtocolClient, ViewCommandExecutor.Client) {
+        let nonce = "n" + UUID().uuidString.prefix(8).lowercased()
+        let client = try await connect(nonce: nonce)
+        _ = subscribe(client)
+        let terminal = try attachClient(to: session)
+        let value = [String(terminal.pid), terminal.tty, "/home/u", "box", "remote"].joined(separator: Tmux.separator)
+        try tmux.run(["set-option", "-sq", ClientMarker.option(nonce: nonce), value])
+        try await client.call(HostRequest.colours(ColoursRequest(ColourProbes.light)), as: ProtocolEmpty.self)
+        try await wait("the Listener did not move to the Terminal's Session") { self.colourProbes.controlClients() == [session] }
+        return (client, terminal)
+    }
+
+    func testAfterTheColoursRequestAProbeAnswersTheMacsColoursAfterASwitchAndAfterAScreensDetach() async throws {
+        let other = try colourProbes.probe(session: "other")
+        let detachedProbe = directory.appendingPathComponent("other-detach").path
+        try tmux.run(["split-window", "-d", "-t", "other:", colourProbes.probeCommand(detachedProbe, go: "detach")])
+        let (_, terminal) = try await macWithColours(showing: "work")
+
+        try tmux.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
+        try await wait("the Listener did not follow the Terminal") { self.colourProbes.controlClients() == ["other"] }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        try colourProbes.go()
+        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: other.0) }
+        XCTAssertEqual(try String(contentsOfFile: other.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
+                       "the Session that the Terminal switched to did not get the Mac's colours")
+
+        // Another screen, as Muxify Mobile is, writes its own colours and detaches.
+        try await colourProbes.screenWritesAndDetaches(in: "other", flags: nil) { try? await Task.sleep(nanoseconds: 500_000_000) }
+        try colourProbes.go("detach")
+        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: detachedProbe) }
+        XCTAssertEqual(try String(contentsOfFile: detachedProbe, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
+                       "the screen's colours stayed after it detached")
+    }
+
+    /// tmux tells a program with mode 2031 of a new colour scheme at the switch. A switch that the Mac starts runs on
+    /// the Host Server's Listener after the Colour Report, so the program gets the Mac's colours at the notice, not the
+    /// other screen's.
+    func testASwitchTheMacStartsRunsOnTheListenerAfterTheColourReport() async throws {
+        let notices = try colourProbes.themeProbe(session: "other")
+        try await wait("the probe did not turn on mode 2031", seconds: 5) { self.colourProbes.lines(notices).first == "ready" }
+        // The Terminal's Session is the newest, so the Listener never sits in the probe's Session, where tmux would
+        // take its colours as black and tell the probe dark before the other screen does.
+        try tmux.run(["new-session", "-d", "-s", "main"])
+        let (client, terminal) = try await macWithColours(showing: "main")
+        try ColourProbes.terminalSays(2, through: clientProcess)
+        try await colourProbes.screenWritesAndDetaches(in: "other", flags: "ignore-size,no-output") {}
+        try await wait("the probe was not told dark") { self.colourProbes.lines(notices).last == "dark" }
+
+        _ = try await client.call(HostRequest.view(.switchClient(client: terminal.tty, target: "=other:")), as: ViewOutput.self)
+
+        try await wait("the probe was not told light", seconds: 5) { self.colourProbes.lines(notices).last?.hasPrefix("light") == true }
+        XCTAssertEqual(colourProbes.lines(notices).last, "light rgb:fbfb/f1f1/c7c7", "the program at the notice got other colours")
+        try await wait("the Listener did not follow the Terminal") { self.colourProbes.controlClients() == ["other"] }
+    }
+
+    func testTheFocusSubscriptionTellsTheMacOfAFocusChangeInTheTerminalsWindow() async throws {
+        let second = try tmuxOutput(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "work:"])
+        let (client, _) = try await macWithColours(showing: "work")
+        let shown = try tmuxOutput(["display-message", "-p", "-t", "work:", "#{window_id}"])
+        let heard = FocusLog()
+        let events = client.subscribe(HostRequest.subscribe(.focus), as: FocusEvent.self)
+        consumers.append(Task {
+            do {
+                for try await event in events { heard.add(event) }
+            } catch {}
+        })
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        try tmux.run(["select-pane", "-t", second])
+        try await wait("the focus change did not reach the Mac") { heard.events.contains(.focusChanged(window: shown)) }
+    }
+
+    private final class FocusLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [FocusEvent] = []
+        var events: [FocusEvent] { lock.lock(); defer { lock.unlock() }; return log }
+        func add(_ event: FocusEvent) { lock.lock(); log.append(event); lock.unlock() }
     }
 
     // MARK: - The config subscription

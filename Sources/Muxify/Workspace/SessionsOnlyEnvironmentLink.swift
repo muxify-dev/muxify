@@ -10,7 +10,7 @@ import MuxifyCore
 final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     let isOnThisMac = false
     let features: EnvironmentFeatures = []
-    /// The store polls the remote server and keeps its Watch Session through `startListening`; once a Host Server
+    /// The store polls the remote server and starts its Listener through `startListening`; once a Host Server
     /// serves, its publisher does both.
     let publishesChanges = false
     let environment: RemoteEnvironment
@@ -23,6 +23,24 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     }
 
     var isListening: Bool { tmuxEvents.isRunning }
+
+    /// Each read also tells the Listener where the Terminal's Client, the one the bootstrap's marker names, is.
+    override func snapshot(updating commandLines: PaneCommandLines?) async throws -> TmuxSnapshot {
+        let snapshot = try await super.snapshot(updating: commandLines)
+        followTerminal(in: snapshot)
+        return snapshot
+    }
+
+    override func snapshotNow() throws -> TmuxSnapshot {
+        let snapshot = try super.snapshotNow()
+        followTerminal(in: snapshot)
+        return snapshot
+    }
+
+    private func followTerminal(in snapshot: TmuxSnapshot) {
+        let tty = snapshot.ownClientTTY
+        tmuxEvents.follow(client: tty, session: snapshot.clients.first { $0.tty == tty && !$0.isControl }?.sessionID)
+    }
 
     func startListening() {
         guard let connection else { return }

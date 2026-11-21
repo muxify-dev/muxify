@@ -256,9 +256,12 @@ final class RemoteSSHTests: XCTestCase {
     func testOnlyTheListenerWatchesTheMarkerAndTheBootstrapKillsNothing() throws {
         let directory = try TestDirectory()
         let ssh = try remote(in: directory)
-        XCTAssertTrue(ssh.command(["-C", "new-session", "-A", "-s", Tmux.watchSessionName]).arguments.last!.contains("kill -HUP"))
+        XCTAssertTrue(ssh.command(["-C", "attach-session", "-f", "no-output,ignore-size"]).arguments.last!.contains("kill -HUP"))
         XCTAssertFalse(ssh.command(["list-sessions"]).arguments.last!.contains("kill -HUP"))
-        XCTAssertFalse(ssh.bootstrap().contains("kill"), "the bootstrap ends no listener: each channel ends itself")
+        let kills = ssh.bootstrap().components(separatedBy: "\n").filter { $0.contains("kill") }
+        XCTAssertEqual(kills.map { $0.trimmingCharacters(in: .whitespaces) },
+                       ["tmux -u kill-session -t '=\(EnvironmentPublisher.leftoverWatchSession)' 2>/dev/null"],
+                       "the bootstrap ends no listener, each channel ends itself; it kills only an earlier Muxify's Watch Session")
     }
 
     func testTheHostServerIsAChannelOfTheMasterThatNeverSignsInOnItsOwn() throws {

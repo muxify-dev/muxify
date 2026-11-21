@@ -109,6 +109,22 @@ final class AppWindowsTests: XCTestCase {
         }
     }
 
+    @MainActor func testOnlyTheKeyAppWindowWritesColourReports() throws {
+        try withWindows { windows, _ in
+            let firstRequest = AppWindowRequest(), secondRequest = AppWindowRequest()
+            let first = windows.store(for: firstRequest), second = windows.store(for: secondRequest)
+            let firstWindow = FocusWindow(), secondWindow = FocusWindow()
+            windows.register(firstWindow, for: firstRequest.id)
+            windows.register(secondWindow, for: secondRequest.id)
+            XCTAssertTrue(first.writesColourReports, "the first App Window, focused as it registered, writes none")
+            XCTAssertFalse(second.writesColourReports)
+
+            secondWindow.makeKeyAndOrderFront(nil)
+            XCTAssertFalse(first.writesColourReports, "an App Window that is no longer key still writes")
+            XCTAssertTrue(second.writesColourReports, "the key App Window writes none")
+        }
+    }
+
     @MainActor func testSessionUrlReusesLocalWhenRemoteIsFocused() throws {
         try withWindows { windows, _ in
             let localRequest = AppWindowRequest()

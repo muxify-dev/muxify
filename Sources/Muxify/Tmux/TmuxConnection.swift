@@ -26,18 +26,34 @@ final class TmuxConnection: @unchecked Sendable {
     private let lock = NSLock()
     private var retired = false
     private var localMarker: (option: String, pid: Int, registered: Bool)?
-    /// Runs before each command on this Mac's server: the Colour Reports before a switch (ADR 0095).
-    private let beforeRunning: (([String]) -> Void)?
+    /// The App Window's Client marker option on this Mac, which its publisher's Listener follows; nil gives each
+    /// replacement an option of its own.
+    private let localMarkerOption: String?
+    /// Runs a switch on the App Window's Listener, after its Colour Report; false when the switch runs here.
+    private let switchOnListener: ((_ client: String, _ target: String) throws -> Bool)?
+    /// Where the Terminal's command on this Mac writes its tmux Client's exit status, as a Remote Environment's writes
+    /// SSH's: Ghostty's own is that of `login`.
+    private let localExitFile: URL?
 
     init(environment: RemoteEnvironment?, sshExecutable: String = "/usr/bin/ssh") throws {
         remote = try environment.map { try RemoteSSH(environment: $0, sshExecutable: sshExecutable) }
-        beforeRunning = nil
+        localMarkerOption = nil
+        switchOnListener = nil
+        localExitFile = environment == nil ? Self.makeLocalExitFile() : nil
     }
 
-    /// The connection to this Mac's server.
-    init(beforeRunning: (([String]) -> Void)? = nil) {
+    /// The connection to this Mac's server. `clientMarker` is the App Window's Client marker option.
+    /// `switchOnListener` runs a `switchClient` on the App Window's Listener, as `EnvironmentPublisher.switchClient`
+    /// does, and returns false when there is none.
+    init(clientMarker: String? = nil, switchOnListener: ((_ client: String, _ target: String) throws -> Bool)? = nil) {
         remote = nil
-        self.beforeRunning = beforeRunning
+        localMarkerOption = clientMarker
+        self.switchOnListener = switchOnListener
+        localExitFile = Self.makeLocalExitFile()
+    }
+
+    private static func makeLocalExitFile() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("muxify-client-exit-\(UUID().uuidString)")
     }
 
     var isOnThisMac: Bool { remote == nil }
@@ -52,7 +68,6 @@ final class TmuxConnection: @unchecked Sendable {
         let stopped = retired
         lock.unlock()
         guard !stopped else { throw TmuxError.cancelled }
-        beforeRunning?(args)
         return try runner.run(invocation(args))
     }
 
@@ -61,7 +76,9 @@ final class TmuxConnection: @unchecked Sendable {
     func view(_ command: ViewCommand, ownClient: ViewCommandExecutor.Client?,
               completion: @escaping (Result<String, Error>) -> Void) {
         queue.async {
-            let result = Result { try ViewCommandExecutor(ownClient: ownClient, run: self.run).run(command) }
+            let result = Result {
+                try ViewCommandExecutor(ownClient: ownClient, run: self.run, switchOnListener: self.switchOnListener).run(command)
+            }
             DispatchQueue.main.async { completion(result) }
         }
     }
@@ -117,7 +134,7 @@ final class TmuxConnection: @unchecked Sendable {
     }
 
     /// Serializes marker writes with removal, so a late registration cannot
-    /// survive detach or retirement. Each replacement gets its own option.
+    /// survive detach or retirement. Each replacement writes the App Window's option again, or one of its own.
     func updateLocalClient(_ client: TmuxClient?) {
         guard isOnThisMac else { return }
         queue.async {
@@ -136,7 +153,8 @@ final class TmuxConnection: @unchecked Sendable {
                 }
             }
             guard let client, !client.isControl else { return }
-            let option = ClientMarker.option(nonce: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
+            let option = self.localMarkerOption
+                ?? ClientMarker.option(nonce: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
             let value = [String(client.pid), client.tty, NSHomeDirectory(), Tmux.hostName, "local"]
                 .joined(separator: Tmux.separator)
             self.localMarker = (option, client.pid, false)
@@ -175,7 +193,23 @@ final class TmuxConnection: @unchecked Sendable {
     func terminalCommand(_ args: [String], target: String? = nil, picksLatestSession: Bool = true,
                          newSession: RemoteSSH.NewSession? = nil) throws -> String {
         if let remote { return remote.terminalCommand(target: target, picksLatestSession: picksLatestSession, newSession: newSession) }
-        return try invocation(args).commandLine
+        let tmux = try invocation(args).commandLine
+        guard let localExitFile else { return tmux }
+        try? FileManager.default.removeItem(at: localExitFile)
+        let script = """
+        \(tmux)
+        status=$?
+        printf '%s\\n' "$status" > \(Tmux.shellQuote(localExitFile.path))
+        exit "$status"
+        """
+        return CommandInvocation(executable: "/bin/bash", arguments: ["-c", script]).commandLine
+    }
+
+    /// The exit status of the last Terminal's tmux Client on this Mac, once it exited: 0 after its Session ended or
+    /// it detached, 1 after the server was killed.
+    var localClientExitStatus: Int? {
+        localExitFile.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
     /// Cancel old operations immediately. Flush only idempotent Browser state,
@@ -201,7 +235,10 @@ final class TmuxConnection: @unchecked Sendable {
         if let remote { _ = try? finalRunner.run(remote.control("exit"), timeout: 1) }
     }
 
-    func cleanup() { remote?.cleanup() }
+    func cleanup() {
+        remote?.cleanup()
+        if let localExitFile { try? FileManager.default.removeItem(at: localExitFile) }
+    }
 }
 
 extension TmuxConnection: ScriptRunning {}

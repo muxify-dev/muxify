@@ -137,6 +137,59 @@ final class HostEnvironmentLinkTests: XCTestCase {
         XCTAssertEqual(Array(heard.prefix(2)), ["features", "topics"])
     }
 
+    /// The store reports its colours as it subscribes, when its App Window becomes key and when Ghostty's colours
+    /// change, and asks for a Window after its decision: the link sends each to the Host Server in `colours`, the first
+    /// once the server answered `hello`. The server's `focus` events reach the store as for this Mac (ADR 0098).
+    func testTheLinkSendsItsColoursOnConnectAndEachReportAndForwardsTheDecisionAndTheFocusEvents() async throws {
+        let paths = paths!, tmux = tmux!
+        let sent = ColoursLog()
+        let link = link(serve: { request, _ in
+            guard let body = try? request.body(HostRequest.self) else { return request.fail(ProtocolError(.invalid, "no request")) }
+            switch body {
+            case .colours(let colours):
+                sent.add(colours, id: request.id)
+                request.finish()
+            case .subscribe(.focus):
+                _ = request.sendEvent(FocusEvent.focusChanged(window: "@3"), key: "focus_changed")
+                _ = request.sendEvent(FocusEvent.taken(window: "@4"), key: "taken")
+            default:
+                // The other subscriptions stay open with nothing in them.
+                break
+            }
+        }, context: { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }) })
+        let light = TerminalColours(background: TerminalColour(red: 0xfb, green: 0xf1, blue: 0xc7),
+                                    foreground: TerminalColour(red: 0x3c, green: 0x38, blue: 0x36))
+        let dark = TerminalColours(background: TerminalColour(red: 0x10, green: 0x10, blue: 0x10),
+                                   foreground: TerminalColour(red: 0xee, green: 0xee, blue: 0xee))
+        try link.connect()
+        var heard: [String] = []
+        let subscription = link.subscribe { event in
+            switch event {
+            case .focusChanged(let window): heard.append("focus " + window)
+            case .windowTaken(let window): heard.append("taken " + window)
+            default: break
+            }
+        }
+        defer { subscription.cancel() }
+
+        link.reportColours(light)
+        link.reportColours(toWindow: "@1")
+        XCTAssertEqual(sent.requests, [], "the link sent colours before a server answered")
+        link.startServer()
+        try await wait("the server did not get the colours after its hello") { sent.requests == [ColoursRequest(light)] }
+        try await wait("the server's focus events did not reach the store") { heard == ["focus @3", "taken @4"] }
+
+        link.reportColours(dark)
+        link.reportColours(toWindow: "@3")
+        link.reportColours(nil)
+        link.reportColours(toWindow: "@5")
+        try await wait("the reports did not reach the server in order") {
+            sent.requests == [ColoursRequest(light), ColoursRequest(dark), ColoursRequest(dark, window: "@3"), ColoursRequest(nil)]
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(sent.requests.count, 4, "a Window was written with no colours")
+    }
+
     func testTheHostsConfigComesFromTheServerAndAnEditOnTheHostPushesItWithoutAReload() async throws {
         let tmux = tmux!
         let home = directory.appendingPathComponent("home", isDirectory: true)
@@ -508,4 +561,13 @@ private final class AskLog: @unchecked Sendable {
         get { lock.lock(); defer { lock.unlock() }; return didSend }
         set { lock.lock(); didSend = newValue; lock.unlock() }
     }
+}
+
+/// The `colours` requests that a server got, in the order the link sent them: by id, as the server's handlers run
+/// at once.
+private final class ColoursLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var log: [(id: Int, request: ColoursRequest)] = []
+    var requests: [ColoursRequest] { lock.lock(); defer { lock.unlock() }; return log.sorted { $0.id < $1.id }.map(\.request) }
+    func add(_ request: ColoursRequest, id: Int) { lock.lock(); log.append((id, request)); lock.unlock() }
 }

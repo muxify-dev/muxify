@@ -16,10 +16,15 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
 
     /// The first read of the records is now, so a subscriber starts with them and not with an empty list.
     init(topics: TopicStore = TopicStore(paths: MuxifyPaths())) {
+        // The App Window's Client marker: the publisher's Listener follows the Client that it names.
+        let marker = ClientMarker.option(nonce: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
         let publisher = EnvironmentPublisher(server: .app, topics: topics, delivery: .main,
-                                             startControlClient: ControlClient.start, report: Diagnostics.report)
+                                             startControlClient: ControlClient.start, clientMarker: marker,
+                                             report: Diagnostics.report)
         self.publisher = publisher
-        super.init { TmuxConnection(beforeRunning: publisher.reportColours(beforeRunning:)) }
+        // A switch runs on the Listener after its Colour Report, so a program that tmux tells of the new colour scheme
+        // at the switch gets these colours.
+        super.init { TmuxConnection(clientMarker: marker, switchOnListener: publisher.switchClient) }
         do {
             state.apply(state.changes(to: try topics.read(), all: true))
         } catch {
@@ -47,6 +52,8 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
                 switch news {
                 case .heard: self?.events.send(.changed)
                 case .readFailed(let error): self?.events.send(.unreachable(error))
+                case .focusChanged(let window): self?.events.send(.focusChanged(window: window))
+                case .taken(let window): self?.events.send(.windowTaken(window: window))
                 }
             }
         }, { [weak self] changes, afterNotification in
@@ -99,6 +106,10 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
 
     func reportColours(_ colours: TerminalColours?) {
         publisher.reportColours(colours)
+    }
+
+    func reportColours(toWindow window: String) {
+        publisher.reportColours(toWindow: window)
     }
 
     func git(_ read: GitRead) async throws -> GitAnswer {

@@ -135,6 +135,7 @@ final class LiveSSHTests: XCTestCase {
         let events = TmuxEvents()
         var notificationCount = 0
         events.onEvent = { _ in notificationCount += 1 }
+        events.follow(client: tty, session: main.sessionID)
         events.start(invocation: connection.invocation)
         defer { events.stop() }
         let eventDeadline = Date().addingTimeInterval(5)
@@ -168,9 +169,15 @@ final class LiveSSHTests: XCTestCase {
         let other = try connection.run(["new-session", "-d", "-s", "other", "-P", "-F", "#{session_id}"])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         _ = try connection.run(["switch-client", "-c", tty, "-t", other])
-        let switched = try connection.snapshot()
-        XCTAssertEqual(switched.clients.first { $0.tty == tty }?.sessionID, other)
-        XCTAssertEqual(switched.clients.first { $0.isControl }?.sessionID, try XCTUnwrap(switched.watchSessionID))
+        XCTAssertEqual(try connection.snapshot().clients.first { $0.tty == tty }?.sessionID, other)
+        // The Listener follows the Terminal's Client there on its `%client-session-changed`.
+        let following = Date().addingTimeInterval(5)
+        while Date() < following, try connection.snapshot().clients.first(where: \.isControl)?.sessionID != other {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertEqual(try connection.snapshot().clients.first { $0.isControl }?.sessionID, other,
+                       "the Listener sits in the Session that the Terminal shows")
+        XCTAssertFalse(try connection.snapshot().windows.contains { $0.sessionName == EnvironmentPublisher.leftoverWatchSession })
         _ = try connection.run(["rename-window", "-t", windowID, "renamed"])
         let disposable = try connection.run(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "\(main.sessionID):"])
             .trimmingCharacters(in: .whitespacesAndNewlines)

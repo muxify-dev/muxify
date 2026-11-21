@@ -58,11 +58,17 @@ class ClientTerminal(unittest.TestCase):
         self.assertEqual(answer.stderr, '')
         return word
 
+    def marker_of_a_new_client(self, previous):
+        """The marker whose value names an attached Client that no marker in `previous` named. An App Window keeps
+        its marker option, and writes it again for each Client it attaches."""
+        clients = self.clients()
+        return next(((key, value) for key, value in self.markers().items()
+                     if len(value) == 5 and (key, value[0]) not in previous and int(value[0]) in clients), None)
+
     def setUp(self):
-        previous = set(self.markers())
+        previous = {(key, value[0]) for key, value in self.markers().items()}
         self.sandbox.act('action', 'client-input', 'Reattach Client')
-        self.option, self.fields = wait(lambda: next(((key, value) for key, value in self.markers().items()
-                                                    if key not in previous), None),
+        self.option, self.fields = wait(lambda: self.marker_of_a_new_client(previous),
                                        'Muxify did not register its Client')
         self.assertEqual(len(self.fields), 5)
         self.assertEqual(self.fields[4], 'local')
@@ -184,13 +190,11 @@ class ClientTerminal(unittest.TestCase):
             script = subprocess.run(['/bin/sh', str(self.check)], env=env, capture_output=True, text=True)
             self.assertEqual((script.returncode, script.stdout), (2, ''), script.stderr)
 
-    def test_marker_is_removed_on_reattach_and_detach(self):
-        sandbox, option = self.sandbox, self.option
+    def test_marker_names_the_new_client_on_reattach_and_is_removed_on_detach(self):
+        sandbox, option, pid = self.sandbox, self.option, self.fields[0]
         sandbox.act('action', 'client-input', 'Reattach Client')
-        replacement = wait(lambda: next(((key, value) for key, value in self.markers().items()
-                                        if key != option and int(value[0]) in self.clients()), None),
-                           'replacement Client did not register')
-        wait(lambda: option not in self.markers(), 'old marker survived reattach')
+        replacement = wait(lambda: self.marker_of_a_new_client({(option, pid)}), 'replacement Client did not register')
+        wait(lambda: pid not in [value[0] for value in self.markers().values()], 'old marker survived reattach')
         socket = sandbox.tmux('display-message', '-p', '#{socket_path}')
         self.assertTrue(pathlib.Path(socket).resolve().is_relative_to(sandbox.root.resolve()))
         sandbox.tmux('detach-client', '-t', replacement[1][1])

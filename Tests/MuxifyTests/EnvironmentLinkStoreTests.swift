@@ -33,6 +33,99 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
     }
 
+    func testWithTwoAppWindowsOnlyTheKeyOneAsksItsPublisherToWriteColourReports() throws {
+        let links = [FakeEnvironmentLink(), FakeEnvironmentLink()]
+        let stores = links.map { link in
+            WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }
+        }
+        let light = TerminalTheme(background: NSColor(srgbRed: 0xfb / 255, green: 0xf1 / 255, blue: 0xc7 / 255, alpha: 1),
+                                  foreground: NSColor(srgbRed: 0x3c / 255, green: 0x38 / 255, blue: 0x36 / 255, alpha: 1))
+        let colours = try XCTUnwrap(light.colours)
+
+        stores[0].setWritesColourReports(true)
+        stores[1].setWritesColourReports(false)
+        for store in stores { store.ghosttyThemeChanged(light) }
+        XCTAssertEqual(links[0].reportedColours.last, colours, "the key App Window did not write its colours")
+        XCTAssertFalse(links[1].reportedColours.contains { $0 != nil }, "an App Window that is not key wrote colours")
+
+        // The other App Window becomes key.
+        stores[0].setWritesColourReports(false)
+        stores[1].setWritesColourReports(true)
+        XCTAssertEqual(links[0].reportedColours.last, .some(nil), "the App Window that resigned key kept writing")
+        XCTAssertEqual(links[1].reportedColours.last, colours, "the App Window that became key did not write")
+    }
+
+    /// tmux does not say whose screen changed the focus, so the store decides: its Terminal's input within half a
+    /// second makes the change this Mac's, which writes the Window; without one another screen took the Window, and
+    /// the Terminal's next key or click takes its colours back, once.
+    func testTheStoreWritesAWindowForItsOwnFocusChangeAndTakesATakenWindowBackOnTheNextInput() {
+        let link = FakeEnvironmentLink()
+        let store = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }
+        store.startLinkForTesting()
+        var time = Date(timeIntervalSinceReferenceDate: 1000)
+        store.now = { time }
+        store.setWritesColourReports(true)
+
+        store.ghosttyTerminalInput()
+        time += 0.4
+        link.send(.focusChanged(window: "@1"))
+        XCTAssertEqual(link.reportedWindows, ["@1"], "a focus change 0.4 s after the Terminal's input did not write its Window")
+
+        time += 5
+        link.send(.focusChanged(window: "@2"))
+        XCTAssertEqual(link.reportedWindows, ["@1"], "a focus change with no recent input wrote: another screen made it")
+
+        time += 1
+        store.ghosttyTerminalInput()
+        XCTAssertEqual(link.reportedWindows, ["@1", "@2"], "the next input did not take the Window's colours back")
+        time += 1
+        store.ghosttyTerminalInput()
+        XCTAssertEqual(link.reportedWindows, ["@1", "@2"], "a second input wrote again")
+
+        time += 5
+        link.send(.windowTaken(window: "@3"))
+        XCTAssertEqual(link.reportedWindows, ["@1", "@2"], "a taken Window was written before any input")
+        time += 5
+        store.ghosttyTerminalInput()
+        XCTAssertEqual(link.reportedWindows, ["@1", "@2", "@3"], "the input after another Client took the Window did not write it")
+    }
+
+    func testTerminalInputWithNoTakenWindowWritesNothing() {
+        let link = FakeEnvironmentLink()
+        let store = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }
+        store.startLinkForTesting()
+        var time = Date(timeIntervalSinceReferenceDate: 1000)
+        store.now = { time }
+        store.setWritesColourReports(true)
+
+        for _ in 0..<3 {
+            time += 2
+            store.ghosttyTerminalInput()
+        }
+
+        XCTAssertEqual(link.reportedWindows, [], "input with no taken Window wrote")
+    }
+
+    func testAnAppWindowThatIsNotKeyNeverWritesAWindow() {
+        let link = FakeEnvironmentLink()
+        let store = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }
+        store.startLinkForTesting()
+        var time = Date(timeIntervalSinceReferenceDate: 1000)
+        store.now = { time }
+        store.setWritesColourReports(false)
+
+        store.ghosttyTerminalInput()
+        time += 0.1
+        link.send(.focusChanged(window: "@1"))
+        time += 5
+        link.send(.focusChanged(window: "@2"))
+        link.send(.windowTaken(window: "@2"))
+        time += 1
+        store.ghosttyTerminalInput()
+
+        XCTAssertEqual(link.reportedWindows, [], "an App Window that is not key wrote a Window")
+    }
+
     func testAnActionWhoseFeatureTheLinkLacksIsHiddenFromTheCommandPalette() {
         let link = FakeEnvironmentLink(features: .all)
         let store = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults(), visitStore: isolatedVisits()) { _ in link }

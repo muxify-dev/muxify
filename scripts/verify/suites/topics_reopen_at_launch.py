@@ -45,12 +45,12 @@ def launch(test_case):
 
 
 def sessions(s):
-    """Each Session of the user's on the sandbox server, by name, with its Window count; none when no server runs."""
+    """Each Session on the sandbox server, by name, with its Window count; none when no server runs."""
     try:
         lines = s.tmux('list-sessions', '-F', '#{session_name} #{session_windows}').splitlines()
     except Exception:
         return {}
-    return {name: int(count) for name, count in (line.rsplit(' ', 1) for line in lines) if name != 'muxify-watch'}
+    return {name: int(count) for name, count in (line.rsplit(' ', 1) for line in lines)}
 
 
 class ReopenAtLaunchOn(unittest.TestCase):

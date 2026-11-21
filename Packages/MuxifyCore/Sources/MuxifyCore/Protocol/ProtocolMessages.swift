@@ -15,8 +15,10 @@ public enum HostProtocol {
     public static let maxPreambleBytes = 64 * 1024
     /// The largest chunk of a streamed response, before base64.
     public static let maxChunkBytes = 64 * 1024
-    /// The protocols that this build speaks. Both ends started at 1; a bump needs an ADR.
-    public static let supported: ClosedRange<Int> = 1...1
+    /// The protocols that this build speaks. Both ends started at 1; a bump needs an ADR. 2 adds the Mac's colours
+    /// (`colours`) and the `focus` subscription, with no fallback to 1, so a Mac and a Host Server of different builds
+    /// do not connect (ADR 0098).
+    public static let supported: ClosedRange<Int> = 2...2
     /// What this build's Host Server adds to its protocol, declared in its `hello`. A client declares only what it
     /// uses: the Mac declares none, the phone all of them.
     public static let capabilities: [String] = HostCapability.allCases.map(\.rawValue)
@@ -27,7 +29,7 @@ public enum HostProtocol {
     public static let serverSilence: TimeInterval = 45
 }
 
-/// What a Host Server adds to protocol 1 (ADR 0086's change rule, ADR 0093). Each side sends a request case, a
+/// What a Host Server adds to its protocol's base (ADR 0086's change rule, ADR 0093). Each side sends a request case, a
 /// subscription case or a key that a capability adds only when the other side's `hello` declared it, and the server
 /// answers `unsupported` to one that a client sends without declaring it.
 public enum HostCapability: String, CaseIterable, Sendable {
@@ -150,7 +152,7 @@ public struct ProtocolChunk: Codable, Equatable, Sendable {
 }
 
 /// A request that the Mac sends to the Host Server (ADR 0087): a typed MuxifyCore command or subscription, never
-/// a script or a raw tmux command. Later releases add cases, each behind a capability. A case that this build does
+/// a script or a raw tmux command. Later releases add cases, each behind a capability or a protocol of its own. A case that this build does
 /// not know is answered `unsupported`.
 public enum HostRequest: Codable, Equatable, Sendable {
     /// Answers `ok`. The Mac sends one every 15 s when it has sent nothing else.
@@ -204,9 +206,14 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// --json` prints when no Mac serves the Window. The server never asks a client for them. A target that names no
     /// Window ends `failed` with the CLI's message. Needs `browser-tabs`.
     case browserTabs(BrowserTabsRequest)
+    /// The Mac's Terminal colours, which the Host Server's Listener writes as Colour Reports by the rules that it
+    /// writes them on the Mac (ADR 0098); none stops its writes, as for an App Window that is not key. With a
+    /// `window`, it writes every Pane of that Window now, as the Mac decided after a `focus` event; without one, every
+    /// Pane of the Session that the Terminal shows. Answers `{}`. Protocol 2's base.
+    case colours(ColoursRequest)
 
-    /// The capability that the client must have declared for the server to serve this request; nil for protocol 1's
-    /// base. A new case does not compile until it chooses.
+    /// The capability that the client must have declared for the server to serve this request; nil for the
+    /// protocol's base. A new case does not compile until it chooses.
     public var capability: HostCapability? {
         switch self {
         case .environment(let request): return request.request == nil ? nil : .request
@@ -215,7 +222,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .subscribe(let subscription): return subscription.capability
         case .browserTabs: return .browserTabs
         case .ping, .shutdown, .markRead, .view, .topicChoices, .worktreeStarts, .adoptWorktrees, .claimOpen, .releaseOpen, .git, .gitWrite,
-             .gitNetwork, .upload:
+             .gitNetwork, .upload, .colours:
             return nil
         }
     }
@@ -236,6 +243,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case visitSessionPath = "visit_session_path"
         case upload
         case browserTabs = "browser_tabs"
+        case colours
     }
 
     public init(from decoder: Decoder) throws {
@@ -264,6 +272,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .visitSessionPath: self = .visitSessionPath(try values.decode(VisitSessionPath.self, forKey: key))
         case .upload: self = .upload(try values.decode(UploadChunk.self, forKey: key))
         case .browserTabs: self = .browserTabs(try values.decode(BrowserTabsRequest.self, forKey: key))
+        case .colours: self = .colours(try values.decode(ColoursRequest.self, forKey: key))
         }
     }
 
@@ -288,6 +297,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .visitSessionPath(let visit): try values.encode(visit, forKey: .visitSessionPath)
         case .upload(let chunk): try values.encode(chunk, forKey: .upload)
         case .browserTabs(let request): try values.encode(request, forKey: .browserTabs)
+        case .colours(let request): try values.encode(request, forKey: .colours)
         }
     }
 }
@@ -349,17 +359,21 @@ public enum HostSubscription: Codable, Equatable, Sendable {
     /// The computed view, as `EnvironmentShown` items keyed `snapshot` with no `capabilities`: the JSON of
     /// `muxify environment show --json`, first at once, then each time it changes. Needs `snapshot`.
     case snapshot
+    /// What the Host Server's Listener hears of the focus in the Window that the App Window's Terminal shows, as
+    /// `FocusEvent`s keyed by their kind: the Mac decides whose screen made each and whether to write that Window
+    /// (ADR 0098). Nothing comes first. Protocol 2's base.
+    case focus
 
-    /// The capability that this subscription needs; nil for protocol 1's base.
+    /// The capability that this subscription needs; nil for the protocol's base.
     public var capability: HostCapability? {
         switch self {
-        case .environment, .config, .repository: return nil
+        case .environment, .config, .repository, .focus: return nil
         case .topic: return .topicDetail
         case .snapshot: return .snapshot
         }
     }
 
-    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config, repository, topic, snapshot }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config, repository, topic, snapshot, focus }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: ProtocolKey.self)
@@ -373,6 +387,7 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         case .repository: self = .repository(try values.decode(RepositorySubscription.self, forKey: ProtocolKey(known.rawValue)))
         case .topic: self = .topic(try values.decode(TopicSubscription.self, forKey: ProtocolKey(known.rawValue)))
         case .snapshot: self = .snapshot
+        case .focus: self = .focus
         }
     }
 
@@ -384,6 +399,87 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         case .repository(let repository): try values.encode(repository, forKey: .repository)
         case .topic(let topic): try values.encode(topic, forKey: .topic)
         case .snapshot: try values.encode(ProtocolEmpty(), forKey: .snapshot)
+        case .focus: try values.encode(ProtocolEmpty(), forKey: .focus)
+        }
+    }
+}
+
+/// `colours`: the Mac's Terminal colours, as `#rrggbb`, and the Window to write now, if any. `{}` carries no colours.
+public struct ColoursRequest: Codable, Equatable, Sendable {
+    /// Nil: the Host Server's Listener writes no Colour Report from now on.
+    public var colours: TerminalColours?
+    /// A Window id, such as `@3`, whose every Pane gets the colours now.
+    public var window: String?
+
+    public init(_ colours: TerminalColours?, window: String? = nil) {
+        self.colours = colours
+        self.window = window
+    }
+
+    private enum CodingKeys: String, CodingKey { case background, foreground, window }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let background = try values.decodeIfPresent(String.self, forKey: .background)
+        let foreground = try values.decodeIfPresent(String.self, forKey: .foreground)
+        window = try values.decodeIfPresent(String.self, forKey: .window)
+        switch (background, foreground) {
+        case (nil, nil): colours = nil
+        case (let background?, let foreground?):
+            guard let background = TerminalColour(hex: background), let foreground = TerminalColour(hex: foreground) else {
+                throw ProtocolError(.invalid, "colours are #rrggbb")
+            }
+            colours = TerminalColours(background: background, foreground: foreground)
+        default: throw ProtocolError(.invalid, "colours carry both a background and a foreground, or neither")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encodeIfPresent(colours?.background.hex, forKey: .background)
+        try values.encodeIfPresent(colours?.foreground.hex, forKey: .foreground)
+        try values.encodeIfPresent(window, forKey: .window)
+    }
+}
+
+/// An item of the `focus` subscription: what the Host Server's Listener heard in the Window that the Terminal
+/// shows. tmux does not say whose screen made it, so the Host Server does not decide: the Mac does, as for this Mac.
+public enum FocusEvent: Codable, Equatable, Sendable {
+    /// The focus changed in the Window: its active Pane, or the Window that the Terminal's Session shows.
+    case focusChanged(window: String)
+    /// Another screen took the Window: another Client moved into the Terminal's Session, or the Window took a size
+    /// that is not the Terminal's.
+    case taken(window: String)
+
+    /// The item's key, which is also its one JSON key: a newer event of one kind replaces an unsent one of that kind.
+    public var key: String {
+        switch self {
+        case .focusChanged: CodingKeys.focusChanged.rawValue
+        case .taken: CodingKeys.taken.rawValue
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case focusChanged = "focus_changed"
+        case taken
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        if let window = try values.decodeIfPresent(String.self, forKey: .focusChanged) {
+            self = .focusChanged(window: window)
+        } else if let window = try values.decodeIfPresent(String.self, forKey: .taken) {
+            self = .taken(window: window)
+        } else {
+            throw ProtocolError(.unsupported, "this Muxify does not know the focus event")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .focusChanged(let window): try values.encode(window, forKey: .focusChanged)
+        case .taken(let window): try values.encode(window, forKey: .taken)
         }
     }
 }

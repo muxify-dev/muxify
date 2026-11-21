@@ -18,10 +18,14 @@ protocol GhosttyRuntimeDelegate: AnyObject {
     func ghosttyThemeChanged(_ theme: TerminalTheme)
     func ghosttyReloadConfig()
     func ghosttyPasteAttachments(from pasteboard: NSPasteboard, into view: TerminalSurfaceView) -> Bool
+    /// The Terminal got a key or a mouse button from its user. It runs on every key, so it must stay as cheap as a
+    /// Boolean read when there is nothing to do.
+    func ghosttyTerminalInput()
 }
 
 extension GhosttyRuntimeDelegate {
     func ghosttyPasteAttachments(from pasteboard: NSPasteboard, into view: TerminalSurfaceView) -> Bool { false }
+    func ghosttyTerminalInput() {}
 }
 
 /// The colors of the active Ghostty theme, for tinting Muxify's own chrome.
@@ -31,6 +35,12 @@ struct TerminalTheme: Equatable {
     /// The theme's 16 ANSI colors, black to bright white, for accents that
     /// follow the Ghostty theme (the Command Palette's).
     let ansi: [NSColor]
+
+    init(background: NSColor, foreground: NSColor, ansi: [NSColor] = []) {
+        self.background = background
+        self.foreground = foreground
+        self.ansi = ansi
+    }
 
     init?(config: ghostty_config_t) {
         guard let background = Self.color(config, "background"),

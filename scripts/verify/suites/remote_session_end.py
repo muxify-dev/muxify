@@ -75,7 +75,7 @@ exec /bin/sh -c "$command"
     def test_closing_the_last_window_of_the_last_session_closes_muxify(self):
         window = self.open_alone('last')
         for other in self.s.tmux('list-sessions', '-F', '#{session_name}').split():
-            if other not in ('last', 'muxify-watch'):
+            if other != 'last':
                 self.s.tmux('kill-session', '-t', other)
         self.s.tmux('kill-window', '-t', window)
         wait(lambda: not alive(self.s.pid), 'Muxify did not close after the last Session closed', 20)
