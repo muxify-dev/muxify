@@ -348,8 +348,7 @@ struct GuestSessionReopenPlan {
     let edit: TopicEdit
 
     init(lock: SessionLock, records: [TopicRecord], windows: [TmuxWindow]) throws {
-        let open = Set(records.filter { $0.settledAt == nil }.map(\.id))
-        if let live = lock.windows(in: windows, open: open).first {
+        if let live = lock.windows(in: windows, open: records.openTopicIDs).first {
             edit = TopicEdit(record: nil, commands: [], selection: .sessionID(live.sessionID))
             return
         }

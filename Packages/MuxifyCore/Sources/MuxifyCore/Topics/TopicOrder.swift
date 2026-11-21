@@ -214,6 +214,11 @@ extension Array where Element == TopicListEntry {
     }
 }
 
+extension Array where Element == TopicRecord {
+    /// The ids of the records that are not Settled: a Session in one of these Topics is never a Guest Session.
+    var openTopicIDs: Set<String> { Set(filter { $0.settledAt == nil }.map(\.id)) }
+}
+
 public enum TopicPlacement: Equatable, Sendable {
     case before(TopicListID)
     case after(TopicListID)

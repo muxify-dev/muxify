@@ -300,9 +300,9 @@ problem, and you can remove the line.
 - Bench (Sidebar menu, Command Palette) takes a card out of In Play. An In
   Play Topic or a Guest Topic goes to the top of the Bench, as `muxify topic
   bench` does. The Topic keeps its Sessions and Agents, and a Guest Topic loses
-  its mark. A Guest Session stops being a Guest, as `muxify topic bench
-  --session <name>` does: it waits in No Topic, because a Session has no record
-  to keep it on the Bench.
+  its mark. A Guest Session, live or Dormant, stops being a Guest, as `muxify
+  topic bench --session <name>` does: its card goes, and a live one waits in No
+  Topic, because a Session has no Topic record to keep it on the Bench.
 - When you Settle, Forget or Bench the card that you are on, Muxify opens the
   next card that shows. After the last card that shows, it opens the first In
   Play card. It never opens a Pinned Topic this way. After Bench, when no

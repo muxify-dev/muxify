@@ -18,7 +18,7 @@ public struct ReopenAtLaunch: Sendable {
     /// Then every Dormant Guest Session, in Lock id order: a Lock with no live Session.
     public static func dormant(contents: TopicContents, windows: [TmuxWindow]) -> [TopicListID] {
         let live = Set(windows.compactMap(\.topicID))
-        let open = Set(contents.records.filter { $0.settledAt == nil }.map(\.id))
+        let open = contents.records.openTopicIDs
         return contents.records.filter { $0.settledAt == nil && !$0.sessions.isEmpty && !live.contains($0.id) }.map { .topic($0.id) }
             + contents.locks.filter { $0.windows(in: windows, open: open).isEmpty }.map { .lock($0.id) }
     }

@@ -447,7 +447,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
             let updates = rememberingOrder.map { order in
                 contents.records.compactMap { $0.remembering(snapshot, order: order, previously: previously) }
             } ?? []
-            let open = Set(contents.records.filter { $0.settledAt == nil }.map(\.id))
+            let open = contents.records.openTopicIDs
             let memories = contents.locks.compactMap { lock in lock.remembering(snapshot, open: open, previously: previously).map { (lock.id, $0) } }
             guard !updates.isEmpty || !memories.isEmpty else { return false }
             try topics.write { transaction in

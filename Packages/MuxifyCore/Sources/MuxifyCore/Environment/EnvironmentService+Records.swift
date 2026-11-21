@@ -285,7 +285,7 @@ extension EnvironmentService {
         }
         if case .guestSession(let id)? = target {
             guard let lock = contents.locks.first(where: { $0.id == id }) else { throw TopicRequestError.guestSessionUnavailable(id) }
-            let live = lock.windows(in: snapshot.windows, open: Self.open(records)).first
+            let live = lock.windows(in: snapshot.windows, open: records.openTopicIDs).first
             return RequestCard(id: .lock(id), label: "The Guest Session " + (live?.sessionName ?? lock.name), pinned: false,
                                session: live?.sessionID, unlocked: nil)
         }
@@ -305,12 +305,8 @@ extension EnvironmentService {
 
     /// The Lock of the live Session `session`, when that Session is a Guest Session.
     private func liveLock(of session: String, contents: TopicContents, snapshot: TmuxSnapshot) -> SessionLock? {
-        let open = Self.open(contents.records)
+        let open = contents.records.openTopicIDs
         return contents.locks.first { $0.windows(in: snapshot.windows, open: open).first?.sessionID == session }
-    }
-
-    static func open(_ records: [TopicRecord]) -> Set<String> {
-        Set(records.filter { $0.settledAt == nil }.map(\.id))
     }
 
     /// Tags are one column of one record, so a Tag change writes only that column.
@@ -351,7 +347,7 @@ private extension TopicListID {
         switch self {
         case .topic(let id): return TopicChange(topicID: id)
         case .lock(let id):
-            let session = contents.locks.first { $0.id == id }?.windows(in: snapshot.windows, open: EnvironmentService.open(contents.records)).first
+            let session = contents.locks.first { $0.id == id }?.windows(in: snapshot.windows, open: contents.records.openTopicIDs).first
             return TopicChange(topicID: nil, session: session.flatMap { SessionID(rawValue: $0.sessionID) })
         case .openPlace: return TopicChange(topicID: nil)
         }

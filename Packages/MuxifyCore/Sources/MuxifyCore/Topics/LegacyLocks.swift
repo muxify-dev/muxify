@@ -13,7 +13,7 @@ extension SessionLock {
         }
         guard !legacy.isEmpty else { return false }
         let imported = try store.write { transaction -> [TmuxWindow] in
-            let open = Set(transaction.records.filter { $0.settledAt == nil }.map(\.id))
+            let open = transaction.records.openTopicIDs
             let noTopic = legacy.filter { $0.window.topicID.map { !open.contains($0) } ?? true }
             for (window, order) in noTopic { transaction.importLock(SessionLock(session: window, order: order, snapshot: snapshot)) }
             return noTopic.map(\.window)
