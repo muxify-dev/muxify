@@ -2023,14 +2023,45 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(try sandbox.sessions(), ["api/ship", "game/ship", "main"])
     }
 
+    func testADormantGuestSessionIsListedReopenedAndBenchedByItsLockID() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        try sandbox.tmux(["new-session", "-d", "-s", "notes", "-c", sandbox.game.path])
+        try sandbox.tmux(["new-window", "-d", "-t", "=notes:", "-c", sandbox.game.path])
+        let guest = try await run(cli, arguments: ["topic", "make-guest", "--session", "notes"], environment: environment)
+        XCTAssertEqual(guest.status, 0, guest.output)
+        let lock = try XCTUnwrap(try sandbox.locks().only)
+        // tmux ends the Session with no Muxify to see it, as a tmux restart does.
+        try sandbox.tmux(["kill-session", "-t", "=notes"])
+
+        let shown = try await run(cli, arguments: ["environment", "show"], environment: environment)
+        XCTAssertEqual(shown.status, 0, shown.output)
+        XCTAssertTrue(shown.stdout.contains("Guests\ndormant session\t\(lock.id)\tnotes\n"), shown.stdout)
+
+        let reopened = try await run(cli, arguments: ["topic", "reopen", "--guest-session", lock.id], environment: environment)
+        XCTAssertEqual(reopened.status, 0, reopened.output)
+        let windows = try sandbox.tmux(["list-windows", "-t", "=notes:", "-F", "#{window_id}"]).split(separator: "\n")
+        XCTAssertEqual(windows.count, 2, "Reopen creates both Windows")
+        XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "=notes:", "@muxify_session_id"]).trimmingCharacters(in: .whitespacesAndNewlines),
+                       lock.id)
+
+        let benched = try await run(cli, arguments: ["topic", "bench", "--guest-session", lock.id], environment: environment)
+        XCTAssertEqual(benched.status, 0, benched.output)
+        XCTAssertEqual(try sandbox.locks(), [])
+        let gone = try await run(cli, arguments: ["topic", "reopen", "--guest-session", lock.id], environment: environment)
+        XCTAssertEqual(gone.status, 1, gone.output)
+        XCTAssertEqual(gone.stderr, "muxify: No Guest Session has the id \(lock.id). No changes were made.\n")
+    }
+
     func testEnvironmentShowJSONListsTheCapabilitiesAndAReadRefusesARequest() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
         let environment = sandbox.cliEnvironment(pane: nil)
         let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: environment)
         XCTAssertEqual(shown.status, 0, shown.output)
-        XCTAssertTrue(shown.stdout.contains(#""capabilities":["request","session-paths"]"#), shown.stdout)
-        XCTAssertEqual(try jsonLine(shown.stdout)["capabilities"] as? [String], ["request", "session-paths"])
+        XCTAssertTrue(shown.stdout.contains(#""capabilities":["request","session-paths","guest-sessions"]"#), shown.stdout)
+        XCTAssertEqual(try jsonLine(shown.stdout)["capabilities"] as? [String], ["request", "session-paths", "guest-sessions"])
         let text = try await run(cli, arguments: ["environment", "show"], environment: environment)
         XCTAssertFalse(text.stdout.contains("capabilities"), text.stdout)
 

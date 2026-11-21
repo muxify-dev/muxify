@@ -32,7 +32,8 @@ struct RequestInvocation: Equatable {
         case diff(sessionPath: String?, stat: Bool)
         case tag(TopicTagChange)
         case rename(title: String)
-        /// A Dormant or Settled Topic has no Pane, so these take only `--topic`.
+        /// A Dormant or Settled Topic has no Pane, so these take only `--topic`. Reopen also takes a Dormant Guest Session
+        /// by its Lock id.
         case reopen
         case startFresh
         /// `topic` is an open Topic's id or label. `session` chooses its destination Session; `newSession` makes one.
@@ -97,9 +98,12 @@ struct RequestInvocation: Equatable {
             case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .fillPlace, .moveCard, .placeCard, .tradeCard,
                  .sortSessions:
                 return [.topic, .window, .pane]
-            case .moveSession, .moveWholeSession: return [.session, .pane]
-            case .replaceFromBench, .makeGuest, .benchTopic: return [.topic, .session, .window, .pane]
-            case .reopen, .startFresh: return [.topic]
+            case .moveSession: return [.session, .guestSession, .pane]
+            case .moveWholeSession: return [.session, .pane]
+            case .replaceFromBench, .makeGuest: return [.topic, .session, .window, .pane]
+            case .benchTopic: return [.topic, .session, .guestSession, .window, .pane]
+            case .reopen: return [.topic, .guestSession]
+            case .startFresh: return [.topic]
             case .moveWindow, .moveToNewTopic, .removeWindowFromTopic: return [.window, .pane]
             case .moveToNewWindow: return [.pane]
             case .newWindow: return [.topic, .session, .window, .pane]
@@ -250,6 +254,8 @@ struct RequestInvocation: Equatable {
         case window = "--window"
         case pane = "--pane"
         case session = "--session"
+        /// A Guest Session, live or Dormant, by the id of its Lock, which `environment show` gives.
+        case guestSession = "--guest-session"
 
         var usage: String {
             switch self {
@@ -257,6 +263,7 @@ struct RequestInvocation: Equatable {
             case .topic: return "--topic <id|label>"
             case .window: return "--window <id>"
             case .pane: return "--pane <id>"
+            case .guestSession: return "--guest-session <id>"
             }
         }
 
@@ -273,6 +280,9 @@ struct RequestInvocation: Equatable {
             case .session:
                 guard !value.isEmpty else { throw CLIError("--session takes the name or id of a tmux Session", exitCode: 2) }
                 return SessionID(rawValue: value).map(EnvironmentTarget.session) ?? .sessionName(value)
+            case .guestSession:
+                guard !value.isEmpty else { throw CLIError("--guest-session takes the id of a Guest Session, as environment show gives it", exitCode: 2) }
+                return .guestSession(value)
             }
         }
 
@@ -711,8 +721,9 @@ extension RequestReply {
 extension EnvironmentShown {
     /// The `capabilities` of `environment show --json`: the options that this command line takes and an older one
     /// does not. A caller sends `--request` only when the list has `request`, and reads `session-paths` with no Topic
-    /// only when the list has `session-paths`. Both are of this command line, so a `snapshot` item has none.
-    static let cliCapabilities = ["request", "session-paths"]
+    /// only when the list has `session-paths`, and names a Guest Session with `--guest-session` only when the list has
+    /// `guest-sessions`. All are of this command line, so a `snapshot` item has none.
+    static let cliCapabilities = ["request", "session-paths", "guest-sessions"]
 }
 
 /// The `--json` form of `topic show --conversations`.

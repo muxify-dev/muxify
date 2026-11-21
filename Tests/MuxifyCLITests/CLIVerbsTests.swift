@@ -35,6 +35,7 @@ final class CLIVerbsTests: XCTestCase {
             (["topic", "open"], request(.open)),
             (["topic", "open", "--topic", "Fix"], request(.open, target: .topic(.named("Fix")))),
             (["topic", "reopen", "--topic", "Fix"], request(.reopen, target: .topic(.named("Fix")))),
+            (["topic", "reopen", "--guest-session", "lock-1"], request(.reopen, target: .guestSession("lock-1"))),
             (["topic", "start-fresh", "--topic", "Fix"], request(.startFresh, target: .topic(.named("Fix")))),
             (["session", "remove-from-topic"], request(.removeSessionFromTopic(kill: false, removeWorktree: false))),
             (["session", "remove-from-topic", "--kill", "--remove-worktree", "--session", "$4"],
@@ -56,7 +57,9 @@ final class CLIVerbsTests: XCTestCase {
         let errors: [([String], String)] = [
             (["topic", "rename"], CLIVerbs.usage(for: ["topic", "rename"])),
             (["topic", "rename", " "], CLIVerbs.usage(for: ["topic", "rename"])),
-            (["topic", "reopen"], "topic reopen takes the Topic: --topic <id|label>. A Dormant or Settled Topic has no Pane."),
+            (["topic", "reopen"],
+             "topic reopen takes the Topic: --topic <id|label>, or the Guest Session: --guest-session <id>. A Dormant or Settled Topic has no Pane."),
+            (["topic", "reopen", "--pane", "%3"], "topic reopen does not take --pane; name the target with --topic <id|label> or --guest-session <id>"),
             (["topic", "start-fresh", "--pane", "%3"], "topic start-fresh does not take --pane; name the target with --topic <id|label>"),
             (["session", "remove-from-topic", "--remove-worktree"], CLIVerbs.usage(for: ["session", "remove-from-topic"])),
             (["session", "remove-from-topic", "--window", "@1"], CLIVerbs.usage(for: ["session", "remove-from-topic"])),

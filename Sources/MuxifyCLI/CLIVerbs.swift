@@ -256,8 +256,8 @@ enum CLIVerbs {
             return .request(try RequestInvocation(.kill(session: true), parsed: parsed))
         },
         CLIVerb(path: .sessionMove,
-                synopsis: "(up | down | --topic <id|label> | --new-topic [\"title\"]) [--session <name|id> | --pane <id>] [--json]",
-                options: [.value("--topic"), .flag("--new-topic"), .flag("--json")], targets: [.session, .pane],
+                synopsis: "(up | down | --topic <id|label> | --new-topic [\"title\"]) [--session <name|id> | --guest-session <id> | --pane <id>] [--json]",
+                options: [.value("--topic"), .flag("--new-topic"), .flag("--json")], targets: [.session, .guestSession, .pane],
                 help: """
                 Moves this Pane's Session, or the Session that --session or --pane names.
                   up | down              one place up or down among the Sessions of its Topic, as
@@ -271,6 +271,9 @@ enum CLIVerbs {
                 Topic Up and Down do: see `topic move`. At the end they fail. `up` on a Session
                 that is in no Topic and not a Guest makes it a Guest Session, at the end of the
                 Guests, as Make a Guest does. `down` on it fails: make it a Guest first.
+                --guest-session names a Guest Session by the id that environment show gives
+                it, also a Dormant one, whose Session tmux no longer has: `up` and `down`
+                move its card.
                 """) { parsed in
             let topic = try parsed.value("--topic"), newTopic = parsed.flag("--new-topic")
             switch (topic, newTopic) {
@@ -642,12 +645,17 @@ enum CLIVerbs {
             default: throw CLIError.usage
             }
         },
-        topicVerb(.topicReopen, synopsis: "--topic <id|label> [--json]",
-                  help: """
-                  Makes the remembered Sessions, Windows, Tabs and Agents of a Dormant or
-                  Settled Topic again, as Reopen Topic does.
-                  """) { parsed in
-            try reopening(.reopen, parsed)
+        CLIVerb(path: .topicReopen, synopsis: "(--topic <id|label> | --guest-session <id>) [--json]", options: [.flag("--json")],
+                targets: [.topic, .guestSession, .window, .pane],
+                help: """
+                Makes the remembered Sessions, Windows, Tabs and Agents of a Dormant or
+                Settled Topic again, as Reopen Topic does.
+                With --guest-session, it makes the Session of a Dormant Guest Session again,
+                with its Windows, Panes, Tabs and Agents, as a click on its card does. Its card
+                stays at its place among the Guests. environment show gives the id, on the
+                Guest Session's "dormant session" line. A live Guest Session does not change.
+                """) { parsed in
+            .request(try RequestInvocation(try reopening(.reopen, parsed), parsed: parsed))
         },
         topicVerb(.topicStartFresh, synopsis: "--topic <id|label> [--json]",
                   help: """
@@ -759,15 +767,16 @@ enum CLIVerbs {
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .request(try RequestInvocation(.makeGuest, parsed: parsed))
         },
-        CLIVerb(path: .topicBench, synopsis: cardTarget + " [--json]", options: [.flag("--json")],
-                targets: [.topic, .session, .window, .pane],
+        CLIVerb(path: .topicBench, synopsis: "[--topic <id|label> | --session <name|id> | --guest-session <id> | --window <id> | --pane <id>] [--json]",
+                options: [.flag("--json")], targets: [.topic, .session, .guestSession, .window, .pane],
                 help: """
                 Puts this Pane's In Play Topic at the top of the Bench, as Bench does.
                 It keeps its Sessions and Agents. A Topic from an In Play place leaves an
                 Open Place there, and no Benched card moves up. A Guest Topic loses its
                 Guest mark and leaves no Open Place. A Guest Session stops being a Guest:
                 its card goes, the Session stays in No Topic, and the other Guests keep
-                their positions.
+                their positions. --guest-session names a Guest Session by the id that
+                environment show gives it, also a Dormant one: its card goes.
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .request(try RequestInvocation(.benchTopic, parsed: parsed))
@@ -854,11 +863,13 @@ enum CLIVerbs {
         },
     ]
 
-    /// A Dormant or Settled Topic has no Pane, so Reopen and Start Fresh name it.
+    /// A Dormant or Settled Topic has no Pane, so Reopen and Start Fresh name it, and Reopen names a Dormant Guest
+    /// Session by its Lock id.
     private static func reopening(_ command: RequestInvocation.Command, _ parsed: ParsedArguments) throws -> RequestInvocation.Command {
         guard parsed.operands.isEmpty else { throw CLIError.usage }
         guard parsed.targets.chosen != nil else {
-            throw CLIError("\(command.phrase) takes the Topic: --topic <id|label>. A Dormant or Settled Topic has no Pane.", exitCode: 2)
+            let guest = command == .reopen ? ", or the Guest Session: --guest-session <id>" : ""
+            throw CLIError("\(command.phrase) takes the Topic: --topic <id|label>\(guest). A Dormant or Settled Topic has no Pane.", exitCode: 2)
         }
         return command
     }
