@@ -539,7 +539,9 @@ final class HostServerTests: XCTestCase {
                        "the Session that the Terminal switched to did not get the Mac's colours")
 
         // Another screen, as Muxify Mobile is, writes its own colours and detaches.
-        try await colourProbes.screenWritesAndDetaches(in: "other", flags: nil) { try? await Task.sleep(nanoseconds: 500_000_000) }
+        try await colourProbes.screenWritesAndDetaches(in: "other", flags: nil, afterAttach: {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }, afterDetach: { _ in try await Task.sleep(nanoseconds: 500_000_000) })
         try colourProbes.go("detach")
         try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: detachedProbe) }
         XCTAssertEqual(try String(contentsOfFile: detachedProbe, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
@@ -551,13 +553,14 @@ final class HostServerTests: XCTestCase {
     /// other screen's.
     func testASwitchTheMacStartsRunsOnTheListenerAfterTheColourReport() async throws {
         let notices = try colourProbes.themeProbe(session: "other")
-        try await wait("the probe did not turn on mode 2031") { self.colourProbes.lines(notices).first == "ready" }
+        try await colourProbes.themeProbeIsReady(notices, in: "other")
         // The Terminal's Session is the newest, so the Listener never sits in the probe's Session, where tmux would
         // take its colours as black and tell the probe dark before the other screen does.
         try tmux.run(["new-session", "-d", "-s", "main"])
         let (client, terminal) = try await macWithColours(showing: "main")
         try ColourProbes.terminalSays(2, through: clientProcess)
-        try await colourProbes.screenWritesAndDetaches(in: "other", flags: "ignore-size,no-output") {}
+        try await colourProbes.screenWritesAndDetaches(in: "other", flags: "ignore-size,no-output", afterAttach: {},
+                                                       afterDetach: { _ in })
         try await wait("the probe was not told dark") { self.colourProbes.lines(notices).last == "dark" }
 
         _ = try await client.call(HostRequest.view(.switchClient(client: terminal.tty, target: "=other:")), as: ViewOutput.self)

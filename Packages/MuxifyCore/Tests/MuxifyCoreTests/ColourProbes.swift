@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// Probe Panes on a throwaway tmux server that ask for the background as programs do, and another screen that writes
 /// its own Colour Reports, for the tests of the Colour Reports (ADR 0098): the publisher's and the Host Server's.
@@ -14,20 +15,24 @@ struct ColourProbes {
     static let dark = TerminalColours(background: TerminalColour(red: 0x10, green: 0x10, blue: 0x10),
                                       foreground: TerminalColour(red: 0xee, green: 0xee, blue: 0xee))
 
+    /// How long a probe waits for tmux to answer its question: a second, times the time scale. tmux answers at once
+    /// when it has a colour for the Pane, and never when it has none.
+    static var answerWait: String { String(scaled(1)) }
+
     /// A Session whose Pane runs a program that waits for the file `go`, then asks for the background (OSC 11) as
-    /// Claude Code does, and writes the answer's colour, or `none` after a second without one, to the returned file.
-    /// A second answer file is for one more probe Pane.
+    /// Claude Code does, and writes the answer's colour, or `none` after `answerWait` without one, to the returned
+    /// file. A second answer file is for one more probe Pane.
     func probe(session: String) throws -> (String, String) {
         let python = "/usr/bin/python3"
         try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: python), "no python3 for the probe")
         let script = directory.appendingPathComponent("probe.py").path
         try """
             import os, re, select, sys, termios, tty, time
-            answer, go = sys.argv[1], sys.argv[2]
+            answer, go, wait = sys.argv[1], sys.argv[2], float(sys.argv[3])
             tty.setraw(0)
             while not os.path.exists(go): time.sleep(0.02)
             os.write(1, b'\\x1b]11;?\\x1b\\\\')
-            reply, end = b'', time.time() + 1
+            reply, end = b'', time.time() + wait
             while time.time() < end and not reply.endswith(b'\\x1b\\\\'):
                 if select.select([0], [], [], 0.05)[0]: reply += os.read(0, 256)
             found = re.search(rb'rgb:[0-9a-f/]+', reply)
@@ -53,7 +58,7 @@ struct ColourProbes {
 
     /// A probe Pane's command, which asks once the file `go` is there.
     func probeCommand(_ answer: String, go: String = "go") -> String {
-        "/usr/bin/python3 \(directory.appendingPathComponent("probe.py").path) \(answer) \(directory.appendingPathComponent(go).path)"
+        "/usr/bin/python3 \(directory.appendingPathComponent("probe.py").path) \(answer) \(directory.appendingPathComponent(go).path) \(Self.answerWait)"
     }
 
     /// Lets every probe that waits for `name` ask.
@@ -62,17 +67,18 @@ struct ColourProbes {
     }
 
     /// A Session whose Pane runs a program that turns on mode 2031, as Claude Code does, and logs each colour-scheme
-    /// notice to the returned file: `ready` once mode 2031 is on, then `dark`, or `light` and the background (OSC 11)
-    /// it asked for at once.
+    /// notice to the returned file: `ready` once it turned mode 2031 on, then `dark`, or `light` and the background
+    /// (OSC 11) it asked for at once. It also prints `ready` on its screen, after mode 2031: `themeProbeIsReady` waits
+    /// for tmux to show it, so tmux has turned the mode on.
     func themeProbe(session: String) throws -> String {
         let python = "/usr/bin/python3"
         try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: python), "no python3 for the probe")
         let script = directory.appendingPathComponent("theme.py").path
         try """
             import os, re, select, sys, tty, time
-            log = sys.argv[1]
+            log, wait = sys.argv[1], float(sys.argv[2])
             tty.setraw(0)
-            os.write(1, b'\\x1b[?2031h')
+            os.write(1, b'\\x1b[?2031h' + b'ready\\r\\n')
             pending = b''
             def note(text):
                 with open(log, 'a') as f: f.write(text + '\\n')
@@ -86,7 +92,7 @@ struct ColourProbes {
                     note('dark')
                     continue
                 os.write(1, b'\\x1b]11;?\\x1b\\\\')
-                end = time.time() + 1
+                end = time.time() + wait
                 while time.time() < end and not re.search(rb'rgb:[0-9a-f/]+', pending):
                     if select.select([0], [], [], 0.05)[0]: pending += os.read(0, 256)
                 found = re.search(rb'rgb:[0-9a-f/]+', pending)
@@ -94,8 +100,19 @@ struct ColourProbes {
                 pending = pending[found.end():] if found else b''
             """.write(toFile: script, atomically: true, encoding: .utf8)
         let log = directory.appendingPathComponent(session + "-notices").path
-        try server.run(["new-session", "-d", "-s", session, "-x", "80", "-y", "24", "\(python) \(script) \(log)"])
+        try server.run(["new-session", "-d", "-s", session, "-x", "80", "-y", "24", "\(python) \(script) \(log) \(Self.answerWait)"])
         return log
+    }
+
+    /// Waits until tmux has turned on mode 2031 in the theme probe of `session`: tmux tells only a program with the
+    /// mode on of a new colour scheme, and a report that comes before the mode sends no notice later. The probe's own
+    /// `ready` says only that it wrote the mode to its terminal; tmux has read that once its screen shows what the
+    /// probe wrote after it.
+    func themeProbeIsReady(_ log: String, in session: String) async throws {
+        try await eventually("the probe did not turn on mode 2031") {
+            guard lines(log).first == "ready" else { return false }
+            return try server.run(["capture-pane", "-p", "-t", "=" + session + ":"]).contains("ready")
+        }
     }
 
     func lines(_ path: String) -> [String] {
@@ -116,8 +133,11 @@ struct ColourProbes {
     }
 
     /// Another screen, as Muxify Mobile is: a control Client in `session`, attached with `flags`, writes `dark` to every
-    /// Pane of the Session and detaches once `afterAttach` returns, which lets the publisher read it.
-    func screenWritesAndDetaches(in session: String, flags: String?, afterAttach: () async -> Void) async throws {
+    /// Pane of the Session and detaches once `afterAttach` returns, which lets the publisher read it. tmux has run the
+    /// screen's report once it detached. `afterDetach` gets the screen's Client name and waits for what the test
+    /// needs of the publisher after the detach.
+    func screenWritesAndDetaches(in session: String, flags: String?, afterAttach: () async -> Void,
+                                 afterDetach: (_ screen: String) async throws -> Void) async throws {
         let binary = try XCTUnwrap(server.binary)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
@@ -133,22 +153,15 @@ struct ColourProbes {
         let before = controlClients().count
         try process.run()
         defer { if process.isRunning { process.terminate() } }
-        try await Self.wait("the screen did not attach") { controlClients().count == before + 1 }
+        await eventually("the screen did not attach") { controlClients().count == before + 1 }
+        let name = "client-\(process.processIdentifier)"
         await afterAttach()
         let panes = try server.run(["list-panes", "-s", "-t", "=" + session, "-F", "#{pane_id}"])
             .split(separator: "\n").map(String.init)
         let lines = ColourReport.commands(panes: panes, colours: Self.dark).map { $0 + "\n" }.joined()
         input.fileHandleForWriting.write(Data(lines.utf8))
         try input.fileHandleForWriting.close()
-        try await Self.wait("the screen did not detach") { controlClients().count == before }
-        try await Task.sleep(nanoseconds: 500_000_000)
-    }
-
-    static func wait(_ message: String, seconds: TimeInterval = 10, until done: () async throws -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while try await !done() {
-            guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
+        await eventually("the screen did not detach") { controlClients().count == before }
+        try await afterDetach(name)
     }
 }
