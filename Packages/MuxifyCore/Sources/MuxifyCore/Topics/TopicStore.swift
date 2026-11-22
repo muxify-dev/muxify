@@ -120,8 +120,9 @@ public struct TopicTransaction {
     }
 
     /// Adds a new Topic as a Guest at the end of the Guests. In the place of the Board Session `replacedSession`, whose
-    /// card leaves the Board, it takes that card's place and section: its In Play place, or its place among the Guests.
-    /// A Pinned record goes last among the Pinned Topics. An id that a record has is taken.
+    /// card leaves the Board, it takes that card's place and section: its place among the Pinned cards, its In Play
+    /// place, or its place among the Guests. A Pinned record goes last among the Pinned cards. An id that a record has
+    /// is taken.
     public mutating func create(_ record: TopicRecord, replacingSession replacedSession: String? = nil) throws {
         try TopicStore.check(record)
         guard !records.contains(where: { $0.id == record.id }) else {
@@ -130,6 +131,7 @@ public struct TopicTransaction {
         if let replaced = boardSessions.first(where: { $0.id == replacedSession }) {
             var placed = record
             placed.order = replaced.order
+            placed.isPinned = replaced.isPinned
             placed.isGuest = TopicOrder.cut(entries, inPlay: inPlay).guests.contains { $0.id == .session(replaced.id) }
             return put(BoardChange([.topic(placed)], endedSessions: [replaced.id]))
         }
@@ -227,7 +229,8 @@ public struct TopicTransaction {
         }
     }
 
-    public mutating func pin(_ id: String, _ pinned: Bool) throws {
+    /// Pin or Unpin of a Topic or a Board Session. From an In Play place, Pin leaves an Open Place there.
+    public mutating func pin(_ id: BoardCardID, _ pinned: Bool) throws {
         put(try TopicOrder.pinning(id, pinned, inPlay: inPlay, in: entries))
     }
 

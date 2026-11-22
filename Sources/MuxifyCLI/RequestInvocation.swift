@@ -94,14 +94,14 @@ struct RequestInvocation: Equatable {
         var targets: [TargetOption] {
             switch self {
             case .new: return []
-            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .moveCard, .placeCard, .tradeCard,
+            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .moveCard, .placeCard, .tradeCard,
                  .sortSessions:
                 return [.topic, .window, .pane]
             case .moveSession: return [.session, .boardSession, .pane]
             case .moveWholeSession: return [.session, .pane]
             case .makeGuest: return [.topic, .session, .window, .pane]
             case .replaceFromBench, .fillPlace: return [.topic, .session, .boardSession, .window, .pane]
-            case .benchTopic: return [.topic, .session, .boardSession, .window, .pane]
+            case .benchTopic, .pin: return [.topic, .session, .boardSession, .window, .pane]
             case .reopen, .startFresh: return [.topic, .boardSession]
             case .moveWindow, .moveToNewTopic, .removeWindowFromTopic: return [.window, .pane]
             case .moveToNewWindow: return [.pane]

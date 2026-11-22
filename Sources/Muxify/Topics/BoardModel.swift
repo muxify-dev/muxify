@@ -373,7 +373,7 @@ struct BoardModel {
     /// The Next Topic after `card` leaves the list together with the Topics `others`: the nearest card below it that the Sidebar
     /// shows and that stays. With In Play and no such card, the first In Play card that stays, also when the Bench is
     /// empty, so a Settle in In Play does not go to a hidden Bench. Else the nearest row below that stays, else above;
-    /// with In Play, never a Pinned Topic, which is not In Play.
+    /// with In Play, never a Pinned card, which is not In Play.
     func nextTopic(after card: TopicGroupID, skipping others: Set<String> = []) -> TopicGroupID {
         guard let index = rows.firstIndex(where: { $0.id == card }) else { return .noTopic }
         func stays(_ row: Row) -> Bool {

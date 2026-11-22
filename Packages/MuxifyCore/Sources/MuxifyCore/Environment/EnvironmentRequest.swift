@@ -357,7 +357,9 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case killWindow
     /// Kills the target's whole Session, with the same rules as `killWindow`.
     case killSession
-    /// Pins or unpins the target's open Topic. A Topic that already has that Pin does not change.
+    /// Pins or unpins the card of the target's open Topic, or of the target's Board Session, also when a
+    /// `board_session` target names a Dormant one. Pin puts it last among the Pinned cards; Unpin puts it at the end of
+    /// the Guests, as a Guest. A card that already has that Pin does not change.
     case pin
     case unpin
     /// Moves the card of the target's Topic, or of the target's Board Session, among the cards with its Pin, or across the In Play lines.

@@ -37,6 +37,8 @@ extension CommandPalette {
         if case .boardSession(let id) = item.ref {
             switch action {
             case .startTopicFresh: close(); store.reopenBoardSession(id, .startFresh)
+            case .pinTopic: close(); store.pin(.boardSession(id), true)
+            case .unpinTopic: close(); store.pin(.boardSession(id), false)
             case .bench: close(); store.bench(.boardSession(id))
             default: break
             }
@@ -52,8 +54,8 @@ extension CommandPalette {
             case .setTopicNote: begin(.text(.topicNote(topic)), text: topic.note ?? "", keepingHistory: true)
             case .clearTopicNote: close(); store.setTopicNote(of: id, nil)
             case .addSessionToTopic: store.refreshSessionPaths(); begin(.addSession(topic), keepingHistory: true)
-            case .pinTopic: close(); store.pinTopic(id, true)
-            case .unpinTopic: close(); store.pinTopic(id, false)
+            case .pinTopic: close(); store.pin(.topic(id), true)
+            case .unpinTopic: close(); store.pin(.topic(id), false)
             case .makeGuest: close(); store.makeGuest(.topic(id))
             case .bench: close(); store.bench(.topic(id))
             case .reopenTopic: close(); store.reopenTopic(id, .reopen)
@@ -86,6 +88,10 @@ extension CommandPalette {
             if let window { begin(.confirm(PaletteConfirmation(.killSession(window))), keepingHistory: true) }
         case .makeGuest:
             if let window { close(); store.makeGuest(.session(window.sessionID)) }
+        case .pinTopic:
+            if let window { close(); store.pin(.session(window.sessionID), true) }
+        case .unpinTopic:
+            if let window { close(); store.pin(.session(window.sessionID), false) }
         case .bench:
             if let window { close(); store.bench(.session(window.sessionID)) }
         case .newWindow:

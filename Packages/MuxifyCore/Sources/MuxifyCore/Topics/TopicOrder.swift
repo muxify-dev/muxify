@@ -9,7 +9,7 @@ public enum BoardCardID: Hashable, Sendable {
 }
 
 /// A Board Session: the row of the `board_sessions` table that gives a No Topic Session a card on the Board. It keeps
-/// the card's order, in the same scale as the Topic records, its Guest mark, and the Session's Remembered Session, in
+/// the card's order, in the same scale as the Topic records, its Pin, its Guest mark, and the Session's Remembered Session, in
 /// the shape of one entry of a Topic record's `sessions`. The live Session points at it with `@muxify_session_id`, so a
 /// tmux restart does not end it: with no such Session, the Board Session is Dormant, and Reopen creates its Session again.
 public struct BoardSession: Codable, Equatable, Sendable {
@@ -19,13 +19,16 @@ public struct BoardSession: Codable, Equatable, Sendable {
 
     public let id: String
     public var order: Double
+    /// The card is Pinned, as a Pinned Topic is: above every card that is not Pinned, and neither In Play nor a Guest.
+    public var isPinned: Bool
     /// The card is among the Guests; else it holds an In Play place. A Board Session never waits on the Bench.
     public var isGuest: Bool
     public var session: JSONValue
 
-    public init(id: String, order: Double, isGuest: Bool, session: JSONValue = .object([:])) {
+    public init(id: String, order: Double, isPinned: Bool = false, isGuest: Bool, session: JSONValue = .object([:])) {
         self.id = id
         self.order = order
+        self.isPinned = isPinned
         self.isGuest = isGuest
         self.session = session
     }
@@ -41,14 +44,25 @@ public struct BoardSession: Codable, Equatable, Sendable {
         return linked.filter { $0.sessionID == first.sessionID }
     }
 
-    private enum CodingKeys: String, CodingKey { case id, order, isGuest = "guest", session }
+    private enum CodingKeys: String, CodingKey { case id, order, isPinned = "pinned", isGuest = "guest", session }
 
     /// As every key of the `environment` subscription, each one but the id decodes when it is missing.
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         self.init(id: try values.decode(String.self, forKey: .id), order: try values.decodeIfPresent(Double.self, forKey: .order) ?? 0,
+                  isPinned: try values.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false,
                   isGuest: try values.decodeIfPresent(Bool.self, forKey: .isGuest) ?? false,
                   session: try values.decodeIfPresent(JSONValue.self, forKey: .session) ?? .object([:]))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(order, forKey: .order)
+        // An optional key: absent is false, so the row of a card that is not Pinned reads as before.
+        if isPinned { try values.encode(isPinned, forKey: .isPinned) }
+        try values.encode(isGuest, forKey: .isGuest)
+        try values.encode(session, forKey: .session)
     }
 }
 
@@ -91,10 +105,12 @@ public enum BoardCard: Equatable, Sendable {
         }
     }
 
-    /// A Board Session is never Pinned.
     public var isPinned: Bool {
-        if case .topic(let record) = self { return record.isPinned }
-        return false
+        switch self {
+        case .topic(let record): return record.isPinned
+        case .session(let session): return session.isPinned
+        case .openPlace: return false
+        }
     }
 
     /// The Guest mark as the card stores it. Only the cut says if a card is among the Guests: a Board Session without
@@ -102,7 +118,7 @@ public enum BoardCard: Equatable, Sendable {
     var hasGuestMark: Bool {
         switch self {
         case .topic(let record): return record.isGuest && !record.isPinned
-        case .session(let session): return session.isGuest
+        case .session(let session): return session.isGuest && !session.isPinned
         case .openPlace: return false
         }
     }
@@ -149,12 +165,20 @@ public enum BoardCard: Equatable, Sendable {
         }
     }
 
-    /// A Pinned Topic is not In Play, so Pin also ends its Guest mark.
+    /// A Pinned card is not In Play, so Pin also ends its Guest mark.
     fileprivate func pinned(_ pinned: Bool) -> BoardCard {
-        guard case .topic(var record) = self else { return self }
-        record.isPinned = pinned
-        if pinned { record.isGuest = false }
-        return .topic(record)
+        switch self {
+        case .topic(var record):
+            record.isPinned = pinned
+            if pinned { record.isGuest = false }
+            return .topic(record)
+        case .session(var session):
+            session.isPinned = pinned
+            if pinned { session.isGuest = false }
+            return .session(session)
+        case .openPlace:
+            return self
+        }
     }
 
     fileprivate func guest(_ guest: Bool) -> BoardCard {
@@ -289,7 +313,7 @@ public enum TopicOrder {
         case sourceUnavailable, anchorUnavailable
         /// Replace from Bench: the card to replace is not In Play, or the card to take its place is not Benched.
         case notInPlay, notBenched
-        /// Choose In Play: a Pinned Topic is neither In Play nor Benched, and each place takes one card.
+        /// Choose In Play: a Pinned card is neither In Play nor Benched, and each place takes one card.
         case pinned, chosenTwice
         /// Fill an Open Place: the place is not an Open Place, or the card is not a Guest or a Benched Topic.
         case notOpenPlace, cannotFill
@@ -302,7 +326,7 @@ public enum TopicOrder {
             case .anchorUnavailable: return "The card at the drop position is no longer on the Board."
             case .notInPlay: return "The card to replace is not In Play."
             case .notBenched: return "The card to put In Play is not on the Bench."
-            case .pinned: return "A Pinned Topic is neither In Play nor on the Bench."
+            case .pinned: return "A Pinned card is neither In Play nor on the Bench."
             case .chosenTwice: return "A card is chosen twice."
             case .notOpenPlace: return "The In Play place is not an Open Place."
             case .cannotFill: return "Only a Guest or a Benched Topic can fill an Open Place."
@@ -311,7 +335,7 @@ public enum TopicOrder {
         }
     }
 
-    /// The Pinned Topics first, then the others; each part in its own hand-set order.
+    /// The Pinned cards first, then the others; each part in its own hand-set order.
     public static func sorted(_ entries: [BoardCard]) -> [BoardCard] {
         entries.filter(\.isOpen).sorted {
             if $0.isPinned != $1.isPinned { return $0.isPinned }
@@ -348,23 +372,27 @@ public enum TopicOrder {
         return placing(source, at: index, in: ordered, others: original.filter { $0.isPinned != source.isPinned })
     }
 
-    /// Pin puts the Topic last among the Pinned Topics and ends its Guest mark. Unpin puts it at the top of the Bench,
-    /// where a returning Topic goes.
-    public static func pinning(_ id: String, _ pinned: Bool, inPlay: Int, in entries: [BoardCard]) throws -> [BoardCard] {
-        guard let found = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
-        guard found.isPinned != pinned, case .topic(let record) = found.pinned(pinned) else { return [] }
-        return inserting(record, inPlay: inPlay, in: entries)
+    /// Pin puts the card, a Topic or a Board Session, last among the Pinned cards and ends its Guest mark. Unpin puts
+    /// it at the end of the Guests with the Guest mark, also when an In Play place is free, so no other card moves.
+    public static func pinning(_ id: BoardCardID, _ pinned: Bool, inPlay: Int, in entries: [BoardCard]) throws -> BoardChange {
+        guard let found = sorted(entries).first(where: { $0.id == id }), found.slot != .openPlace else { throw Failure.sourceUnavailable }
+        guard found.isPinned != pinned else { return BoardChange([]) }
+        guard pinned else { return appendingGuest(found.pinned(false), inPlay: inPlay, in: entries) }
+        return BoardChange(inserting(found.pinned(true), inPlay: inPlay, in: entries))
     }
 
-    /// Places a Topic that Reopen, Start Fresh or Unpin brings back at the top of the Bench. A Pinned
-    /// Topic has no Bench, so it goes last among the Pinned Topics.
+    /// Places a Topic that Reopen or Start Fresh brings back at the top of the Bench. A Pinned Topic has no Bench, so
+    /// it goes last among the Pinned cards.
     public static func inserting(_ record: TopicRecord, inPlay: Int, in entries: [BoardCard]) -> [BoardCard] {
-        let original = sorted(entries).filter { $0.id != .topic(record.id) }
-        let source = BoardCard.topic(record)
-        var zone = original.filter { $0.isPinned == record.isPinned }
-        let index = record.isPinned ? zone.count : topOfBench(in: zone, inPlay: inPlay)
+        inserting(.topic(record), inPlay: inPlay, in: entries)
+    }
+
+    private static func inserting(_ source: BoardCard, inPlay: Int, in entries: [BoardCard]) -> [BoardCard] {
+        let original = sorted(entries).filter { $0.id != source.id }
+        var zone = original.filter { $0.isPinned == source.isPinned }
+        let index = source.isPinned ? zone.count : topOfBench(in: zone, inPlay: inPlay)
         zone.insert(source, at: index)
-        return placing(source, at: index, in: zone, others: original.filter { $0.isPinned != record.isPinned })
+        return placing(source, at: index, in: zone, others: original.filter { $0.isPinned != source.isPinned })
     }
 
     /// The index in `zone`, the cards that are not Pinned, where a returning Topic goes: right after the last
@@ -454,7 +482,7 @@ public enum TopicOrder {
     }
 
     /// Make a Guest: the Benched Topic goes to the end of the Guests with the Guest mark, and no other card moves. A
-    /// Board Session is never on the Bench, so it is never a card that this takes.
+    /// Board Session is never on the Bench, so it is never a card that this takes. Unpin puts a card there the same way.
     public static func makingGuest(_ id: BoardCardID, inPlay: Int, in entries: [BoardCard]) throws -> BoardChange {
         guard let entry = sorted(entries).first(where: { $0.id == id }) else { throw Failure.sourceUnavailable }
         guard !entry.isPinned else { throw Failure.pinned }

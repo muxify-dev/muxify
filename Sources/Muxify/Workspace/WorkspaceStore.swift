@@ -391,11 +391,7 @@ final class WorkspaceStore {
         }
     }
 
-    func pinTopic(_ id: String, _ pinned: Bool) {
-        perform(EnvironmentRequest(pinned ? .pin : .unpin, target: .topic(.id(id))))
-    }
-
-    /// A card that Make a Guest and Bench act on: a Topic, a live No Topic Session by its tmux id, which has a card when
+    /// A card that Pin, Make a Guest and Bench act on: a Topic, a live No Topic Session by its tmux id, which has a card when
     /// it is a Board Session, or a Board Session, live or Dormant, by its id.
     enum GuestCard: Equatable {
         case topic(String)
@@ -436,14 +432,32 @@ final class WorkspaceStore {
         }
     }
 
-    /// Bench applies to a card In Play: a Topic in an In Play place, a Guest Topic or a Board Session, which is always
-    /// In Play. Not to a Benched or Pinned Topic.
+    /// Bench applies to a card In Play: a Topic in an In Play place, a Guest Topic or a Board Session that is not
+    /// Pinned, which is always In Play. Not to a Benched Topic or a Pinned card.
     func canBench(_ card: GuestCard) -> Bool {
         guard link.features.contains(.topics), board.topicsEnabled else { return false }
         switch card {
         case .topic(let id): return board.split.inPlay.contains { $0.id == .topic(id) }
-        case .session, .boardSession: return guestState(of: card) == true
+        case .session, .boardSession: return guestState(of: card) == true && pinState(of: card) == false
         }
+    }
+
+    /// Whether the card is Pinned. Nil when Pin does not apply: a Settled Topic, a No Topic Session that has no card, or
+    /// Topics are off.
+    func pinState(of card: GuestCard) -> Bool? {
+        guard link.features.contains(.topics), board.topicsEnabled else { return nil }
+        switch card {
+        case .topic(let id): return records.first { $0.id == id && $0.settledAt == nil }?.isPinned
+        case .session(let id): return board.boardSessionsBySession[id].flatMap(boardSession)?.isPinned
+        case .boardSession(let id): return boardSession(id)?.isPinned
+        }
+    }
+
+    /// Pin and Unpin go through the Topic service, as `muxify topic pin` and `unpin` do. Unpin puts the card at the end
+    /// of the Guests.
+    func pin(_ card: GuestCard, _ pinned: Bool) {
+        guard let state = pinState(of: card), state != pinned, let target = card.target else { return }
+        perform(EnvironmentRequest(pinned ? .pin : .unpin, target: target))
     }
 
     /// Bench goes through the Topic service, as `muxify topic bench` does. A Topic goes to the top of the Bench; a
@@ -464,7 +478,8 @@ final class WorkspaceStore {
         return board.nextTopic(after: card)
     }
 
-    /// The card that the Make a Guest and Bench Commands act on: the Active Topic, else the Session of the Location.
+    /// The card that the Pin, Unpin, Make a Guest and Bench Commands act on: the Active Topic, else the Session of the
+    /// Location.
     var currentGuestCard: GuestCard? {
         if let id = activeTopicID { return .topic(id) }
         return selectedWindow.map { .session($0.sessionID) }
@@ -518,14 +533,10 @@ final class WorkspaceStore {
         if !changingTopic { stepInFlight = nil }
     }
 
-    /// The Active Topic when it is open, which Pin Topic and Unpin Topic act on.
-    var pinnableActiveTopic: TopicRecord? {
-        guard link.features.contains(.topics), let id = activeTopicID else { return nil }
-        return records.first { $0.id == id && $0.settledAt == nil }
-    }
-
-    func togglePinOfActiveTopic() {
-        if let topic = pinnableActiveTopic { pinTopic(topic.id, !topic.isPinned) }
+    /// Pin or Unpin of the card of the Location, as the `pin_topic` key does.
+    func togglePinOfCurrentCard() {
+        guard let card = currentGuestCard, let pinned = pinState(of: card) else { return }
+        pin(card, !pinned)
     }
 
     func changeTopic(_ source: TopicMembershipPlan.Source, destination: TopicRecord? = nil, title: String = "") {
@@ -3199,7 +3210,7 @@ final class WorkspaceStore {
         case .setTopicNote: presentSetTopicNote()
         case .moveTopicUp: moveActiveCard(.previous)
         case .moveTopicDown: moveActiveCard(.next)
-        case .togglePinTopic: togglePinOfActiveTopic()
+        case .togglePinTopic: togglePinOfCurrentCard()
         case .markRead: markCurrentRead()
         case .markUnread: changeRead(.unread, in: currentReadTarget)
         case .markAllRead: changeRead(.read, in: .environment)

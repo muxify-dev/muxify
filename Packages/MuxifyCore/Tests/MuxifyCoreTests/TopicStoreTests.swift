@@ -207,17 +207,28 @@ final class TopicStoreTests: XCTestCase {
 
     private func shown(_ store: TopicStore) throws -> [String] { TopicOrder.sorted(try records(store).map(BoardCard.topic)).records.map(\.id) }
 
-    func testPinPutsATopicLastAmongPinnedTopicsAndUnpinAtTheTopOfTheBench() throws {
+    func testPinPutsATopicLastAmongPinnedCardsAndUnpinAtTheEndOfTheGuests() throws {
         let store = TopicStore(paths: paths, inPlay: 2)
         try seed(record("a", order: 0), record("b", order: 1), record("c", order: 2), record("d", order: 3), record("e", order: 4))
-        try store.write { try $0.pin("c", true) }
+        try store.write { try $0.pin(.topic("c"), true) }
         XCTAssertEqual(try shown(store), ["c", "a", "b", "d", "e"])
-        try store.write { try $0.pin("e", true) }
+        try store.write { try $0.pin(.topic("e"), true) }
         XCTAssertEqual(try shown(store), ["c", "e", "a", "b", "d"], "a new Pin goes below the Topics already Pinned")
-        try store.write { try $0.pin("c", false) }
-        XCTAssertEqual(try shown(store), ["e", "a", "b", "c", "d"], "Unpin puts the Topic at the top of the Bench, where a returning Topic goes")
+        try store.write { try $0.pin(.topic("c"), false) }
+        XCTAssertEqual(try shown(store), ["e", "a", "b", "c", "d"], "Unpin puts the Topic at the end of the Guests")
         XCTAssertEqual(try records(store).filter(\.isPinned).map(\.id), ["e"])
-        XCTAssertThrowsError(try store.write { try $0.pin("missing", true) })
+        XCTAssertEqual(try records(store).filter(\.isGuest).map(\.id), ["c"])
+        XCTAssertThrowsError(try store.write { try $0.pin(.topic("missing"), true) })
+    }
+
+    func testThePinOfABoardSessionIsSavedAndSurvivesARead() throws {
+        let store = TopicStore(paths: paths, inPlay: 2)
+        try seed(record("a", order: 0))
+        try store.write { $0.addToBoard(BoardSession(id: "s1", order: 0, isGuest: true)) }
+        try store.write { try $0.pin(.session("s1"), true) }
+        XCTAssertEqual(try store.read().boardSessions.map { [$0.isPinned, $0.isGuest] }, [[true, false]])
+        try store.write { try $0.pin(.session("s1"), false) }
+        XCTAssertEqual(try store.read().boardSessions.map { [$0.isPinned, $0.isGuest] }, [[false, true]])
     }
 
     func testUnpinNextToAnExhaustedRankRenumbersTheOpenTopics() throws {
@@ -225,7 +236,7 @@ final class TopicStoreTests: XCTestCase {
         var pinned = record("p", order: 0)
         pinned.isPinned = true
         try seed(record("a", order: .greatestFiniteMagnitude), pinned)
-        try store.write { try $0.pin("p", false) }
+        try store.write { try $0.pin(.topic("p"), false) }
         XCTAssertEqual(try shown(store), ["a", "p"])
         XCTAssertTrue(try records(store).allSatisfy { !$0.isPinned && $0.order?.isFinite == true })
     }
@@ -261,7 +272,7 @@ final class TopicStoreTests: XCTestCase {
         var other = record("p", order: 0)
         other.isPinned = true
         try seed(other, record("a", order: 0), record("t", order: 1))
-        try store.write { try $0.pin("t", true) }
+        try store.write { try $0.pin(.topic("t"), true) }
         XCTAssertEqual(try stored("t")["pinned"], .integer(1))
         XCTAssertEqual(try stored("a")["pinned"], .integer(0), "a Topic that is not Pinned is 0")
 

@@ -4,7 +4,7 @@ A Topic is one thing the user wants to get done. It groups Sessions, and its Ses
 
 ## See every Topic and Session
 
-- `muxify environment show` prints every Session in tmux order and the user's Board in the order that Muxify shows it: the Pinned Topics, the In Play places, the Guests and the Bench, then the No Topic Sessions. Each card has its mark, and each Topic has its Note, Tags and state (live, Dormant or Empty). With `--json`, a card names its Sessions by id. It does not give Windows or Panes: use `topic show` for those. Use it to see which Topics are In Play, or which Agent waits for an answer.
+- `muxify environment show` prints every Session in tmux order and the user's Board in the order that Muxify shows it: the Pinned cards, the In Play places, the Guests and the Bench, then the No Topic Sessions. Each card has its mark, and each Topic has its Note, Tags and state (live, Dormant or Empty). With `--json`, a card names its Sessions by id. It does not give Windows or Panes: use `topic show` for those. Use it to see which Topics are In Play, or which Agent waits for an answer.
 
 ## See the whole Topic
 
@@ -28,6 +28,6 @@ A Topic is one thing the user wants to get done. It groups Sessions, and its Ses
 
 ## Change the Topic
 
-`topic rename`, `topic note`, `topic tag`, `topic pin`, `topic move`, `topic choose-in-play` and the `mark-read` and `mark-unread` verbs change how the user sees their Topics. Run them when the user asks.
+`topic rename`, `topic note`, `topic tag`, `topic pin`, `topic move`, `topic choose-in-play` and the `mark-read` and `mark-unread` verbs change how the user sees their Topics. Run them when the user asks. `topic pin` and `topic unpin` also take a Board Session (`--board-session <id>` or `--session <name>`), and Unpin puts the card at the end of the Guests.
 
 `topic settle` marks the Topic as done. Without flags it keeps the Sessions and Worktrees. With `--kill-sessions` it stops every process in them, and with `--remove-worktrees` it removes the merged Worktrees that the Topic made. Ask the user before you settle.

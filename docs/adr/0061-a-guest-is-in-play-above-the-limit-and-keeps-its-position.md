@@ -1,5 +1,7 @@
 # A Guest is In Play above the limit and keeps its position
 
+> **Partly superseded by [ADR-0103](0103-a-board-session-can-be-pinned-and-unpin-makes-a-guest.md):** Unpin puts the card at the end of the Guests, as a Guest, not at the top of the Bench.
+
 > **Partly superseded by [ADR-0102](0102-a-board-session-can-take-an-in-play-place.md):** a Locked Session is a Board Session, and it can take an In Play place. Bench takes its card off the Board. A Trade or Replace from Bench that would send it to the Bench takes it off the Board too.
 
 > **Partly superseded by [ADR-0094](0094-a-new-topic-is-a-guest.md):** a new Topic is a Guest, at the end of the Guests.

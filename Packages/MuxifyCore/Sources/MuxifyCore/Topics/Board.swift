@@ -38,7 +38,12 @@ public struct Board {
             return nil
         }
 
-        public var isPinned: Bool { record?.isPinned ?? false }
+        public var isPinned: Bool {
+            switch subject {
+            case .topic(let record): return record.isPinned
+            case .session(let session): return session.isPinned
+            }
+        }
     }
 
     public enum Entry {
@@ -63,7 +68,7 @@ public struct Board {
         }
     }
 
-    /// Every card and Open Place in list order, the Pinned Topics first, as `TopicCards.order` gives them.
+    /// Every card and Open Place in list order, the Pinned cards first, as `TopicCards.order` gives them.
     public let entries: [Entry]
     /// The same cards as `TopicCards` takes them, for Move Up and Move Down.
     public let order: [BoardCard]

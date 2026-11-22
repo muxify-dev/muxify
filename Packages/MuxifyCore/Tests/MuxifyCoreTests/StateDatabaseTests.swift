@@ -46,6 +46,22 @@ final class StateDatabaseTests: XCTestCase {
         XCTAssertEqual(applied, ["first", "second"])
     }
 
+    func testStepSevenKeepsEveryBoardSessionOfAStepSixDatabaseAndReadsItAsNotPinned() throws {
+        let stepSix = try StateDatabase.open(paths, migrations: Array(StateDatabase.migrations.prefix(6)), imports: [])
+        XCTAssertEqual(try StateDatabase.userVersion(stepSix), 6)
+        try stepSix.execute(#"INSERT INTO board_sessions (id, "order", guest, session) VALUES (?, ?, ?, ?)"#, "s1", 1.0, true, #"{"name":"notes"}"#)
+        try stepSix.execute(#"INSERT INTO board_sessions (id, "order", guest, session) VALUES (?, ?, ?, ?)"#, "s2", 2.0, false, "{}")
+
+        let connection = try StateDatabase.open(paths)
+        XCTAssertEqual(try StateDatabase.userVersion(connection), 7)
+        XCTAssertEqual(try TopicTable.contents(connection).boardSessions, [
+            BoardSession(id: "s1", order: 1, isPinned: false, isGuest: true, session: .object(["name": .string("notes")])),
+            BoardSession(id: "s2", order: 2, isPinned: false, isGuest: false),
+        ])
+        XCTAssertEqual(try connection.query(#"SELECT id, guest, session FROM board_sessions ORDER BY id"#) { $0.text(0) }, ["s1", "s2"],
+                       "an older build reads the table by its named columns")
+    }
+
     func testTheImportsRunAfterTheMigrationsOnEveryOpen() throws {
         let table = StateDatabase.Migration("CREATE TABLE moved (name TEXT)")
         var imports = 0

@@ -125,6 +125,8 @@ final class CLIVerbsTests: XCTestCase {
         let cases: [([String], CLICommand)] = [
             (["topic", "pin"], request(.pin(true))),
             (["topic", "unpin", "--topic", "Fix"], request(.pin(false), target: .topic(.named("Fix")))),
+            (["topic", "pin", "--board-session", "s1"], request(.pin(true), target: .boardSession("s1"))),
+            (["topic", "unpin", "--session", "notes"], request(.pin(false), target: .sessionName("notes"))),
             (["topic", "move", "up"], request(.moveCard(.up))),
             (["topic", "move", "down", "--topic", "Fix"], request(.moveCard(.down), target: .topic(.named("Fix")))),
             (["topic", "move", "--trade-with", "Next"], request(.tradeCard(with: .topic("Next")))),

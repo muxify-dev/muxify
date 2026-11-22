@@ -190,10 +190,10 @@ exec /bin/sh -c "$command"
         wait(lambda: self.s.driver('press', 'Commands')['pressed'], 'Commands did not open')
         self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'the Commands field did not show')
         self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', 'Pin Topic')
-        self.s.wait_rows(lambda rs: self.s.has('palette-row-command-Pin Topic', rs), 'Pin Topic is missing from Commands')
-        self.s.act('press', 'palette-row-command-Pin Topic')
-        wait(lambda: self.host_store.get(topic).get('pinned') is True, 'Pin Topic did not Pin the Topic in the Host\'s database')
+        self.s.act('set', 'palette-search', 'Pin')
+        self.s.wait_rows(lambda rs: self.s.has('palette-row-command-Pin', rs), 'Pin is missing from Commands')
+        self.s.act('press', 'palette-row-command-Pin')
+        wait(lambda: self.host_store.get(topic).get('pinned') is True, 'Pin did not Pin the Topic in the Host\'s database')
 
     def test_a_config_edit_on_the_host_changes_the_remote_app_window_without_reload_config(self):
         """The Host Server's `config` subscription pushes the edit: nothing reloads, and no Command Palette opens."""

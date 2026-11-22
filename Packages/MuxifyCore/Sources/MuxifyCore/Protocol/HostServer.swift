@@ -639,13 +639,13 @@ final class HostEnvironment: @unchecked Sendable {
 
     /// On `delivery`: computes the view once the state and the Config are there, and sends it to every subscriber whose
     /// view differs from the last one, and to the subscriber `first` in any case. A newer item replaces an unsent one.
-    /// A client that did not declare `board` gets the view without its Dormant Board Sessions, so a change
-    /// of only those sends it nothing.
+    /// A client that did not declare `board` gets the view without its Dormant Board Sessions, so a change of only
+    /// those sends it nothing, and with each live Pinned Board Session as a No Topic Session.
     private func sendSnapshot(first: Int? = nil) {
         guard hasState, let config = snapshotConfig, let tmux = state.snapshot else { return }
         let whole = EnvironmentShown(contents: state.topicContents, tmux: tmux, config: config)
         var older = whole
-        older.snapshot = whole.snapshot.withoutDormantSessions
+        older.snapshot = whole.snapshot.withoutBoard
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var changed: [Bool: Bool] = [:]
@@ -702,7 +702,7 @@ final class HostEnvironment: @unchecked Sendable {
             if case .failed(let failure) = response {
                 request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
             } else if case .snapshot(let snapshot) = response, !declaresBoard {
-                request.finish(EnvironmentResponse.snapshot(snapshot.withoutDormantSessions))
+                request.finish(EnvironmentResponse.snapshot(snapshot.withoutBoard))
             } else {
                 request.finish(response)
             }

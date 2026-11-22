@@ -69,6 +69,7 @@ enum CLIVerbs {
 
     private static let topicTarget = "[--topic <id|label> | --window <id> | --pane <id>]"
     private static let cardTarget = "[--topic <id|label> | --session <name|id> | --window <id> | --pane <id>]"
+    private static let boardCardTarget = "[--topic <id|label> | --session <name|id> | --board-session <id> | --window <id> | --pane <id>]"
 
     // MARK: - browser
 
@@ -363,7 +364,7 @@ enum CLIVerbs {
         CLIVerb(path: .environmentShow, synopsis: "[--json]", options: [.flag("--json")],
                 help: """
                 Shows the Sessions and the Board of the Environment, in the order that
-                Muxify shows them: the Sessions in tmux order, then the Pinned Topics, the
+                Muxify shows them: the Sessions in tmux order, then the Pinned cards, the
                 In Play places, the Guests and the Bench, each with its Sessions, and each
                 No Topic Session. JSON includes each Session's Windows in tmux index order,
                 with marks, and the Tags that the Config defines. JSON also has `sidebar`,
@@ -672,15 +673,27 @@ enum CLIVerbs {
                 """) { parsed in
             .request(try RequestInvocation(try reopening(.startFresh, parsed), parsed: parsed))
         },
-        topicVerb(.topicPin, synopsis: "\(topicTarget) [--json]",
-                  help: "Pins this Pane's Topic, as Pin Topic does: its card goes last among the Pinned Topics.") { parsed in
+        CLIVerb(path: .topicPin, synopsis: boardCardTarget + " [--json]", options: [.flag("--json")],
+                targets: [.topic, .session, .boardSession, .window, .pane],
+                help: """
+                Pins this Pane's card, its Topic or its Board Session, as Pin does: the card
+                goes last among the Pinned cards. A card from an In Play place leaves an
+                Open Place there, and a Guest loses its Guest mark. --board-session names a
+                Board Session by the id that environment show gives it, also a Dormant one.
+                """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
-            return .pin(true)
+            return .request(try RequestInvocation(.pin(true), parsed: parsed))
         },
-        topicVerb(.topicUnpin, synopsis: "\(topicTarget) [--json]",
-                  help: "Ends the Pin of this Pane's Topic, as Unpin Topic does: its card goes first among the others.") { parsed in
+        CLIVerb(path: .topicUnpin, synopsis: boardCardTarget + " [--json]", options: [.flag("--json")],
+                targets: [.topic, .session, .boardSession, .window, .pane],
+                help: """
+                Ends the Pin of this Pane's card, its Topic or its Board Session, as Unpin
+                does: the card goes to the end of the Guests, as a Guest, also when an In
+                Play place is free. --board-session names a Board Session by the id that
+                environment show gives it, also a Dormant one.
+                """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
-            return .pin(false)
+            return .request(try RequestInvocation(.pin(false), parsed: parsed))
         },
         topicVerb(.topicMove, synopsis: """
                   (up | down | (--before | --after | --trade-with) <id|label>
@@ -800,7 +813,7 @@ enum CLIVerbs {
                 options: [.flag("--json")], targets: [.topic, .session, .boardSession, .window, .pane],
                 help: """
                 Puts this Pane's Guest or Benched Topic in the Open Place at In Play place
-                <place>, counted from 1 after the Pinned Topics, as a pick on the Open Place
+                <place>, counted from 1 after the Pinned cards, as a pick on the Open Place
                 page does. A Guest loses its Guest mark. No other card moves. --session and
                 --board-session name a Board Session, also a Dormant one.
                 """) { parsed in

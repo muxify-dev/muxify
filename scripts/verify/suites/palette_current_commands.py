@@ -181,7 +181,7 @@ class PaletteCurrentCommands(PaletteFixture):
     def test_commands_omit_unavailable_topic_and_tab_actions(self):
         for title in ['Add a Session', 'Settle Topic', 'Move Pane with Active Tab',
                       'Remove Session from Topic', 'Forget Topic', 'Rename Topic', 'Move Topic Down',
-                      'Pin Topic', 'Set Topic Note', 'Clear Topic Note']:
+                      'Pin', 'Set Topic Note', 'Clear Topic Note']:
             self.s.open_palette('Commands', title)
             self.assertFalse(self.s.has('palette-row-command-' + title), title + ' had no target')
             self.s.act('action', 'palette-search', 'Close')
@@ -241,13 +241,13 @@ class PaletteCurrentCommands(PaletteFixture):
         self.press_key('⌥⌘↑')
         wait(lambda: state() != before, 'Move Topic Up did not run after the presses past the end: %s' % (before,))
 
-    def test_pin_topic_flips_to_unpin_topic(self):
+    def test_pin_flips_to_unpin(self):
         self.current_topic('pin-current')
-        self.s.run_command('Pin Topic')
-        wait(lambda: self.record('pin-current').get('pinned') is True, 'Pin Topic did not Pin the Active Topic')
-        self.assertTrue(self.absent('Pin Topic'), 'Pin Topic shows for a Pinned Topic')
-        self.s.run_command('Unpin Topic')
-        wait(lambda: not self.record('pin-current').get('pinned'), 'Unpin Topic did not Unpin the Active Topic')
+        self.s.run_command('Pin')
+        wait(lambda: self.record('pin-current').get('pinned') is True, 'Pin did not Pin the Active Topic')
+        self.assertTrue(self.absent('Pin'), 'Pin shows for a Pinned Topic')
+        self.s.run_command('Unpin')
+        wait(lambda: not self.record('pin-current').get('pinned'), 'Unpin did not Unpin the Active Topic')
 
     def test_layout_commands_show_their_shortcut_and_change_the_window(self):
         self.s.open_palette('Commands', 'Maximize Terminal')

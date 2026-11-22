@@ -148,7 +148,7 @@ final class EnvironmentSnapshotTests: XCTestCase {
                              windows: [window("$1", topic: "a"), window("$2", guest: true)], inPlay: 3)
         XCTAssertEqual(sections(shown)?.places, ["topic:a", "session:$2", "dormant:board$3"])
         XCTAssertEqual(sections(shown)?.bench, ["topic:b"], "the Bench holds only Topics")
-        XCTAssertEqual(sections(shown.withoutDormantSessions)?.places, ["topic:a", "session:$2", "open:board$3"],
+        XCTAssertEqual(sections(shown.withoutBoard)?.places, ["topic:a", "session:$2", "open:board$3"],
                        "each place keeps its number for a reader that does not know a Dormant Board Session")
     }
 
@@ -175,6 +175,29 @@ final class EnvironmentSnapshotTests: XCTestCase {
         let shown = snapshot([topic("a", order: 0), pinned], windows: [], inPlay: 1)
         XCTAssertEqual(names(shown.pinned), ["topic:p"])
         XCTAssertEqual(sections(shown)?.places, ["topic:a"])
+    }
+
+    func testAPinnedBoardSessionIsAmongThePinnedCardsAndAnOlderReaderSeesALiveOneAsANoTopicSession() throws {
+        var pinnedTopic = topic("p", order: 0)
+        pinnedTopic.isPinned = true
+        var live = boardSession("$2", order: 1), dormant = boardSession("$3", order: 2)
+        live.isPinned = true
+        dormant.isPinned = true
+        let shown = snapshot([pinnedTopic, topic("a", order: 0)], boardSessions: [live, dormant],
+                             windows: [window("$1", topic: "a"), window("$2", guest: true), window("$4")], inPlay: 2)
+        XCTAssertEqual(names(shown.pinned), ["topic:p", "session:$2", "dormant:board$3"], "a Dormant one stays among the Pinned cards")
+        XCTAssertEqual(sections(shown)?.places, ["topic:a"])
+        XCTAssertEqual(sections(shown)?.guests, [])
+        XCTAssertEqual(shown.noTopic, ["$4"])
+
+        let older = shown.withoutBoard
+        XCTAssertEqual(names(older.pinned), ["topic:p"], "a reader without board knows only Topics among the Pinned cards")
+        XCTAssertEqual(older.noTopic, ["$2", "$4"], "the live one is a No Topic Session, in tmux order")
+        XCTAssertTrue(older.sessions.contains { $0.id == "$2" && $0.topic == nil })
+        XCTAssertFalse(older.cards.contains { if case .dormantSession = $0 { true } else { false } }, "and the Dormant one is gone")
+
+        let text = String(decoding: try JSONEncoder().encode(shown), as: UTF8.self)
+        XCTAssertEqual(try JSONDecoder().decode(EnvironmentSnapshot.self, from: Data(text.utf8)), shown)
     }
 
     func testABenchedDormantTopicAndABenchedEmptyTopic() {

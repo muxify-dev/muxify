@@ -1,5 +1,7 @@
 # A Board Session can take an In Play place, and the Bench holds only Topics
 
+> **Partly superseded by [ADR-0103](0103-a-board-session-can-be-pinned-and-unpin-makes-a-guest.md):** a Board Session can be Pinned. Bench, Settle, Forget, the Topic Note and Tags stay Topic-only.
+
 > Supersedes in part [ADR-0061](0061-a-guest-is-in-play-above-the-limit-and-keeps-its-position.md), [ADR-0081](0081-in-play-is-the-only-topics-mode.md) and [ADR-0101](0101-a-guest-session-lives-in-the-state-database.md): a Session's card is no longer always a Guest, the list of cards is the Board, and the Guest Session is a Board Session.
 
 A No Topic Session could have a card only as a Guest. Muxify called it a Locked Session, and the user saw a Guest Session (ADR-0061, ADR-0081, ADR-0101). To give the Session an In Play place, the user had to make a Topic from it. That changed the card and what it meant: a Topic has a title, and the user can Settle it. The user wants a Session to take an In Play place and stay a Session.
