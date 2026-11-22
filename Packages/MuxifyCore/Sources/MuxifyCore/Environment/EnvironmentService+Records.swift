@@ -284,7 +284,7 @@ extension EnvironmentService {
                                session: nil, unlocked: nil)
         }
         if case .guestSession(let id)? = target {
-            guard let lock = contents.locks.first(where: { $0.id == id }) else { throw TopicRequestError.guestSessionUnavailable(id) }
+            let lock = try guestSessionLock(id, in: contents)
             let live = lock.windows(in: snapshot.windows, open: records.openTopicIDs).first
             return RequestCard(id: .lock(id), label: "The Guest Session " + (live?.sessionName ?? lock.name), pinned: false,
                                session: live?.sessionID, unlocked: nil)
@@ -305,8 +305,7 @@ extension EnvironmentService {
 
     /// The Lock of the live Session `session`, when that Session is a Guest Session.
     private func liveLock(of session: String, contents: TopicContents, snapshot: TmuxSnapshot) -> SessionLock? {
-        let open = contents.records.openTopicIDs
-        return contents.locks.first { $0.windows(in: snapshot.windows, open: open).first?.sessionID == session }
+        contents.locks.bySession(in: snapshot.windows, open: contents.records.openTopicIDs)[session]
     }
 
     /// Tags are one column of one record, so a Tag change writes only that column.

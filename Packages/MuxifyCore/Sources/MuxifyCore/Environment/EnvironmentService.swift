@@ -77,7 +77,8 @@ public struct EnvironmentService: Sendable {
         return snapshot
     }
 
-    /// The Sessions the Settle sheet offers, as the Topic's live Sessions are now. It reads and writes nothing else.
+    /// The Sessions the Settle sheet offers, as the Topic's live Sessions are now. It writes nothing, beyond the import
+    /// that each read of the server makes (`serverSnapshot`).
     public func settleChoices(for target: EnvironmentTarget) -> Result<[TopicSettleSession], TopicFailure> {
         do {
             let records = try store.read().records
@@ -144,7 +145,7 @@ public struct EnvironmentService: Sendable {
         if case .session(let id)? = target { sessionID = id.rawValue }
         else if case .guestSession(let id)? = target {
             let contents = try store.read()
-            guard let lock = contents.locks.first(where: { $0.id == id }) else { throw TopicRequestError.guestSessionUnavailable(id) }
+            let lock = try guestSessionLock(id, in: contents)
             guard let live = lock.windows(in: snapshot.windows, open: contents.records.openTopicIDs).first else {
                 throw TopicRequestError.guestSessionDormant(id)
             }
@@ -159,6 +160,12 @@ public struct EnvironmentService: Sendable {
         }
         guard let window = snapshot.windows.first(where: { $0.sessionID == sessionID }) else { throw TopicEditFailure.sourceUnavailable }
         return window
+    }
+
+    /// The Lock that a `guest_session` target names. With none, the Guest Session was Benched or ended.
+    func guestSessionLock(_ id: String, in contents: TopicContents) throws -> SessionLock {
+        guard let lock = contents.locks.first(where: { $0.id == id }) else { throw TopicRequestError.guestSessionUnavailable(id) }
+        return lock
     }
 
     var executor: TopicExecutor { TopicExecutor(server: server, paths: paths) }

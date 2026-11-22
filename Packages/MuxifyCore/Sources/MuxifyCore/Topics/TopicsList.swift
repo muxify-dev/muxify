@@ -89,10 +89,7 @@ public struct TopicsList {
                 topics: Config.Topics) {
         let order = TopicCards.order(records: records, locks: locks, openPlaces: openPlaces)
         let open = Set(order.records.map(\.id))
-        var locksBySession: [String: String] = [:]
-        for lock in order.locks {
-            if let session = lock.windows(in: windows, open: open).first?.sessionID { locksBySession[session] = lock.id }
-        }
+        let locksBySession = order.locks.bySession(in: windows, open: open).mapValues(\.id)
         let labels = TopicLabels(records)
         let members = Dictionary(grouping: windows) { TopicGroupID($0, open: open, locks: locksBySession) }
         let entries = order.map { entry -> Entry in

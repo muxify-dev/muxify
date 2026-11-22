@@ -219,6 +219,18 @@ extension Array where Element == TopicRecord {
     var openTopicIDs: Set<String> { Set(filter { $0.settledAt == nil }.map(\.id)) }
 }
 
+extension Array where Element == SessionLock {
+    /// The Lock of each live Guest Session, by the Session's tmux id. `open` are the open Topics. A Session points at
+    /// one Lock id, so no two Locks share a Session.
+    func bySession(in windows: [TmuxWindow], open: Set<String>) -> [String: SessionLock] {
+        var locks: [String: SessionLock] = [:]
+        for lock in self {
+            if let session = lock.windows(in: windows, open: open).first?.sessionID { locks[session] = lock }
+        }
+        return locks
+    }
+}
+
 public enum TopicPlacement: Equatable, Sendable {
     case before(TopicListID)
     case after(TopicListID)

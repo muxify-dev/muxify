@@ -321,7 +321,7 @@ extension EnvironmentService {
                                                            in: launch.folder.path))
         case .reopen, .startFresh:
             if case .guestSession(let id)? = request.target, request.command == .reopen {
-                guard let lock = contents.locks.first(where: { $0.id == id }) else { throw TopicRequestError.guestSessionUnavailable(id) }
+                let lock = try guestSessionLock(id, in: contents)
                 return Planned(edit: try GuestSessionReopenPlan(lock: lock, records: records, windows: snapshot.windows).edit)
             }
             guard case .topic(let ref) = request.target else { throw TopicRequestError.noTarget }

@@ -169,13 +169,7 @@ public struct EnvironmentState: Equatable {
 
     /// The order of each live Guest Session's Lock, by the Session's tmux id.
     public var lockOrders: [String: Double] {
-        let windows = orderedSessions.flatMap(\.windows)
-        let open = Array(topics.values).openTopicIDs
-        var orders: [String: Double] = [:]
-        for lock in locks {
-            if let session = lock.windows(in: windows, open: open).first?.sessionID { orders[session] = lock.order }
-        }
-        return orders
+        locks.bySession(in: orderedSessions.flatMap(\.windows), open: Array(topics.values).openTopicIDs).mapValues(\.order)
     }
 
     /// `changes`, which this state applied last, as a client that did not declare `guest-sessions` reads them, so an
