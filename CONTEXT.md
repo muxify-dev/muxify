@@ -8,7 +8,7 @@ A personal macOS front end for tmux with a Sidebar, Terminal and Browser.
 
 **Environment**:
 The context whose Sessions, Windows, Panes and Agents Muxify presents. Local is the Environment on the machine running Muxify.
-`muxify environment show` lists its Sessions and its Topics list, and also the No Topic Sessions, in `no_topic`, which have no card on the Mac.
+`muxify environment show` lists its Sessions and its Board, and also the No Topic Sessions, in `no_topic`, which have no card on the Mac.
 _Avoid_: workspace, project
 
 **Remote Environment**:
@@ -122,7 +122,7 @@ The Topic of the App Window's Location: the Topic of its Window or of its Empty 
 _Avoid_: current Topic, selected Topic, focused Topic
 
 **Next Topic**:
-The Topic or Guest Session that Muxify opens when the card that the user is on leaves the Sidebar by Settle, Forget or Bench: the nearest card below it that the Sidebar shows. With no such card, the first In Play card, also when the Bench is empty. Else the nearest row below it in the Topics list that stays, else the nearest such row above it, else No Topic. It is never a Pinned Topic.
+The Topic or Board Session that Muxify opens when the card that the user is on leaves the Sidebar by Settle, Forget or Bench: the nearest card below it that the Sidebar shows. With no such card, the first In Play card, also when the Bench is empty. Else the nearest row below it on the Board that stays, else the nearest such row above it, else No Topic. It is never a Pinned Topic.
 _Avoid_: following Topic, previous Topic, last Topic
 
 **Tag**:
@@ -142,7 +142,7 @@ To mark a Topic as done. It leaves the Sidebar, its Sessions are killed or leave
 _Avoid_: close, archive, resolve, complete
 
 **Reopen**:
-To bring a Settled or Dormant Topic back and create its remembered Sessions again, with their Windows, Panes, Tabs and Agents.
+To bring a Settled or Dormant Topic, or a Dormant Board Session, back and create its remembered Sessions again, with their Windows, Panes, Tabs and Agents.
 _Avoid_: restore (also for bringing back every Topic after a restart, which is Reopen done by Muxify at launch; it never Reopens a Settled Topic), unsettle, resume
 
 **Remembered Session**:
@@ -150,7 +150,7 @@ A Topic's saved Session identity, name, launch directory and restoration details
 _Avoid_: Session Path, Home Session, Home Session Path
 
 **Start Fresh**:
-To bring a Dormant or Settled Topic back with one new Session for each Session it remembers, each with one shell Window. Its remembered Windows, Tabs and Agents are not created again.
+To bring a Dormant or Settled Topic, or a Dormant Board Session, back with one new Session for each Session it remembers, each with one shell Window. Its remembered Windows, Tabs and Agents are not created again.
 _Avoid_: start anew, reset, new Topic, fresh start (when tmux has no Session of the user's, the user chooses where to start)
 
 **Forget**:
@@ -162,7 +162,7 @@ A Command that Forgets, in one step, every Settled Topic that was Settled more t
 _Avoid_: prune, clean up, auto-forget
 
 **Dormant**:
-An open Topic that has no live Sessions but remembers Sessions, for example after a tmux restart. It stays Dormant in the Sidebar until the user goes to it, which Reopens it, or Settles it. With `topics.reopen_at_launch`, Muxify Reopens every Dormant Topic by itself when it launches.
+An open Topic that has no live Sessions but remembers Sessions, or a Board Session that has no live Session, for example after a tmux restart. Its card stays at its place in the Sidebar, In Play or among the Guests, dimmed, until the user goes to it, which Reopens it. A Dormant Topic can also be Settled, and a Dormant Board Session Benched. With `topics.reopen_at_launch`, Muxify Reopens every Dormant Topic and Dormant Board Session by itself when it launches.
 _Avoid_: inactive, sleeping, suspended
 
 **Empty**:
@@ -170,60 +170,56 @@ An open Topic that has no live Session and remembers no Session: the user stoppe
 _Avoid_: Dormant (when it remembers no Session), blank, cleared
 
 **In Play**:
-The In Play places and the Guests. It is the only way the Sidebar lists the Topics. The number of places is the number that the Config gives, and 5 when the Config gives none. Each place holds an open Topic that is not Pinned and is not a Guest. A place that holds no Topic is an Open Place. The Sidebar shows the Pinned Topics, then the places, then the Guests line and the Guests, then the Bench line. A Guest never shows between two places.
+The In Play places and the Guests. It is the only way the Board lists its cards. The number of places is the number that the Config gives, and 5 when the Config gives none. Each place holds an open Topic or a Board Session that is not Pinned and is not a Guest. A place that holds no card is an Open Place. The Sidebar shows the Pinned Topics, then the places, then the Guests line and the Guests, then the Bench line. A Guest never shows between two places.
 _Avoid_: active Topics, focus Topics, front Topics, WIP limit
 
 **Bench**:
-The open Topics in the Topics list that are not Pinned, not Guests and hold no In Play place. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic keeps its place in the list, its Sessions and its Agents. A Topic that comes back goes to the top of the Bench. A new Topic is a Guest, at the end of the Guests; a new Topic from a Guest Session, or from its last Window or Pane, takes the Guest Session's place. A Locked Session is never Benched: it is a Guest.
+The open Topics on the Board that are not Pinned, not Guests and hold no In Play place. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic keeps its place on the Board, its Sessions and its Agents. A Topic that comes back goes to the top of the Bench. A new Topic is a Guest, at the end of the Guests; a new Topic from a Board Session, or from its last Window or Pane, takes the Board Session's place. The Bench holds only Topics: a Board Session is never Benched.
 _Avoid_: backlog, queue, hidden Topics, overflow, Snooze (when you mean the Bench)
 
 **Choose In Play**:
-A Command that sets which open Topics are In Play, and in what order. The user checks them, then chooses the one for each place in turn. The In Play Topics and the Guest Topics start checked. A Guest that takes a place loses its Guest mark. A Guest that takes no place stays a Guest. The other checked Topics go to the top of the Bench. When the user checks fewer Topics than there are places, the other places are Open Places.
+A Command that sets which open Topics and Board Sessions are In Play, and in what order. The user checks them, then chooses the one for each place in turn. The cards In Play, in the places and among the Guests, start checked. A Guest that takes a place loses its Guest mark. A Guest that takes no place stays a Guest. The other checked Topics go to the top of the Bench. A Board Session that held a place and gets none leaves the Board, because the Bench holds only Topics. When the user checks fewer cards than there are places, the other places are Open Places.
 _Avoid_: In Play Prioritisation Session, prioritise, reorder, Zen
 
 **Replace from Bench**:
-An Action on an In Play card. A Benched Topic that the user chooses takes its position, and the replaced card goes to the end of the Bench. On a Guest, the card that comes in gets the Guest mark.
+An Action on an In Play card. A Benched Topic that the user chooses takes its position, and the replaced card goes to the end of the Bench. On a Guest, the card that comes in gets the Guest mark. A replaced Board Session leaves the Board, because the Bench holds only Topics.
 _Avoid_: Done, Switch Topic Places, swap, Snooze
 
 **Pin**:
 To keep a Topic above every Topic that is not Pinned, in each list of Topics, until you unpin it. A Pinned Topic is neither In Play nor Benched.
 _Avoid_: favorite, star, sticky, keep on top
 
-**Lock**:
-The tmux option that makes a No Topic Session a Guest Session. Make a Guest sets it. It stays until Bench ends it, the Session ends, or the Session goes into a Topic. It is a word of the code and of tmux: the user sees Guest Session, Make a Guest and Bench.
-_Avoid_: pin, keep, dock, sticky, Lock Session (as a Command or an Action)
-
-**Locked Session**:
-A No Topic Session that has a Lock. It has a card among the Guests, but it is not a Topic: it cannot be Settled, Pinned or Forgotten. Every Locked Session is a Guest, and the user sees it as a Guest Session.
-_Avoid_: kept Session, pinned Session, Topic (when you mean the Session)
-
-**Unlock**:
-To end a Lock, which Bench of a Guest Session does. The Session stays, as a No Topic Session. It is a word of the code: the user sees Bench.
-_Avoid_: unpin, release, Unlock Session (as a Command or an Action)
-
 **Guest**:
-A card In Play above the number that the Config gives: a Topic with the Guest mark, or a Locked Session. It does not count toward that number, and it shows under the Guests line, after the In Play places. It never waits on the Bench, and when it leaves it leaves no Open Place. Every new Topic is a Guest: it goes to the end of the Guests, also when an In Play place is free. A new Topic from a Guest Session, or from the last Window or Pane of a Guest Session, takes the Guest Session's place.
-_Avoid_: visitor, temporary Topic, extra slot, Pin (when you mean a Guest)
+A card In Play above the number that the Config gives: a Topic or a Board Session with the Guest mark. It does not count toward that number, and it shows under the Guests line, after the In Play places. It never waits on the Bench, and when it leaves it leaves no Open Place. Every new Topic is a Guest: it goes to the end of the Guests, also when an In Play place is free. A new Topic from a Board Session, or from the last Window or Pane of a Board Session, takes the Board Session's place and its section: its In Play place, or its place among the Guests.
+_Avoid_: visitor, temporary Topic, extra slot, Pin (when you mean a Guest), Guest Session (say a Board Session in the Guests)
 
 **Make a Guest**:
-An Action on a Benched Topic or a No Topic Session. The card goes to the end of the Guests, directly above the Bench line, as a Guest. No other card goes to the Bench. For a Session, it sets the Lock.
+An Action on a Benched Topic or on a No Topic Session that has no card. The card goes to the end of the Guests, directly above the Bench line, as a Guest. No other card goes to the Bench. The Session becomes a Board Session.
 _Avoid_: put In Play, promote, Lock Session
 
 **Bench (the Action)**:
-The Action that takes a card out of In Play: an In Play Topic, a Guest Topic or a Guest Session. A Topic goes to the top of the Bench and keeps its Sessions and Agents. From an In Play place it leaves an Open Place there. A Guest Topic loses its Guest mark and leaves no Open Place. A Guest Session has no record to wait on the Bench, so Bench Unlocks it: it waits in No Topic, and its card ends. When the user is on the card, the Next Topic opens if the Sidebar shows it.
-_Avoid_: End Guest, Bench Topic, Snooze, hide, demote
+The Action that takes a card out of In Play: a Topic or a Board Session, in an In Play place or among the Guests, live or Dormant. A Topic goes to the top of the Bench and keeps its Sessions and Agents, and a Guest Topic loses its Guest mark. The Bench holds only Topics, so Bench takes a Board Session's card off the Board: a live Session stays as a No Topic Session, and a Dormant one is gone. Each move that would send a Board Session to the Bench does the same. From an In Play place the card leaves an Open Place there; a Guest leaves none. When the user is on the card, the Next Topic opens if the Sidebar shows it.
+_Avoid_: End Guest, Bench Topic, Snooze, hide, demote, Unlock, Remove from Board
 
 **Open Place**:
-An In Play place that no card fills. Settle, Forget, Pin and Bench on a regular In Play card leave an Open Place at its place. No Benched card moves up, and the other places keep their positions. The Open Place stays until the user fills it with a Guest Topic or a Benched Topic, also after Muxify or tmux restarts. The Sidebar shows it as a dashed card with its Hint. A click or the Hint's key goes to its Open Place page.
+An In Play place that no card fills. Settle, Forget, Pin and Bench on a card in an In Play place leave an Open Place at its place, and so does a Board Session in a place whose card leaves the Board. No Benched card moves up, and the other places keep their positions. The Open Place stays until the user fills it with a Guest or a Benched Topic, also after Muxify or tmux restarts. The Sidebar shows it as a dashed card with its Hint. A click or the Hint's key goes to its Open Place page.
 _Avoid_: empty slot, hole, gap, free place
 
 **Trade**:
-A Sidebar drag that takes a card across the Guests line or the Bench line and lets it go on a card on the other side. The two cards exchange their places in the Topics list, and no other card moves. Each card takes the mark of the section it comes into. A Guest that comes into an In Play place loses its Guest mark, and a card that comes into the Guests gets it. A Guest dropped on an Open Place fills it. A Guest Session cannot take an In Play place.
+A Sidebar drag that takes a card across the Guests line or the Bench line and lets it go on a card on the other side. The two cards exchange their places on the Board, and no other card moves. Each card takes the mark of the section it comes into. A Guest that comes into an In Play place loses its Guest mark, and a card that comes into the Guests gets it. A Guest dropped on an Open Place fills it. A Board Session that a Trade sends to the Bench leaves the Board.
 _Avoid_: swap, Replace from Bench (when the replaced card does not go to the end of the Bench), exchange
 
 **Move Up / Move Down**:
-A key step of one card in the Topics list: Move Topic Up and Move Topic Down, the Move buttons of a card, and `muxify topic move up|down`. Inside a section it is a reorder. A step that would cross the Guests line or the Bench line changes the card's section instead, one section per step. Down from the last place makes the card the top Guest and leaves an Open Place. Up from the top Guest fills the lowest Open Place, or Trades with the last place when no place is open. Down from the last Guest is Bench. Up from the top of the Bench, or from any Benched card while the Bench is hidden, is Make a Guest. The user stays on the card, also on a hidden Bench. Up on the opened No Topic Session, which has no card, is Make a Guest: it is Locked and goes to the end of the Guests. It has no Down. The CLI acts as if the Bench shows. Presses of the key made while a step runs each make one more step, and stop silently at the end.
+A key step of one card on the Board: Move Topic Up and Move Topic Down, the Move buttons of a card, and `muxify topic move up|down`. Inside a section it is a reorder. A step that would cross the Guests line or the Bench line changes the card's section instead, one section per step. Down from the last place makes the card the top Guest and leaves an Open Place. Up from the top Guest fills the lowest Open Place, or Trades with the last place when no place is open. Down from the last Guest is Bench. Up from the top of the Bench, or from any Benched card while the Bench is hidden, is Make a Guest. The user stays on the card, also on a hidden Bench. Up on the opened No Topic Session, which has no card, is Make a Guest: it becomes a Board Session at the end of the Guests. It has no Down. The CLI acts as if the Bench shows. Presses of the key made while a step runs each make one more step, and stop silently at the end.
 _Avoid_: shift, nudge, Trade (when you mean a key step)
+
+**Board**:
+The cards of an Environment's open Topics and Board Sessions in one order, and the Sidebar view that shows them: the Pinned Topics, the In Play places, the Guests and the Bench. Switch to Board shows it, and `muxify environment show` lists it.
+_Avoid_: Topics list, Topics view, Topics mode, list of Topics
+
+**Board Session**:
+A No Topic Session that has a card on the Board, live or Dormant. Its card takes an In Play place or is a Guest, by the rules of a Topic's card, but it is never Pinned and never on the Bench, and it cannot be Settled, Forgotten, Noted or Tagged. Make a Guest of a No Topic Session makes one, and Bench takes its card off the Board. The state database keeps its place and its Remembered Session, and the live Session points at it with `@muxify_session_id`, so a tmux restart does not end it: it is Dormant until the user opens it. When its Session goes into a Topic or ends while Muxify watches, its card leaves the Board.
+_Avoid_: Lock, Locked Session, Guest Session (say a Board Session in the Guests), Session card (the Config key `sidebar.session_cards`), `@muxify_lock` (the tmux option of an older Muxify)
 
 ### Browser
 
@@ -329,11 +325,11 @@ What an App Window shows in the Terminal's place: a Window, an Empty Topic page 
 _Avoid_: place, focus, selection, current Window (when an Empty Topic page shows)
 
 **Empty Topic page**:
-The page in the Terminal's place for a Topic with no live Session, whether Empty, Dormant or Settled, or for No Topic when it has no Window. It offers Add a Session, or Reopen and Start Fresh.
+The page in the Terminal's place for a Topic with no live Session, whether Empty, Dormant or Settled, for a Dormant Board Session, or for No Topic when it has no Window. It offers Add a Session, or Reopen and Start Fresh.
 _Avoid_: Topic page, empty view, Empty (when you mean the page of a Dormant or Settled Topic)
 
 **Open Place page**:
-The page in the Terminal's place for an Open Place: a search field and the Guest Topics, then the Benched Topics, in the order of the Topics list, each drawn as its Sidebar card. Typing hides the Topics that do not match. A click or ↩ on a row fills the place with that Topic and opens it. ⎋ only clears the search. Every App Window keybind still acts on it.
+The page in the Terminal's place for an Open Place: a search field and the Guests, then the Benched Topics, in the order of the Board, each drawn as its Sidebar card. Typing hides the cards that do not match. A click or ↩ on a row fills the place with that card and opens it. ⎋ only clears the search. Every App Window keybind still acts on it.
 _Avoid_: Home window, Home, fill sheet, Fill Open Place step
 
 **Intent**:
@@ -342,7 +338,7 @@ _Avoid_: pending selection, navigation, transition
 
 **Sidebar**:
 The panel on the left of the Muxify window that lists Sessions, Windows and Agents. The Git View's left pane is its List pane, never a sidebar.
-_Avoid_: left sidebar, left panel, collapse other sessions (the Config key `sidebar.session_cards: one` makes a Session card, like a Topic card, the only open one when the Location moves to its Session), toggle Topics/Sessions (say Switch to Topics / Switch to Sessions; Show Sessions stays the View menu's toggle for the Sessions section)
+_Avoid_: left sidebar, left panel, collapse other sessions (the Config key `sidebar.session_cards: one` makes a Session card, like a Topic card, the only open one when the Location moves to its Session), toggle Board/Sessions (say Switch to Board / Switch to Sessions; Show Sessions stays the View menu's toggle for the Sessions section)
 
 **Focus**:
 Where keyboard input goes in an App Window: the Terminal, the Browser, the Git View or a Command Palette. One of them has Focus at a time, and a keybind for one of them acts only while it has Focus.
@@ -415,7 +411,7 @@ The ranked list of an Action's step, such as Add a Session or Move. Each has a n
 _Avoid_: picker, dropdown, menu
 
 **Check step**:
-A palette step that lists Topics and Guest Sessions with a box on each, before an Action on the checked ones. Choose In Play starts with it.
+A palette step that lists Topics and Board Sessions with a box on each, before an Action on the checked ones. Choose In Play starts with it.
 _Avoid_: pick step, chips, mark, multi-select, selection
 
 ### Git

@@ -54,7 +54,7 @@ class QuickSwitchHints(unittest.TestCase):
         self.select(self.first)
         if not self.s.has('sidebar-panel'):
             self.s.act('press', 'toggle-sidebar')
-        self.s.act('press', 'sidebar-view-topics')
+        self.s.act('press', 'sidebar-view-board')
         self.s.wait_rows(lambda rows: self.s.has('topic-first', rows), 'initial Topic card not shown')
         self.s.act('action', 'topic-first', 'Go to Topic')
         self.s.wait_rows(lambda rows: self.value('topic-window-' + self.first, rows) == 'selected'

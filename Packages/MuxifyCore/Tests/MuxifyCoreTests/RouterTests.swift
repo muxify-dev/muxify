@@ -176,14 +176,34 @@ final class RouterTests: XCTestCase {
         XCTAssertEqual(router.location, .window(id("@2")))
     }
 
-    func testNextTopicWithoutAWindowShowsItsPageAndAMissingLockedSessionShowsNoTopic() {
-        for (next, expected) in [(TopicGroupID.topic("work"), TopicGroupID.topic("work")), (.noTopic, .noTopic), (.locked("$1"), .noTopic)] {
+    func testNextTopicWithoutAWindowShowsItsPageAndAMissingBoardSessionShowsNoTopic() {
+        for (next, expected) in [(TopicGroupID.topic("work"), TopicGroupID.topic("work")), (.noTopic, .noTopic), (.session("$1"), .noTopic)] {
             var router = Router()
             _ = router.handle(.settled(next: next), .init())
             XCTAssertEqual(router.handle(.read(1), .init()), [.visit(.emptyTopic(expected))])
             XCTAssertEqual(router.location, .emptyTopic(expected))
             XCTAssertNil(router.intent)
         }
+    }
+
+    func testADormantBoardSessionShowsItsPageEntersItsWindowWhenItAppearsAndLeavesWhenItLeavesTheBoard() {
+        let page = Location.emptyTopic(.session("g1"))
+        var router = Router()
+        let dormant = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"), boardSessions: ["g1"])
+        _ = router.handle(.settled(next: .session("g1")), dormant)
+        XCTAssertEqual(router.handle(.read(1), dormant), [.visit(page)], "Next Topic shows the Dormant Board Session's own page")
+        XCTAssertTrue(router.handle(.read(2), dormant).isEmpty, "the page stays while the Board Session is Dormant")
+
+        var reopened = dormant
+        reopened.windows.append(window("@2"))
+        reopened.entryWindows = [.session("g1"): id("@2")]
+        _ = router.handle(.read(3), reopened)
+        XCTAssertEqual(router.location, .window(id("@2")), "a Session made again elsewhere replaces the page")
+
+        _ = router.handle(.go(page), dormant)
+        var benched = dormant
+        benched.boardSessions = []
+        XCTAssertEqual(router.handle(.topicsChanged, benched), [.visit(.window(id("@1")))], "Bench of the Board Session ends its page")
     }
 
     func testAClosedLocationFollowsTheWindowTmuxMovedTheClientToWithoutASwitch() {

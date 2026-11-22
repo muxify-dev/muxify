@@ -113,13 +113,13 @@ final class CommandPalette {
         guard let store else { return nil }
         return PaletteCatalog(windows: store.windows, agents: store.agents, sessionPaths: store.sessionPaths, folders: store.folders,
                               selectedWindowID: store.selectedWindowID, homeDirectory: store.homeDirectory,
-                              topics: store.link.features.contains(.topics) ? store.topics : nil, records: store.records,
+                              board: store.link.features.contains(.topics) ? store.board : nil, records: store.records,
                               lastWindowByGroup: store.topicSelection.lastWindowByGroup, visits: store.visits, commands: commands,
                               commandShortcuts: Dictionary(uniqueKeysWithValues: commands.compactMap { command in
                                   shortcut(for: command).map { (command, $0) }
                               }), commandSummaries: Dictionary(uniqueKeysWithValues: [PaletteCommand.markRead, .markUnread].compactMap { command in
                                   store.currentReadSummary.map { (command, $0) }
-                              }), agentMarks: store.topics.agentMarks)
+                              }), agentMarks: store.board.agentMarks)
     }
 
     @ObservationIgnored private lazy var resultsCache = ObservedCache(expiry: { $0.expiresAt }) { [unowned self] in
@@ -175,6 +175,9 @@ final class CommandPalette {
         case .agent:
             if store?.link.features.contains(.topics) == true { actions += [.move] }
         case .sessionPath: actions += [.newSession]
+        case .boardSession(let id):
+            actions += [.startTopicFresh]
+            if store?.canBench(.boardSession(id)) == true { actions += [.bench] }
         case .choice, .command, .tag: break
         }
         if !item.path.isEmpty { actions += [.copyFolder]; if store?.link.isOnThisMac == true { actions += [.revealFolder] } }
@@ -195,7 +198,9 @@ final class CommandPalette {
                 return "Reopen Topic"
             case .settled: return "Reopen Topic"
             case .tag: return flow == nil ? "Show its Topics" : "Choose Tag"
-            case .session, .topicSession: return "Switch to Session"
+            case .session, .topicSession:
+                if case .boardSession = item.ref { return "Reopen Session" }
+                return "Switch to Session"
             // A SessionPath row's target is the Session ↩ goes to; without one, ↩ starts it.
             case .sessionPath, .worktree: return item.target == nil ? "Open as Session" : "Switch to Session"
             case .muxifyWorktree: return "Remove"
@@ -376,6 +381,7 @@ final class CommandPalette {
             case .session(let session):
                 if let window = EntryWindow.ofSession(session.windows) { store.select(window) }
             case .sessionPath(let target): store.openDirectory(target)
+            case .boardSession(let id): store.reopenBoardSession(id, .reopen)
             case .tag: break
             case .choice: break
             case .command: break

@@ -3,8 +3,8 @@ import XCTest
 
 final class BodyCountsTests: XCTestCase {
     func testTheBodiesBetweenTwoReadingsAreTheirDifferenceWithNoZero() {
-        let bodies = BodyCounts(from: ["SidebarCard": 40, "TopicsList": 3, "TopicCard": 9],
-                                to: ["SidebarCard": 70, "TopicsList": 3, "TopicCard": 12, "AgentMarkSpine": 5])
+        let bodies = BodyCounts(from: ["SidebarCard": 40, "Board": 3, "TopicCard": 9],
+                                to: ["SidebarCard": 70, "Board": 3, "TopicCard": 12, "AgentMarkSpine": 5])
         XCTAssertEqual(bodies, BodyCounts(["SidebarCard": 30, "TopicCard": 3, "AgentMarkSpine": 5]))
         XCTAssertEqual(bodies.value, "AgentMarkSpine:5,SidebarCard:30,TopicCard:3")
     }
@@ -27,8 +27,8 @@ final class BodyCountsTests: XCTestCase {
     }
 
     func testTheValueRoundTripsAndNoneIsEmpty() {
-        let bodies = BodyCounts(["TopicsSection": 2, "SidebarCard": 300, "SessionsSection": 0])
-        XCTAssertEqual(bodies.value, "SidebarCard:300,TopicsSection:2")
+        let bodies = BodyCounts(["BoardSection": 2, "SidebarCard": 300, "SessionsSection": 0])
+        XCTAssertEqual(bodies.value, "BoardSection:2,SidebarCard:300")
         XCTAssertEqual(BodyCounts(value: bodies.value), bodies)
         XCTAssertEqual(BodyCounts().value, "none")
         XCTAssertEqual(BodyCounts(value: "none"), BodyCounts())

@@ -20,7 +20,7 @@ extension EnvironmentService {
         var phase = TopicFailure.Phase.nothingChanged
         do {
             guard Self.isWorktreeName(name) else { throw MuxifyWorktreeError.nameInvalid(name) }
-            let snapshot = try server.snapshot()
+            let snapshot = try serverSnapshot()
             guard let folder = try from ?? callerFolder(request, snapshot: snapshot, client: client) else { throw TopicRequestError.noTarget }
             let repository = try worktrees.repository(at: folder)
             let path = repository.folder(for: name, root: worktreesRoot, defaultRoot: defaultWorktreesRoot)
@@ -59,7 +59,7 @@ extension EnvironmentService {
         var phase = TopicFailure.Phase.nothingChanged
         do {
             let record = try worktreeRecord(named: value)
-            let snapshot = try server.snapshot()
+            let snapshot = try serverSnapshot()
             let users = Self.sessions(using: record.path, in: snapshot)
             if !users.isEmpty, !kill {
                 throw MuxifyWorktreeError.inUse(path: record.path, sessions: users.map(\.sessionName))
@@ -98,7 +98,7 @@ extension EnvironmentService {
     func listWorktrees(_ request: EnvironmentRequest, all: Bool, from: String?, client: String?) -> EnvironmentResponse {
         do {
             var records = try worktreeRecords()
-            let snapshot = try server.snapshot()
+            let snapshot = try serverSnapshot()
             let folder = all ? nil : try from ?? callerFolder(request, snapshot: snapshot, client: client)
             if let folder {
                 let main = try worktrees.repository(at: folder).main

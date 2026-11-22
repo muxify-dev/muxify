@@ -1,5 +1,7 @@
 # Bench is one Action, and a card that leaves opens the Next Topic
 
+> **Partly superseded by [ADR-0102](0102-a-board-session-can-take-an-in-play-place.md):** Bench takes a Board Session's card off the Board, also from an In Play place, where it leaves an Open Place.
+
 > **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** `muxify topic bench` also takes a Guest Session, and `muxify session unlock` is gone. Lock Session and Unlock Session are gone.
 
 > Supersedes the End Guest part of [ADR-0064](0064-in-play-places-stay-open-and-guests-show-in-their-own-section.md).

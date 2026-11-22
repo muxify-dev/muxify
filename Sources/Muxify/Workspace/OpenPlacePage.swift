@@ -7,7 +7,7 @@ import Observation
 @MainActor @Observable
 final class OpenPlacePage {
     var query = ""
-    /// The Topic of the selected row. A row the query hides gives the selection to the first row.
+    /// The selected row, by its card's accessibility id. A row the query hides gives the selection to the first row.
     var selectedID: String?
     /// The page moves Focus to its field once it shows. The store asks for it (`focusOpenPlaceField`).
     var fieldFocusRequested = false

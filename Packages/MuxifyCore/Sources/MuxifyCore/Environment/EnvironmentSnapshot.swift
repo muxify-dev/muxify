@@ -1,6 +1,6 @@
 import Foundation
 
-/// The Sessions and the Topics list of the Environment, in the order that Muxify shows them, from one read of the
+/// The Sessions and the Board of the Environment, in the order that Muxify shows them, from one read of the
 /// records and one tmux snapshot: what `muxify environment show` prints. A client draws each array in the order it
 /// comes and sorts nothing, so the card rules stay in MuxifyCore. Every missing value is encoded as null, never left out.
 public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
@@ -41,7 +41,7 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
         /// tmux `session_activity`, in seconds since 1970.
         public var activity: Int
         @EncodesNull public var mark: CardMark?
-        /// The open Topic it is in; nil for a No Topic Session, Locked or not.
+        /// The open Topic it is in; nil for a No Topic Session, a Board Session or not.
         @EncodesNull public var topic: String?
         public var windows: [Window]
 
@@ -61,17 +61,21 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
         private enum CodingKeys: String, CodingKey { case id, label, note, tags, state }
     }
 
-    /// One card of the Topics list. Each card has `sessions`: the Topic's own Session order, the one Locked Session,
-    /// or none for an Open Place.
+    /// One card of the Board. Each card has `sessions`: the Topic's own Session order, the one live Board Session, or
+    /// none for a Dormant Board Session and an Open Place.
     public enum Card: Codable, Hashable, Sendable {
         case topic(Topic, mark: CardMark?, sessions: [String])
-        /// A Locked Session.
+        /// A live Board Session.
         case session(String, mark: CardMark?)
+        /// A Dormant Board Session: its id, which Reopen takes as its target, and the name its Session had. It is a
+        /// kind of its own, not a `session` with no Session, so a reader that knows only the other kinds can draw it
+        /// as a card it does not know.
+        case dormantSession(id: String, name: String)
         /// Only in the In Play places.
         case openPlace(id: String)
 
-        private enum Kind: String, Codable { case topic, session, openPlace = "open_place" }
-        private enum CodingKeys: String, CodingKey { case kind, mark, topic, sessions, id }
+        private enum Kind: String, Codable { case topic, session, dormantSession = "dormant_session", openPlace = "open_place" }
+        private enum CodingKeys: String, CodingKey { case kind, mark, topic, sessions, id, name }
 
         public init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -85,6 +89,8 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
                     throw DecodingError.dataCorruptedError(forKey: .sessions, in: values, debugDescription: "expected one Session")
                 }
                 self = .session(sessions[0], mark: try values.decodeIfPresent(CardMark.self, forKey: .mark))
+            case .dormantSession:
+                self = .dormantSession(id: try values.decode(String.self, forKey: .id), name: try values.decode(String.self, forKey: .name))
             case .openPlace:
                 self = .openPlace(id: try values.decode(String.self, forKey: .id))
             }
@@ -102,6 +108,11 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
                 try values.encode(Kind.session, forKey: .kind)
                 try values.encode(mark, forKey: .mark)
                 try values.encode([session], forKey: .sessions)
+            case .dormantSession(let id, let name):
+                try values.encode(Kind.dormantSession, forKey: .kind)
+                try values.encode(id, forKey: .id)
+                try values.encode(name, forKey: .name)
+                try values.encode([String](), forKey: .sessions)
             case .openPlace(let id):
                 try values.encode(Kind.openPlace, forKey: .kind)
                 try values.encode(id, forKey: .id)
@@ -148,7 +159,7 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
     /// The Pinned Topics, in the order the user gave.
     public var pinned: [Card]
     public var unpinned: Unpinned
-    /// The Sessions in no open Topic and not Locked, in tmux order. They have no card in the Sidebar.
+    /// The Sessions in no open Topic and not a Board Session, in tmux order. They have no card in the Sidebar.
     public var noTopic: [String]
 
     /// Every card in list order: the Pinned cards, then the others.
@@ -165,7 +176,8 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
 
     public init(contents: TopicContents, tmux: TmuxSnapshot, topics: Config.Topics, notifications: Config.Notifications) {
         let marks = AgentMarks(tmux.agents, notifications: notifications)
-        let list = TopicsList(records: contents.records, openPlaces: contents.openPlaces, windows: tmux.windows, marks: marks, topics: topics)
+        let list = Board(records: contents.records, openPlaces: contents.openPlaces, boardSessions: contents.boardSessions, windows: tmux.windows,
+                              marks: marks, topics: topics)
         let firsts = TopicSessionOrder.firstWindows(tmux.windows, record: nil, order: topics.sessionOrder)
         func topic(of window: TmuxWindow) -> String? {
             if case .topic(let id) = list.group(of: window) { return id }
@@ -188,18 +200,37 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
     }
 }
 
+extension EnvironmentSnapshot {
+    /// The view for a reader that does not know the `dormant_session` card: the same, without the Dormant Board
+    /// Sessions. In an In Play place, an Open Place card with the Board Session's id stands for one, so each place keeps
+    /// its number; a fill of that place fails, because it is not open.
+    public var withoutDormantSessions: EnvironmentSnapshot {
+        func live(_ cards: [Card]) -> [Card] { cards.filter { if case .dormantSession = $0 { false } else { true } } }
+        func held(_ places: [Card]) -> [Card] {
+            places.map { if case .dormantSession(let id, _) = $0 { .openPlace(id: id) } else { $0 } }
+        }
+        var older = self
+        older.pinned = live(pinned)
+        switch unpinned {
+        case .inPlay(let limit, let places, let guests, let bench):
+            older.unpinned = .inPlay(limit: limit, places: held(places), guests: live(guests), bench: live(bench))
+        }
+        return older
+    }
+}
+
 extension EnvironmentSnapshot.Card {
-    init(_ entry: TopicsList.Entry) {
+    init(_ entry: Board.Entry) {
         switch entry {
         case .openPlace(let id): self = .openPlace(id: id)
         case .card(let card): self.init(card)
         }
     }
 
-    init(_ card: TopicsList.Card) {
+    init(_ card: Board.Card) {
         switch card.subject {
-        case .locked(let lock):
-            self = .session(lock.sessionID, mark: card.mark)
+        case .session(let boardSession):
+            self = card.sessions.first.map { .session($0, mark: card.mark) } ?? .dormantSession(id: boardSession.id, name: card.label)
         case .topic(let record):
             let topic = EnvironmentSnapshot.Topic(id: record.id, label: card.label, note: record.note, tags: card.tags.map(\.tag),
                                                   state: card.state)

@@ -80,7 +80,7 @@ final class FakeEnvironmentLink: EnvironmentLink {
     func topicsReloaded() async {}
     func topicsCaughtUp() async {}
 
-    func writeTopics<T>(locks: [SessionLock], _ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
+    func writeTopics<T>(_ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
         throw EnvironmentLinkError.unsupported("Topics")
     }
 

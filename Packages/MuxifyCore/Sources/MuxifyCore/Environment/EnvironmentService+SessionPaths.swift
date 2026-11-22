@@ -7,7 +7,7 @@ extension EnvironmentService {
     /// `tiebreak` is the Go to… palette's, and `home` is the folder that a row's path shows as `~`.
     public func rankedSessionPaths(query: String, tiebreak: [PaletteTiebreak], home: String) -> Result<[RankedSessionPath], TopicFailure> {
         do {
-            let rows = SessionPathRows.build(sessionPaths: sessionPaths, windows: try server.snapshot().windows, records: try store.read().records)
+            let rows = SessionPathRows.build(sessionPaths: sessionPaths, windows: try serverSnapshot().windows, records: try store.read().records)
             return .success(SessionPathRanking.rank(rows, query: query, visits: try VisitStore(paths: paths).times(), tiebreak: tiebreak, home: home))
         } catch { return .failure(failure(error, phase: .nothingChanged)) }
     }

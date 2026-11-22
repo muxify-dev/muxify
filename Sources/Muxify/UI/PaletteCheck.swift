@@ -3,10 +3,10 @@ import MuxifyCore
 /// What a check step does with the cards that go on from it. Each Action that starts with a check step is a case, and
 /// the compiler finds every place that must answer for it.
 enum CheckAction: Equatable {
-    /// Choose In Play: the Topics that are not Pinned, with the In Play ones and the Guest Topics checked first. Going
-    /// on fills the `places` In Play places one at a time from the checked cards; a place that no checked card fills is
-    /// an Open Place. Of the other checked cards, the regular ones go to the top of the Bench, and a Guest stays a Guest.
-    /// A Guest Session cannot take a place, so the step does not list it.
+    /// Choose In Play: the Topics that are not Pinned and the Board Sessions, with the cards In Play checked first: the
+    /// places and the Guests. Going on fills the `places` In Play places one at a time from the checked cards; a place
+    /// that no checked card fills is an Open Place. Of the other checked cards, a Topic in a place or on the Bench goes
+    /// to the top of the Bench, a Guest stays a Guest, and a Board Session in a place leaves the Board.
     case chooseInPlay(places: Int)
 
     var title: String {
@@ -16,12 +16,9 @@ enum CheckAction: Equatable {
     }
 
     /// The cards that the step lists, in list order.
-    func listed(_ topics: TopicsModel) -> [TopicsModel.Row] {
+    func listed(_ topics: BoardModel) -> [BoardModel.Row] {
         switch self {
-        case .chooseInPlay: topics.rows.filter { row in
-            guard case .topic = row.id else { return false }
-            return !row.isPinned
-        }
+        case .chooseInPlay: topics.rows.filter { !$0.isPinned }
         }
     }
 
@@ -31,7 +28,7 @@ enum CheckAction: Equatable {
         case .chooseInPlay(let places):
             let open = places - count
             return "\(count) checked for \(places) In Play \(places == 1 ? "place" : "places")."
-                + (count > places ? " The last \(count - places) go to the top of the Bench, and a Guest of them stays a Guest." : "")
+                + (count > places ? " The last \(count - places) go to the top of the Bench; a Guest of them stays a Guest, and a Board Session leaves the Board." : "")
                 + (open > 0 ? " \(open) \(open == 1 ? "place stays an Open Place" : "places stay Open Places")." : "")
         }
     }
@@ -40,8 +37,9 @@ enum CheckAction: Equatable {
     @MainActor func goOn(with ids: [TopicGroupID], in palette: CommandPalette) {
         switch self {
         case .chooseInPlay(let places):
-            let guests = Set(ids.filter { id in palette.store?.topics.rows.contains { $0.id == id && $0.isGuest } == true })
-            palette.order(OrderDraft(cards: ids, places: places, guests: guests))
+            let guests = Set(ids.filter { id in palette.store?.board.split.guests.contains { $0.id == id } == true })
+            let boardSessions = Set(ids.filter(\.isBoardSession))
+            palette.order(OrderDraft(cards: ids, places: places, benchless: guests.union(boardSessions)))
         }
     }
 }
@@ -63,17 +61,17 @@ struct CheckDraft: Equatable {
 extension CommandPalette {
     /// `ids` in list order, without the cards that the step no longer lists.
     func listOrder(_ ids: Set<TopicGroupID>, _ action: CheckAction) -> [TopicGroupID] {
-        guard let topics = store?.topics else { return [] }
-        return action.listed(topics).map(\.id).filter(ids.contains)
+        guard let board = store?.board else { return [] }
+        return action.listed(board).map(\.id).filter(ids.contains)
     }
 
     func checkedIDs(_ draft: CheckDraft) -> [TopicGroupID] { listOrder(draft.checked, draft.action) }
 
     /// One row for each card that the step lists. A row stays in its place when it is checked.
     func checkRows(_ draft: CheckDraft) -> PickList<PaletteItem> {
-        guard let topics = store?.topics else { return .empty }
-        let candidates = draft.action.listed(topics).map { cardCandidate($0, choice: .check($0.id)) }
-        return FuzzyRanker.list([PickSectionInput(id: "topics", title: "Topics", rule: .ranked(showsWhenEmpty: true),
+        guard let board = store?.board else { return .empty }
+        let candidates = draft.action.listed(board).map { cardCandidate($0, choice: .check($0.id)) }
+        return FuzzyRanker.list([PickSectionInput(id: "topics", title: "Board", rule: .ranked(showsWhenEmpty: true),
                                                   candidates: candidates)], query: FuzzyQuery(query), rules: PickRules())
     }
 

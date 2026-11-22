@@ -108,7 +108,7 @@ extension CommandPalette {
     var fieldChips: [FieldChip] {
         switch presentation {
         case .search(_, let tag?)?:
-            return [fieldChip(tag, defined: store?.topics.tags)]
+            return [fieldChip(tag, defined: store?.board.tags)]
         case .flow(.text(.tags(let field)))?:
             return field.chipField.chips.enumerated().map { index, tag in
                 fieldChip(tag, defined: field.defined, isSelected: index == field.chipField.selection)

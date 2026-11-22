@@ -1,5 +1,9 @@
 # A Lock lives on the tmux Session
 
+> **Partly superseded by [ADR-0102](0102-a-board-session-can-take-an-in-play-place.md):** a Locked Session is a Board Session, and it can take an In Play place.
+
+> **Partly superseded by [ADR-0101](0101-a-guest-session-lives-in-the-state-database.md):** the Lock is a row of the state database, not the tmux option `@muxify_lock`, so a Guest Session stays after a tmux restart, as a Dormant Guest Session at its place.
+
 > **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** In Play is the only Topics mode, so every Locked Session is a Guest Session. The user makes one with Make a Guest and ends it with Bench. Lock Session, Unlock Session and `muxify session lock` are gone. The Lock stays as the tmux option below.
 
 > **Update 2026-10-30:** With `topics.in_play`, a Locked Session is a Guest: it is In Play above the limit and never waits on the Bench ([ADR 0061](0061-a-guest-is-in-play-above-the-limit-and-keeps-its-position.md)). The Lock stays the only state of the Session: `@muxify_lock` holds its order, and `in_play` decides if it is a Guest. A new Topic made from a Guest Session takes its place and gets the Guest mark in its record.

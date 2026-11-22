@@ -13,7 +13,7 @@ final class WorkspaceStoreDefaultsTests: XCTestCase {
         let config = ConfigStore(path: "/nonexistent/muxify-store-defaults.yaml")
 
         let store = WorkspaceStore(configStore: config, defaults: defaults, visitStore: visits)
-        let mode: SidebarMode = modeBefore == SidebarMode.sessions.rawValue ? .topics : .sessions
+        let mode: SidebarMode = modeBefore == SidebarMode.sessions.rawValue ? .board : .sessions
         store.sidebarMode = mode
         store.openSessionCards = ["muxify-test-card"]
 

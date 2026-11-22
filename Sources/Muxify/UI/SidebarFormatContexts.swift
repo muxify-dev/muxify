@@ -7,11 +7,14 @@ struct SidebarFormatContexts {
 
     var topics: [TopicGroupID: Context] = [:]
     var sessions: [String: Context] = [:]
+    /// The Session that each Dormant Board Session remembers, by its id. Its card shows it with the Session
+    /// Formats, as a live one shows its Session.
+    var dormantBoardSessions: [String: Context] = [:]
     var windows: [String: Context] = [:]
     var panes: [String: Context] = [:]
 
-    init(model: TopicsModel, windows: [TmuxWindow], panes: [TmuxPane], agents: [Agent],
-         branches: TopicBranches, records: [TopicRecord], sessionPaths: [SessionPath], tabCounts: [String: Int],
+    init(model: BoardModel, windows: [TmuxWindow], panes: [TmuxPane], agents: [Agent],
+         branches: TopicBranches, records: [TopicRecord], boardSessions: [BoardSession] = [], sessionPaths: [SessionPath], tabCounts: [String: Int],
          isOnThisMac: Bool = true, features: EnvironmentFeatures = .all) {
         // A branch is read from a HEAD file on this Mac, and a Topic only where the Environment serves Topics.
         let servesTopics = features.contains(.topics)
@@ -75,8 +78,16 @@ struct SidebarFormatContexts {
             }
             sessions[sessionID] = Context(values: sessionValues, loops: [.windows: windowContexts, .panes: paneContexts])
         }
+        let boardSessionsByID = Dictionary(boardSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for topic in model.rows + model.groups.flatMap(\.topics) {
-            // A Locked card shows its Session's Formats.
+            // A Board Session card shows its Session's Formats: a live one its Session, a Dormant one the Session that it
+            // remembers.
+            if case .session(let id) = topic.id, topic.state == .dormant, let boardSession = boardSessionsByID[id] {
+                dormantBoardSessions[id] = Context(values: [
+                    .session_name: topic.title, .session_base_name: boardSession.session["base_name"]?.string ?? topic.title,
+                    .window_count: String(boardSession.session["windows"]?.array?.count ?? 0),
+                ])
+            }
             guard case .topic = topic.id else { continue }
             let children = topic.sessions.compactMap { sessions[$0.id.session] }
             let windowIDs = Set(topic.sessions.flatMap(\.windows).map(\.id))

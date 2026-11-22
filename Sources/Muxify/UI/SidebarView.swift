@@ -60,8 +60,8 @@ struct SidebarView: View {
             }
         }
         .onChange(of: store.selectedWindowID, initial: true) { _, _ in store.updateTopicSelection() }
-        .onChange(of: store.topics.activeTopic) { _, _ in store.updateTopicSelection() }
-        .onChange(of: store.topics.activeTopicGroup) { _, _ in store.updateTopicSelection() }
+        .onChange(of: store.board.activeTopic) { _, _ in store.updateTopicSelection() }
+        .onChange(of: store.board.activeTopicGroup) { _, _ in store.updateTopicSelection() }
         // Moving to another Session (click, tmux navigation, new Window) opens its card; `session_cards: one`
         // closes the others. The first call, as the Sidebar appears, is no move: it only opens the Location's card.
         .onChange(of: store.selectedWindow?.sessionName, initial: true) { previous, name in
@@ -78,17 +78,17 @@ private struct WorkSection: View {
     let store: WorkspaceStore
 
     var body: some View {
-        let model = store.topics
+        let model = store.board
         if model.showsToggle {
             SidebarPager(mode: Binding(get: { model.mode }, set: { store.sidebarMode = $0 }),
                          animateSwitching: store.config.sidebar.animateSwitching,
                          acceptsGestures: !store.palette.isOpen && store.currentGitView?.isOpen != true) {
-                TopicsSection(store: store, model: model).animatesSessionCards(store)
+                BoardSection(store: store, model: model).animatesSessionCards(store)
             } sessions: {
                 SessionsSection(store: store).animatesSessionCards(store)
             }
-        } else if model.mode == .topics {
-            TopicsSection(store: store, model: model)
+        } else if model.mode == .board {
+            BoardSection(store: store, model: model)
         } else if model.sessionsEnabled {
             SessionsSection(store: store)
         } else {
@@ -116,27 +116,27 @@ extension View {
     }
 }
 
-private struct TopicsSection: View {
+private struct BoardSection: View {
     @Environment(\.sidebarTypography) private var typography
     @Environment(\.interfaceFontSize) private var fontSize
     let store: WorkspaceStore
-    let model: TopicsModel
-    @State private var drag = ListDrag<TopicListID>(spacing: 6, tradesAcross: [TopicsModel.ListItem.guestsLineID,
-                                                                                TopicsModel.ListItem.benchLineID])
+    let model: BoardModel
+    @State private var drag = ListDrag<BoardCardID>(spacing: 6, tradesAcross: [BoardModel.ListItem.guestsLineID,
+                                                                                BoardModel.ListItem.benchLineID])
     /// The cards whose "N more…" the user pressed.
     @State private var showingAllRows: Set<TopicGroupID> = []
     /// The No Topic Session cards whose "N more…" the user pressed, by Session ID.
     @State private var showingAllSessionRows: Set<String> = []
-    @State private var scroll = TopicsListScroll()
+    @State private var scroll = BoardScroll()
     /// The height of the block that sticks at the top while the Bench scrolls: the bottom of its last item.
     @State private var topHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
     @State private var lastBenchHeight: CGFloat = 0
-    /// The top of the Topics list's viewport in the window, where a lifted card's pointer is.
+    /// The top of the Board's viewport in the window, where a lifted card's pointer is.
     @State private var viewportTop: CGFloat = 0
     @State private var driver = ScrollDriver()
 
-    /// The coordinate space of the Topics list's content, from the top of its first item.
+    /// The coordinate space of the Board's content, from the top of its first item.
     static let contentSpace = "topics-content"
     static let contentSpacing: CGFloat = 6
     static let contentInset: CGFloat = 4
@@ -147,10 +147,10 @@ private struct TopicsSection: View {
     }
 
     var body: some View {
-        let _ = BodyCount.tick("TopicsSection")
+        let _ = BodyCount.tick("BoardSection")
         GeometryReader { proxy in
             VStack(spacing: 0) {
-                topicsList
+                boardList
                 if !model.groups.isEmpty {
                     VStack(spacing: 4) {
                         ForEach(model.groups) { group in
@@ -164,8 +164,8 @@ private struct TopicsSection: View {
         }
     }
 
-    private var topicsList: some View {
-        BodyCount.tick("TopicsList")
+    private var boardList: some View {
+        BodyCount.tick("Board")
         let parts = model.listParts
         let hasBench = parts.bench != nil
         let geometry = geometry
@@ -176,7 +176,7 @@ private struct TopicsSection: View {
                 // One ForEach for both parts, so a card that trades across the line keeps its view.
                 ForEach(model.list) { item in
                     listItem(item)
-                        .modifier(TopicsListPart(part: part(of: item, in: parts), scroll: scroll, geometry: geometry,
+                        .modifier(BoardPart(part: part(of: item, in: parts), scroll: scroll, geometry: geometry,
                                                  isRaised: isRaised(item),
                                                  dragShift: drag.shift(of: item.dragSlot, in: model.dragSlots(around: item.id)),
                                                  theme: store.theme,
@@ -254,7 +254,7 @@ private struct TopicsSection: View {
     }
 
     @ViewBuilder
-    private func listItem(_ item: TopicsModel.ListItem) -> some View {
+    private func listItem(_ item: BoardModel.ListItem) -> some View {
         switch item {
         case .card(let topic):
             listCard(topic, order: model.dragSlots(around: item.id)).tracksEdges(topic.id, in: scroll)
@@ -263,7 +263,7 @@ private struct TopicsSection: View {
                                                    indicatorHeight: geometry.indicatorHeight, driver: driver))
         case .openPlace(let id, let place):
             OpenPlaceCard(place: place, isLocation: store.location == .openPlace(id)) { store.goToOpenPlace(id) }
-                .listDragItem(TopicListID.openPlace(id), drag: drag, shown: model.dragSlots(around: item.id), cornerRadius: 9)
+                .listDragItem(BoardCardID.openPlace(id), drag: drag, shown: model.dragSlots(around: item.id), cornerRadius: 9)
         case .guestsLine:
             GuestsLine().listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
         case .benchLine(let isBenchShown):
@@ -274,8 +274,8 @@ private struct TopicsSection: View {
         }
     }
 
-    private func part(of item: TopicsModel.ListItem, in parts: (top: ArraySlice<TopicsModel.ListItem>,
-                                                             bench: ArraySlice<TopicsModel.ListItem>?)) -> TopicsListPart.Part {
+    private func part(of item: BoardModel.ListItem, in parts: (top: ArraySlice<BoardModel.ListItem>,
+                                                             bench: ArraySlice<BoardModel.ListItem>?)) -> BoardPart.Part {
         guard let bench = parts.bench else { return .plain }
         if let index = parts.top.firstIndex(where: { $0.id == item.id }) {
             return .top(isFirst: index == parts.top.startIndex, isLast: index == parts.top.index(before: parts.top.endIndex))
@@ -284,24 +284,24 @@ private struct TopicsSection: View {
     }
 
     /// A card the drag lifts or moves draws above every other card, also above the block that sticks.
-    private func isRaised(_ item: TopicsModel.ListItem) -> Bool {
+    private func isRaised(_ item: BoardModel.ListItem) -> Bool {
         guard let id = item.cardID?.listID else { return false }
         return drag.dragged == id || drag.tradePath(of: id) != nil
     }
 
     @ViewBuilder
-    private func listCard(_ topic: TopicsModel.Row, order: [StackSlot<TopicListID>]) -> some View {
+    private func listCard(_ topic: BoardModel.Row, order: [StackSlot<BoardCardID>]) -> some View {
         let state = store.topicCardState(topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
                                          showsAllRows: showingAllRows.contains(topic.id), showsTags: true)
-        if case .locked(let sessionID) = topic.id {
-            LockedCard(store: store, state: state, sessionID: sessionID,
+        if case .session(let boardSession) = topic.id {
+            BoardSessionCard(store: store, state: state, boardSession: boardSession,
                        onShowAllRows: { showingAllRows.insert(topic.id) },
                        drag: drag, order: order, steps: model.steps(of: topic.id))
                 .equatable()
         } else {
             TopicCard(store: store, state: state,
                       onShowAllRows: { showingAllRows.insert(topic.id) },
-                      place: .list(TopicListPlace(drag: drag, order: order, steps: model.steps(of: topic.id),
+                      place: .list(BoardPlace(drag: drag, order: order, steps: model.steps(of: topic.id),
                                                   rename: renameTopic)))
                 .equatable()
         }
@@ -320,7 +320,7 @@ private struct TopicsSection: View {
 
     /// The No Topic Session the user opened, as the card Sessions mode shows. No Topic has no group row.
     @ViewBuilder
-    private func noTopicCard(_ opened: TopicsModel.Session) -> some View {
+    private func noTopicCard(_ opened: BoardModel.Session) -> some View {
         if let session = store.sessions.first(where: { $0.id == opened.id.session }) {
             SessionCard(store: store, state: store.sessionCardState(session, showsAllRows: showingAllSessionRows.contains(session.id)),
                         identifier: "\(TopicGroupID.noTopic.accessibilityID)-session-\(session.id)", viewport: TopicCard.viewport,
@@ -338,11 +338,11 @@ private struct TopicsSection: View {
     }
 }
 
-/// Hands a lifted card's pointer to `driver`, so the Topics list scrolls while the pointer rests at an edge: the edges
+/// Hands a lifted card's pointer to `driver`, so the Board scrolls while the pointer rests at an edge: the edges
 /// of the Bench area under the block that sticks, or of the whole list without a Bench line. A view of its own, so only
 /// it draws again as the pointer moves.
 private struct EdgeAutoScroller: View {
-    let drag: ListDrag<TopicListID>
+    let drag: ListDrag<BoardCardID>
     let driver: ScrollDriver
     let viewportTop: CGFloat
     let geometry: BenchGeometry?
@@ -361,8 +361,8 @@ private struct EdgeAutoScroller: View {
 /// A click on it reveals the first card under it. A view of its own: it reads where the cards stand, which changes as
 /// the list scrolls, and the list around it does not.
 private struct MoreBelowPill: View {
-    let model: TopicsModel
-    let scroll: TopicsListScroll
+    let model: BoardModel
+    let scroll: BoardScroll
     let hasBench: Bool
     let theme: TerminalTheme?
     let reveal: (TopicGroupID) -> Void
@@ -388,8 +388,8 @@ private struct MoreBelowPill: View {
 /// band alone, so it cannot show and go in turns. A click on it reveals the last card under it. A view of its own, as
 /// `MoreBelowPill` is.
 private struct MoreAbovePill: View {
-    let model: TopicsModel
-    let scroll: TopicsListScroll
+    let model: BoardModel
+    let scroll: BoardScroll
     let geometry: BenchGeometry
     let theme: TerminalTheme?
     let reveal: (TopicGroupID) -> Void
@@ -411,10 +411,10 @@ private struct MoreAbovePill: View {
     }
 }
 
-/// Where an item of the Topics list stands while the list has a Bench line. An item of the block at the top moves down
+/// Where an item of the Board stands while the list has a Bench line. An item of the block at the top moves down
 /// as far as the list scrolled, so it stays, and it stands on the Sidebar's chrome above the Benched cards, which pass
 /// under it. A Benched card's open header sticks under the block. Without a Bench line the item is as it was.
-private struct TopicsListPart: ViewModifier {
+private struct BoardPart: ViewModifier {
     enum Part: Equatable {
         case plain
         case top(isFirst: Bool, isLast: Bool)
@@ -427,7 +427,7 @@ private struct TopicsListPart: ViewModifier {
     }
 
     let part: Part
-    let scroll: TopicsListScroll
+    let scroll: BoardScroll
     let geometry: BenchGeometry
     let isRaised: Bool
     /// How far a drag moves the item from its place, as `ListDrag.shift` gives: for the lifted item, the placeholder.
@@ -437,7 +437,7 @@ private struct TopicsListPart: ViewModifier {
     @Binding var lastBenchHeight: CGFloat
 
     func body(content: Content) -> some View {
-        BodyCount.tick("TopicsListPart")
+        BodyCount.tick("BoardPart")
         let isTop = part.isTop, isFirst = part.isFirst, isLastOfTop = part.isLastOfTop, isLastBenched = part.isLastBenched
         // Only an item of the block reads the scroll, so a scroll of the Bench draws the block again, not the Bench.
         let stick = isTop ? geometry.stick(at: scroll.offset) : 0
@@ -453,7 +453,7 @@ private struct TopicsListPart: ViewModifier {
             .background {
                 if isTop {
                     Color.clear.chrome(theme: theme, material: .sidebar)
-                        .padding(.top, isFirst ? -TopicsSection.contentInset : 0).padding(.bottom, -TopicsSection.contentSpacing)
+                        .padding(.top, isFirst ? -BoardSection.contentInset : 0).padding(.bottom, -BoardSection.contentSpacing)
                         .padding(.horizontal, -6)
                         .contentShape(Rectangle())
                         // With its card as the cards slide aside, so it does not cover a card that slides into its place.
@@ -462,7 +462,7 @@ private struct TopicsListPart: ViewModifier {
             }
             .offset(y: isTop ? stick : 0)
             // Outside the offset, so the block's height does not grow as it sticks.
-            .onGeometryChange(for: CGFloat?.self) { isLastOfTop ? $0.frame(in: .named(TopicsSection.contentSpace)).maxY : nil } action: {
+            .onGeometryChange(for: CGFloat?.self) { isLastOfTop ? $0.frame(in: .named(BoardSection.contentSpace)).maxY : nil } action: {
                 if let bottom = $0 { blockBottom = bottom }
             }
             // The stack sees this zIndex, not the drag's inside the item, so it keeps the drag's raise.
@@ -471,9 +471,9 @@ private struct TopicsListPart: ViewModifier {
 }
 
 private extension View {
-    /// Keeps the card's place against the edges of the Topics list in `scroll.places`, from the top of the visible part
+    /// Keeps the card's place against the edges of the Board in `scroll.places`, from the top of the visible part
     /// that `scrollTopInset` gives: under the block for a Benched card.
-    func tracksEdges(_ id: TopicGroupID, in scroll: TopicsListScroll) -> some View {
+    func tracksEdges(_ id: TopicGroupID, in scroll: BoardScroll) -> some View {
         modifier(EdgeTracker(id: id, scroll: scroll))
     }
 }
@@ -482,14 +482,14 @@ private struct EdgeTracker: ViewModifier {
     @Environment(\.scrollTopInset) private var scrollTopInset
     @Environment(\.interfaceFontSize) private var fontSize
     let id: TopicGroupID
-    let scroll: TopicsListScroll
+    let scroll: BoardScroll
 
     func body(content: Content) -> some View {
         content
             .onEdgePlace(of: TopicCard.viewport, visibleTop: scrollTopInset, indicatorHeight: EdgePill.height(fontSize)) {
                 if scroll.places[id] != $0 { scroll.places[id] = $0 }
             }
-            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TopicsSection.contentSpace)).minY } action: {
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(BoardSection.contentSpace)).minY } action: {
                 scroll.tops[id] = $0
             }
             .onDisappear {
@@ -548,7 +548,7 @@ private struct TopicLink: ViewModifier {
 /// The Sessions a Settled Topic's opened card lists: remembered ones, whose rows are dimmed and do nothing on click.
 private struct RememberedSessions: View {
     let store: WorkspaceStore
-    let topic: TopicsModel.Row
+    let topic: BoardModel.Row
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
@@ -590,8 +590,8 @@ private struct SessionOrdering {
 /// active Window. In an open Topic card a drag moves the Session, with its rows, within its Topic.
 private struct SessionHeading: View {
     let store: WorkspaceStore
-    let topic: TopicsModel.Row
-    let session: TopicsModel.Session
+    let topic: BoardModel.Row
+    let session: BoardModel.Session
     var ordering: SessionOrdering? = nil
     @Environment(\.interfaceFontSize) private var fontSize
 
@@ -655,7 +655,7 @@ private struct SessionHeading: View {
 /// A Window or Pane row of a Topic.
 private struct TopicItemRow: View {
     let store: WorkspaceStore
-    let item: TopicsModel.SessionChildren.Item
+    let item: BoardModel.SessionChildren.Item
     /// What the row shows, read by its list: see SidebarCardState.swift.
     let state: SidebarRowState
     let titles: [String: String]
@@ -685,18 +685,18 @@ private struct TopicItemRow: View {
     }
 }
 
-/// Where a Topic card sits. In the Topics list the card has a Hint, moves by a drag and by Move Up and Move Down, and
+/// Where a Topic card sits. In the Board the card has a Hint, moves by a drag and by Move Up and Move Down, and
 /// offers Settle. In the Settled group it has none of these, and tells how long ago, seen from `now`, it was Settled.
 enum TopicCardPlace: Equatable {
-    case list(TopicListPlace)
+    case list(BoardPlace)
     case group(now: Date)
 }
 
-/// What a card in the Topics list needs to move among the cards with its Pin.
-struct TopicListPlace: Equatable {
-    let drag: ListDrag<TopicListID>
-    /// The Topic and Locked cards among which it moves, in list order, and the views between them that slide.
-    let order: [StackSlot<TopicListID>]
+/// What a card on the Board needs to move among the cards with its Pin.
+struct BoardPlace: Equatable {
+    let drag: ListDrag<BoardCardID>
+    /// The Topic and Board Session cards among which it moves, in list order, and the views between them that slide.
+    let order: [StackSlot<BoardCardID>]
     let steps: CardSteps
     let rename: (String) -> Void
 
@@ -717,7 +717,7 @@ struct TopicCard: View, Equatable {
         lhs.store === rhs.store && lhs.state == rhs.state && lhs.place == rhs.place
     }
 
-    private var topic: TopicsModel.Row { state.topic }
+    private var topic: BoardModel.Row { state.topic }
     private var titles: [String: String] { state.titles }
     private var holdsSelection: Bool { state.holdsSelection }
     private var showsAllRows: Bool { state.showsAllRows }
@@ -729,7 +729,7 @@ struct TopicCard: View, Equatable {
     /// The scroll view of the Settled group.
     static let groupsViewport = "topic-groups-viewport"
 
-    private var list: TopicListPlace? {
+    private var list: BoardPlace? {
         if case .list(let list) = place { return list }
         return nil
     }
@@ -777,7 +777,7 @@ struct TopicCard: View, Equatable {
             }
     }
 
-    /// The Topic's own action: Settle in the Topics list, Reopen in a group, which reopens the Topic at once.
+    /// The Topic's own action: Settle on the Board, Reopen in a group, which reopens the Topic at once.
     @ViewBuilder
     private var corner: some View {
         if case .topic(let id) = topic.id {
@@ -863,7 +863,7 @@ struct TopicCard: View, Equatable {
     }
 
     @ViewBuilder
-    private func listActions(_ list: TopicListPlace) -> some View {
+    private func listActions(_ list: BoardPlace) -> some View {
         Button("Go to Topic") { store.goToTopic(topic.id) }
         if case .topic(let id) = topic.id {
             Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
@@ -881,7 +881,7 @@ struct TopicCard: View, Equatable {
     }
 
     @ViewBuilder
-    private func listMenu(_ list: TopicListPlace) -> some View {
+    private func listMenu(_ list: BoardPlace) -> some View {
         Button("Go to Topic") { store.goToTopic(topic.id) }
             .accessibilityIdentifier("go-to-topic")
         if case .topic(let id) = topic.id {
@@ -966,17 +966,17 @@ struct TopicCard: View, Equatable {
         return nil
     }
 
-    private var listID: TopicListID? { topic.id.listID }
+    private var listID: BoardCardID? { topic.id.listID }
 }
 
-/// The press on a Topic card's header: in the Topics list a click, or a drag that moves the card; in a group a click.
+/// The press on a Topic card's header: on the Board a click, or a drag that moves the card; in a group a click.
 private struct CardHandle: ViewModifier {
-    let list: TopicListPlace?
-    let listID: TopicListID?
+    let list: BoardPlace?
+    let listID: BoardCardID?
     let isEnabled: Bool
     let onTap: () -> Void
-    let onDrop: (DropPlacement<TopicListID>) -> Void
-    let onTrade: (TopicListID) -> Void
+    let onDrop: (DropPlacement<BoardCardID>) -> Void
+    let onTrade: (BoardCardID) -> Void
 
     func body(content: Content) -> some View {
         if let list, let listID {
@@ -987,10 +987,10 @@ private struct CardHandle: ViewModifier {
     }
 }
 
-/// A Topic card in the Topics list is an item of the list's drag; a card in a group does not move.
+/// A Topic card on the Board is an item of the list's drag; a card in a group does not move.
 private struct CardItem: ViewModifier {
-    let list: TopicListPlace?
-    let listID: TopicListID?
+    let list: BoardPlace?
+    let listID: BoardCardID?
 
     func body(content: Content) -> some View {
         if let list, let listID {
@@ -1001,10 +1001,10 @@ private struct CardItem: ViewModifier {
     }
 }
 
-/// Move Up and Move Down of a Topic or Locked card: the Sidebar's own order change, which the palette does not show.
+/// Move Up and Move Down of a Topic or Board Session card: the Sidebar's own order change, which the palette does not show.
 private struct CardMoveButtons: View {
     let store: WorkspaceStore
-    let id: TopicListID
+    let id: BoardCardID
     let steps: CardSteps
 
     var body: some View {
@@ -1015,37 +1015,42 @@ private struct CardMoveButtons: View {
     }
 }
 
-/// A Locked Session among the Topic cards (ADR 0018). It has a Topic card's shape and its place in the order, but it
-/// is a No Topic Session: its title and Summary come from the Session card Formats, its rows are its Windows with no
-/// SessionPath heading, and it offers only what a Session can do.
-private struct LockedCard: View, Equatable {
+/// A Board Session among the Topic cards. It has a Topic card's shape and its place in the order, In Play or among the
+/// Guests, but it is a No Topic Session: a terminal glyph leads its title, its title and Summary come from the Session
+/// card Formats, its rows are its Windows with no SessionPath heading, and it offers only what a Session can do.
+private struct BoardSessionCard: View, Equatable {
     let store: WorkspaceStore
     /// What the card shows, which its list reads from the store: see SidebarCardState.swift.
     let state: TopicCardState
-    let sessionID: String
+    /// The Board Session's id.
+    let boardSession: String
     let onShowAllRows: () -> Void
-    let drag: ListDrag<TopicListID>
-    let order: [StackSlot<TopicListID>]
+    let drag: ListDrag<BoardCardID>
+    let order: [StackSlot<BoardCardID>]
     let steps: CardSteps
+    @Environment(\.interfaceFontSize) private var fontSize
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.store === rhs.store && lhs.state == rhs.state && lhs.sessionID == rhs.sessionID && lhs.drag === rhs.drag
+        lhs.store === rhs.store && lhs.state == rhs.state && lhs.boardSession == rhs.boardSession && lhs.drag === rhs.drag
             && lhs.order == rhs.order && lhs.steps == rhs.steps
     }
 
-    private var row: TopicsModel.Row { state.topic }
+    private var row: BoardModel.Row { state.topic }
     private var titles: [String: String] { state.titles }
     private var holdsSelection: Bool { state.holdsSelection }
     private var showsAllRows: Bool { state.showsAllRows }
 
-    private var id: TopicListID { .lock(sessionID: sessionID) }
+    private var id: BoardCardID { .session(boardSession) }
     private var window: TmuxWindow? { row.sessions.first?.windows.first }
+    /// tmux has no Session for it, as after a tmux restart: a press creates the Session again.
+    private var isDormant: Bool { row.state == .dormant }
+    private var goTitle: String { isDormant ? "Reopen" : "Go to Session" }
 
     private var formatted: SidebarFormats.Text { state.formatted }
 
     var body: some View {
         SidebarCard(isOpen: row.isExpanded, holdsSelection: holdsSelection, mark: row.mark, viewport: TopicCard.viewport,
-                    identifier: row.id.accessibilityID) {
+                    restingOpacity: isDormant ? 0.55 : 1, identifier: row.id.accessibilityID) {
             header
         } content: {
             CardList(blocks: row.sessions.compactMap { session in
@@ -1060,7 +1065,7 @@ private struct LockedCard: View, Equatable {
                              isDimmed: false)
             }
         } menu: {
-            Button("Go to Session") { store.goToTopic(row.id) }
+            Button(goTitle) { store.goToTopic(row.id) }
             Divider()
             actions
         }
@@ -1068,8 +1073,10 @@ private struct LockedCard: View, Equatable {
     }
 
     private var header: some View {
-        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isGuest: true,
-                   hintTarget: .locked(sessionID), notes: ["Guest"], summary: formatted.summary) {
+        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isGuest: row.isGuest, isBoardSession: true,
+                   hintTarget: .boardSession(boardSession), notes: (row.isGuest ? ["Guest"] : []) + (row.idleLabel.map { [$0] } ?? []),
+                   summary: formatted.summary) {
+            if let label = row.idleLabel { Text(label).font(fontSize.font(10)).foregroundStyle(.secondary) }
             if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
                 BellMark()
             }
@@ -1082,15 +1089,21 @@ private struct LockedCard: View, Equatable {
         .accessibilityAction(.default, press)
         .accessibilityIdentifier(row.id.accessibilityID)
         .accessibilityActions {
-            Button("Go to Session") { store.goToTopic(row.id) }
+            Button(goTitle) { store.goToTopic(row.id) }
             actions
         }
     }
 
-    /// The Actions of a Guest Session. It is not a Topic, so it has no Settle, Pin or Forget.
+    /// The Actions of a Board Session. It is not a Topic, so it has no Settle, Pin or Forget. Bench takes its card off
+    /// the Board. A Dormant one has no Session to rename, move or kill, and offers Start Fresh beside Reopen.
     @ViewBuilder
     private var actions: some View {
-        Button("Bench") { store.bench(.session(sessionID)) }
+        if isDormant {
+            Button("Start Fresh") { store.reopenBoardSession(boardSession, .startFresh) }
+                .accessibilityIdentifier("start-fresh-" + row.id.accessibilityID)
+                .disabled(store.changingTopic)
+        }
+        Button("Bench") { store.bench(.boardSession(boardSession)) }
             .disabled(store.changingTopic)
         if let window {
             Button("Rename Session…") { store.palette.begin(.text(.renameSession(window)), text: window.sessionName) }
@@ -1180,7 +1193,7 @@ private struct SessionsSection: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    // Not lazy, for the same reason as the Topics list.
+                    // Not lazy, for the same reason as the Board.
                     VStack(alignment: .leading, spacing: 6) {
                         // Read here, not in each card: see SidebarCardState.swift.
                         let cards = store.sessions.map { store.sessionCardState($0, showsAllRows: showingAllRows.contains($0.id)) }
@@ -1216,7 +1229,7 @@ private struct SessionsSection: View {
     }
 
     @ViewBuilder
-    private func row(_ item: TopicsModel.SessionChildren.Item, _ state: SidebarRowState) -> some View {
+    private func row(_ item: BoardModel.SessionChildren.Item, _ state: SidebarRowState) -> some View {
         switch item {
         case .window(let window):
             let shown = state.window
@@ -1265,7 +1278,7 @@ private struct SessionsSection: View {
     }
 }
 
-/// A Session card, in Sessions mode and as the opened No Topic Session in Topics mode. Each place gives its own Window and Pane rows.
+/// A Session card, in Sessions mode and as the opened No Topic Session in the Board view. Each place gives its own Window and Pane rows.
 /// It shows only `state`, which its list reads from the store, and touches the store only in its actions, so a card whose
 /// values stay the same does not update on a switch elsewhere.
 private struct SessionCard<Row: View>: View, Equatable {
@@ -1275,7 +1288,7 @@ private struct SessionCard<Row: View>: View, Equatable {
     /// The coordinate space of the list's scroll view.
     let viewport: String
     let onShowAllRows: () -> Void
-    @ViewBuilder var row: (TopicsModel.SessionChildren.Item, SidebarRowState) -> Row
+    @ViewBuilder var row: (BoardModel.SessionChildren.Item, SidebarRowState) -> Row
 
     /// The closures only call the store, so the values decide what the card shows.
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -1505,7 +1518,7 @@ private struct BellMark: View {
 /// The row of one Pane of a split Window.
 private struct PaneRow: View {
     let store: WorkspaceStore
-    let row: TopicsModel.PaneRow
+    let row: BoardModel.PaneRow
     /// What the row shows, read by its list; nil reads it from the store.
     var state: SidebarRowState.Pane? = nil
     @Environment(\.interfaceFontSize) private var fontSize
@@ -1562,7 +1575,7 @@ private struct AgentsSection: View {
     @Environment(\.sidebarTypography) private var typography
 
     private var scopeName: String? {
-        let scope = store.topics.agentsScope
+        let scope = store.board.agentsScope
         if case .window(let id, _) = scope, let window = store.windows.first(where: { $0.id == id }) {
             return store.sidebarWindowRow(window).text.title
         }
@@ -1570,7 +1583,7 @@ private struct AgentsSection: View {
     }
 
     var body: some View {
-        let model = store.topics
+        let model = store.board
         VStack(alignment: .leading, spacing: 0) {
             Text(["Agents", scopeName].compactMap { $0 }.joined(separator: " · "))
                 .font(typography.font(for: .section))

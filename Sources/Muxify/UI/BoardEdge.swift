@@ -108,7 +108,7 @@ struct OpenPlaceCard: View {
     }
 }
 
-/// A pill over an edge of the Topics list that tells the user how many cards are past that edge: over the top of the
+/// A pill over an edge of the Board that tells the user how many cards are past that edge: over the top of the
 /// Bench area for the cards above it, under the block that sticks, or over the bottom of the list for the cards below.
 /// A click scrolls the nearest hidden card into view. Near its edge it moves with the cards, so it slides in from under
 /// the block, or out under the last card, and does not come or go in one frame.

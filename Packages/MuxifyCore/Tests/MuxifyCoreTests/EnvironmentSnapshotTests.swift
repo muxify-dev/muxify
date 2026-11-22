@@ -3,10 +3,16 @@ import XCTest
 import MuxifyTestSupport
 
 final class EnvironmentSnapshotTests: XCTestCase {
-    private func window(_ session: String, name: String? = nil, topic: String? = nil, lock: Double? = nil, created: Int = 0,
+    /// A Window of `session`. A `guest` one points at the Board Session that `boardSession(session, order:)` makes.
+    private func window(_ session: String, name: String? = nil, topic: String? = nil, guest: Bool = false, created: Int = 0,
                         activity: Int = 0, index: Int = 0, active: Bool = true) -> TmuxWindow {
         .fixture(id: "@\(UUID().uuidString.prefix(8))", sessionID: session, sessionName: name ?? "s" + session.dropFirst(),
-                 index: index, isActive: active, sessionActivity: activity, topicID: topic, lockOrder: lock, sessionCreated: created)
+                 index: index, isActive: active, sessionActivity: activity, topicID: topic, savedSessionID: guest ? "board" + session : "",
+                 sessionCreated: created)
+    }
+
+    private func boardSession(_ session: String, order: Double, isGuest: Bool = true) -> BoardSession {
+        BoardSession(id: "board" + session, order: order, isGuest: isGuest, session: .object(["name": .string("s" + session.dropFirst())]))
     }
 
     private func topic(_ id: String, order: Double, title: String? = nil) -> TopicRecord {
@@ -22,7 +28,8 @@ final class EnvironmentSnapshotTests: XCTestCase {
         var unread = false
     }
 
-    private func snapshot(_ records: [TopicRecord], openPlaces: [OpenPlace] = [], windows: [TmuxWindow], agents: [AgentPane] = [],
+    private func snapshot(_ records: [TopicRecord], openPlaces: [OpenPlace] = [], boardSessions: [BoardSession] = [], windows: [TmuxWindow],
+                          agents: [AgentPane] = [],
                           inPlay: Int = Config.Topics.defaultInPlay, tags: ConfigTags? = nil) -> EnvironmentSnapshot {
         var topics = Config.Topics()
         topics.inPlay = inPlay
@@ -31,7 +38,7 @@ final class EnvironmentSnapshotTests: XCTestCase {
             TmuxPane(id: "%\(index)", windowID: windows.first { $0.sessionID == agent.session }!.id, command: "claude", agent: "claude",
                      agentStatus: agent.status.rawValue, unread: agent.unread)
         }
-        return EnvironmentSnapshot(contents: TopicContents(records: records, openPlaces: openPlaces),
+        return EnvironmentSnapshot(contents: TopicContents(records: records, openPlaces: openPlaces, boardSessions: boardSessions),
                                    tmux: TmuxSnapshot(windows: windows, clients: [], panes: panes, serverRunning: true),
                                    topics: topics, notifications: Config.Notifications())
     }
@@ -42,6 +49,7 @@ final class EnvironmentSnapshotTests: XCTestCase {
             switch card {
             case .topic(let topic, _, _): return "topic:" + topic.id
             case .session(let session, _): return "session:" + session
+            case .dormantSession(let id, _): return "dormant:" + id
             case .openPlace(let id): return "open:" + id
             }
         }
@@ -110,12 +118,38 @@ final class EnvironmentSnapshotTests: XCTestCase {
         }
     }
 
-    func testALockedSessionThatWasAmongTheTopicsIsAGuestAndNotInNoTopic() {
-        let shown = snapshot([topic("a", order: 0), topic("b", order: 2)],
-                             windows: [window("$1", topic: "a"), window("$3", lock: 1), window("$4")])
+    func testABoardSessionThatWasAmongTheTopicsIsAGuestAndNotInNoTopic() {
+        let shown = snapshot([topic("a", order: 0), topic("b", order: 2)], boardSessions: [boardSession("$3", order: 1)],
+                             windows: [window("$1", topic: "a"), window("$3", guest: true), window("$4")])
         XCTAssertEqual(sections(shown)?.places, ["topic:a", "topic:b"])
         XCTAssertEqual(sections(shown)?.guests, ["session:$3"])
-        XCTAssertEqual(shown.noTopic, ["$4"], "a Locked Session has a card, so it is not in no_topic")
+        XCTAssertEqual(shown.noTopic, ["$4"], "a Board Session has a card, so it is not in no_topic")
+    }
+
+    func testADormantBoardSessionIsADormantSessionCardAtItsPlaceAmongTheGuests() throws {
+        var guest = topic("g", order: 2)
+        guest.isGuest = true
+        let shown = snapshot([topic("a", order: 0), guest], boardSessions: [boardSession("$3", order: 1), boardSession("$4", order: 3)],
+                             windows: [window("$1", topic: "a"), window("$4", guest: true)])
+        XCTAssertEqual(sections(shown)?.guests, ["dormant:board$3", "topic:g", "session:$4"], "a Dormant one keeps its place")
+        XCTAssertTrue(shown.guestsHave(.dormantSession(id: "board$3", name: "s3")), "the name its Session had")
+        XCTAssertEqual(shown.noTopic, [])
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let text = String(decoding: try encoder.encode(shown), as: UTF8.self)
+        XCTAssertTrue(text.contains(#"{"id":"board$3","kind":"dormant_session","name":"s3","sessions":[]}"#), text)
+        XCTAssertEqual(try JSONDecoder().decode(EnvironmentSnapshot.self, from: Data(text.utf8)), shown)
+    }
+
+    func testABoardSessionInAPlaceIsACardOfThePlacesAndAnOlderReaderSeesAnOpenPlaceForADormantOne() {
+        let shown = snapshot([topic("a", order: 0), topic("b", order: 3)],
+                             boardSessions: [boardSession("$2", order: 1, isGuest: false), boardSession("$3", order: 2, isGuest: false)],
+                             windows: [window("$1", topic: "a"), window("$2", guest: true)], inPlay: 3)
+        XCTAssertEqual(sections(shown)?.places, ["topic:a", "session:$2", "dormant:board$3"])
+        XCTAssertEqual(sections(shown)?.bench, ["topic:b"], "the Bench holds only Topics")
+        XCTAssertEqual(sections(shown.withoutDormantSessions)?.places, ["topic:a", "session:$2", "open:board$3"],
+                       "each place keeps its number for a reader that does not know a Dormant Board Session")
     }
 
     func testAnOpenPlaceKeepsItsPlaceAndThePlacesAfterIt() {
@@ -125,13 +159,14 @@ final class EnvironmentSnapshotTests: XCTestCase {
         XCTAssertEqual(sections(shown)?.bench, ["topic:c"])
     }
 
-    func testAGuestTopicAndAGuestSessionAreGuestsInListOrder() {
+    func testAGuestTopicAndABoardSessionAmongTheGuestsAreGuestsInListOrder() {
         var guest = topic("g", order: 1)
         guest.isGuest = true
-        let shown = snapshot([topic("a", order: 0), guest, topic("b", order: 3)], windows: [window("$5", lock: 2)], inPlay: 1)
+        let shown = snapshot([topic("a", order: 0), guest, topic("b", order: 3)], boardSessions: [boardSession("$5", order: 2)],
+                             windows: [window("$5", guest: true)], inPlay: 1)
         XCTAssertEqual(sections(shown)?.places, ["topic:a"])
         XCTAssertEqual(sections(shown)?.guests, ["topic:g", "session:$5"])
-        XCTAssertEqual(sections(shown)?.bench, ["topic:b"], "a Locked Session is never Benched")
+        XCTAssertEqual(sections(shown)?.bench, ["topic:b"], "a Board Session is never Benched")
     }
 
     func testAPinnedTopicIsPinnedAndHoldsNoPlace() {
@@ -188,12 +223,13 @@ final class EnvironmentSnapshotTests: XCTestCase {
             var record = topic("a", order: 0)
             record.isUnread = unread
             let agents = ["$1", "$2"].flatMap { id in statuses.map { AgentPane(session: id, status: $0.0, unread: $0.1) } }
-            let shown = snapshot([record], windows: [window("$1", topic: "a"), window("$2", lock: 1)], agents: agents)
+            let shown = snapshot([record], boardSessions: [boardSession("$2", order: 1)], windows: [window("$1", topic: "a"), window("$2", guest: true)],
+                                 agents: agents)
             let context = "unread=\(unread) \(statuses)"
             XCTAssertEqual(topicCard("a", in: shown)?.mark, card, context)
             XCTAssertEqual(shown.sessions.first { $0.id == "$1" }?.mark, session.map(CardMark.agent), "a Session shows its Agent mark: " + context)
-            guard case .inPlay(_, _, let guests, _) = shown.unpinned, case .session(_, let locked)? = guests.last else { return XCTFail("no Locked card") }
-            XCTAssertEqual(locked, session.map(CardMark.agent), "a Locked Session's card has no Unread of its own: " + context)
+            guard case .inPlay(_, _, let guests, _) = shown.unpinned, case .session(_, let mark)? = guests.last else { return XCTFail("no Board Session card") }
+            XCTAssertEqual(mark, session.map(CardMark.agent), "a Board Session's card has no Unread of its own: " + context)
         }
     }
 
@@ -231,8 +267,8 @@ final class EnvironmentSnapshotTests: XCTestCase {
     }
 
     func testTheJSONHasEveryKeyWithNullForAMissingValue() throws {
-        let shown = snapshot([topic("a", order: 0)], openPlaces: [OpenPlace(id: "gap", order: 1)],
-                             windows: [window("$1", topic: "a"), window("$2", lock: 2)], agents: [AgentPane(session: "$1", status: .blocked)],
+        let shown = snapshot([topic("a", order: 0)], openPlaces: [OpenPlace(id: "gap", order: 1)], boardSessions: [boardSession("$2", order: 2)],
+                             windows: [window("$1", topic: "a"), window("$2", guest: true)], agents: [AgentPane(session: "$1", status: .blocked)],
                              inPlay: 2)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -248,5 +284,12 @@ final class EnvironmentSnapshotTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(EnvironmentSnapshot.self, from: Data(text.utf8)), shown)
         XCTAssertEqual(try JSONDecoder().decode(EnvironmentResponse.self, from: try encoder.encode(EnvironmentResponse.snapshot(shown))),
                        .snapshot(shown))
+    }
+}
+
+private extension EnvironmentSnapshot {
+    func guestsHave(_ card: Card) -> Bool {
+        guard case .inPlay(_, _, let guests, _) = unpinned else { return false }
+        return guests.contains(card)
     }
 }

@@ -389,7 +389,7 @@ private struct TerminalArea: View {
         ZStack {
             TerminalHostRepresentable(host: store.terminalHost)
             if store.surface == nil { placeholder }
-            if let topic = store.topics.emptyTopic { emptyTopic(topic) }
+            if let topic = store.board.emptyTopic { emptyTopic(topic) }
             if store.showsOpenPlacePage { OpenPlacePageView(store: store, page: store.openPlacePage) }
             if store.location == .emptyTopic(.noTopic) {
                 VStack(spacing: 12) {
@@ -426,7 +426,7 @@ private struct TerminalArea: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 
-    private func emptyTopic(_ topic: TopicsModel.Row) -> some View {
+    private func emptyTopic(_ topic: BoardModel.Row) -> some View {
         VStack(spacing: 12) {
             Image(systemName: offersReopen(topic) ? "clock.arrow.circlepath" : "folder.badge.plus")
                 .font(fontSize.font(34, weight: .light))
@@ -436,7 +436,7 @@ private struct TerminalArea: View {
             if case .topic(let id) = topic.id {
                 switch (store.reopening(id, .reopen), store.reopening(id, .startFresh)) {
                 case (.success(let reopen)?, .success(let startFresh)?) where !reopen.sessions.isEmpty && topic.state != .empty:
-                    ReopenChoiceView(store: store, topicID: id, reopen: reopen, startFresh: startFresh)
+                    ReopenChoiceView(store: store, reopen: reopen.sessions, startFresh: startFresh.sessions) { store.reopenTopic(id, $0) }
                 case (.failure(let error)?, _):
                     Text("This Topic cannot be reopened. \(String(describing: error))")
                         .foregroundStyle(.secondary)
@@ -456,6 +456,17 @@ private struct TerminalArea: View {
                             .accessibilityIdentifier("empty-topic-add-session")
                     }
                 }
+            } else if case .session(let id) = topic.id {
+                switch (store.boardSessionReopening(id, .reopen), store.boardSessionReopening(id, .startFresh)) {
+                case (.success(let reopen)?, .success(let startFresh)?):
+                    ReopenChoiceView(store: store, reopen: [reopen], startFresh: [startFresh]) { store.reopenBoardSession(id, $0) }
+                case (.failure(let error)?, _):
+                    Text("This Board Session cannot be reopened. \(String(describing: error))")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("reopen-choice-failure")
+                default:
+                    EmptyView()
+                }
             }
         }
         .font(fontSize.font(.body))
@@ -466,10 +477,13 @@ private struct TerminalArea: View {
         .environment(\.colorScheme, store.theme.map { $0.isDark ? .dark : .light } ?? systemColorScheme)
     }
 
-    /// A Settled Topic, or a Dormant one that remembers a Session, offers Reopen; an empty open Topic offers Add a Session.
-    private func offersReopen(_ topic: TopicsModel.Row) -> Bool {
+    /// A Settled Topic, a Dormant one that remembers a Session, or a Dormant Board Session offers Reopen; an empty open
+    /// Topic offers Add a Session.
+    private func offersReopen(_ topic: BoardModel.Row) -> Bool {
         if case .settled = topic.kind { return true }
-        guard topic.state == .dormant, case .topic(let id) = topic.id, case .success(let reopening)? = store.reopening(id, .reopen) else { return false }
+        guard topic.state == .dormant else { return false }
+        if case .session = topic.id { return true }
+        guard case .topic(let id) = topic.id, case .success(let reopening)? = store.reopening(id, .reopen) else { return false }
         return !reopening.sessions.isEmpty
     }
 

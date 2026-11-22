@@ -1,5 +1,7 @@
 # In Play is the only Topics mode
 
+> **Partly superseded by [ADR-0102](0102-a-board-session-can-take-an-in-play-place.md):** a Board Session can take an In Play place, and the Topics list is the Board. 'Every Locked Session is a Guest' does not apply.
+
 > **Partly superseded by [ADR-0094](0094-a-new-topic-is-a-guest.md):** a new Topic is a Guest. Only a returning Topic goes to the top of the Bench.
 
 > **Amended:** the default of `topics.in_play` is now 3. A Config that does not set it, or sets a value that is not valid, gets 3.

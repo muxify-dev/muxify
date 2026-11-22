@@ -92,8 +92,8 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         await publisher.caughtUp()
     }
 
-    override func writeTopics<T>(locks: [SessionLock], _ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
-        try await publisher.write(locks: locks, body)
+    override func writeTopics<T>(_ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
+        try await publisher.write(body)
     }
 
     /// The service on the Local server, with the SessionPaths as git reported them last.

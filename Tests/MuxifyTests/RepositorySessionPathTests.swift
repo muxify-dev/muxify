@@ -225,7 +225,7 @@ final class RepositorySessionPathTests: XCTestCase {
         var topic = TopicRecord(id: "a", title: "Fix")
         topic.sessions = [.object(["id": .string("$1"), "repository_path": .string(gameServer.folder.path), "worktree_path": .string(release.folder.path), "branch": .string("release-line")])]
         func flagged(_ path: String) -> Bool {
-            TopicsModel.usesMainWorkingCopy(window("@1", session: "$1", topic: "a", directory: release.folder.path, path: path),
+            BoardModel.usesMainWorkingCopy(window("@1", session: "$1", topic: "a", directory: release.folder.path, path: path),
                                             record: topic, sessionPaths: [gameServer])
         }
         XCTAssertFalse(flagged(release.folder.path))
@@ -234,7 +234,7 @@ final class RepositorySessionPathTests: XCTestCase {
         XCTAssertFalse(flagged("/elsewhere"))
         var mainCheckout = TopicRecord(id: "a", title: "Fix")
         mainCheckout.sessions = [.object(["repository_path": .string(app.folder.path), "worktree_path": .string(app.folder.path), "branch": .string("main")])]
-        XCTAssertFalse(TopicsModel.usesMainWorkingCopy(window("@1", session: "$1", topic: "a", directory: app.folder.path, path: app.folder.path + "/src"),
+        XCTAssertFalse(BoardModel.usesMainWorkingCopy(window("@1", session: "$1", topic: "a", directory: app.folder.path, path: app.folder.path + "/src"),
                                                        record: mainCheckout, sessionPaths: [app]), "a Window in the main checkout its Session remembers")
     }
 }

@@ -82,7 +82,7 @@ final class DiagnosticsSummaryTests: XCTestCase {
           1. 09:03:10  30.0 s  cpu.avg 40.0  cpu.peak 48.0  main.busy.peak 90.0
              input keys:0,clicks:0,scrolls:40,sidebar_switches:12,palette_opens:0
              moving \(moving)
-             bodies SidebarCard:900,TopicsSection:12
+             bodies BoardSection:12,SidebarCard:900
              digest burst-2026-11-10-090313.txt  samples 5000  busy 97.8%
                libraries AttributeGraph 58.8%, SwiftUI 20.1%, Muxify 3.0%
                symbols AG::Graph::update@AttributeGraph 20.0%, s2@SwiftUI 10.0%, s3@SwiftUI 9.0%, s4@SwiftUI 8.0%, s5@SwiftUI 7.0%
@@ -103,7 +103,7 @@ final class DiagnosticsSummaryTests: XCTestCase {
              digest freeze-2026-11-10-090230.txt  samples 2500  busy 100.0%
                libraries SwiftUI 70.0%
                symbols none
-               frames TopicsList.body 50.0%
+               frames Board.body 50.0%
 
         Errors 4 kinds
           5     system log: error com.apple.foo: bad thing
@@ -205,7 +205,7 @@ final class DiagnosticsSummaryTests: XCTestCase {
             try line(day, "09:02:33", DiagnosticsRecord(.digest, [("sample", freezeSample), ("samples", "2500"), ("busy", "100.0"),
                                                                   ("libraries", "SwiftUI:70.0")]).text),
             try line(day, "09:02:33", DiagnosticsRecord(.digest, [("sample", freezeSample), ("symbols", "none")]).text),
-            try line(day, "09:02:33", DiagnosticsRecord(.digest, [("sample", freezeSample), ("frames", "TopicsList.body:50.0")]).text),
+            try line(day, "09:02:33", DiagnosticsRecord(.digest, [("sample", freezeSample), ("frames", "Board.body:50.0")]).text),
             try minute(day, "09:03:00", cpu: 3, busy: 1.5, memory: 305, groups: [.tmux: figures(2.5, 21)]),
             try line(day, "09:03:00", "system log 09:02:59: error com.apple.foo: bad thing (2 times)"),
             try line(day, "09:03:13", "burst: sampling the process for 5 s to \(burstSample)"),
@@ -215,7 +215,7 @@ final class DiagnosticsSummaryTests: XCTestCase {
             try line(day, "09:03:18", DiagnosticsRecord(.digest, [("sample", burstSample),
                                                                   ("frames", "SidebarCard.body:30.0,f2:20.0,f3:10.0,f4:5.0,f5:4.0,f6:3.0")]).text),
             try burst(day, "09:03:10", length: 30, cpu: 40, peak: 48, busy: 90, input: InputCounts(scrolls: 40, sidebarSwitches: 12),
-                      bodies: BodyCounts(["SidebarCard": 900, "TopicsSection": 12]), samples: [burstSample]),
+                      bodies: BodyCounts(["SidebarCard": 900, "BoardSection": 12]), samples: [burstSample]),
             try minute(day, "09:04:00", cpu: 20, busy: 10, memory: 320, input: InputCounts(keys: 5),
                        groups: [.tmux: figures(4, 25), .webkit: figures(12, 200)]),
             try burst(day, "09:04:10", length: 10, cpu: 50, peak: 60, busy: 70),

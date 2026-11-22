@@ -222,7 +222,7 @@ class DiagnosticsIdleCost(unittest.TestCase):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1] + '_idle')
         cls.addClassCleanup(s.teardown)
         cls.logs = s.root/'logs'
-        (s.root/'config/muxify/config.yaml').write_text(ON + 'sidebar:\n  agents_scope:\n    topics: all\n    sessions: all\n')
+        (s.root/'config/muxify/config.yaml').write_text(ON + 'sidebar:\n  agents_scope:\n    board: all\n    sessions: all\n')
         project = s.root/'projects/working'
         project.mkdir(parents=True)
         cls.panes = []
@@ -291,7 +291,7 @@ class DiagnosticsSwipeCost(SwipeSteps, unittest.TestCase):
     def test_card_rebuilds_on_each_switch_are_a_burst_with_the_switches_card_bodies_and_a_swiftui_digest(self):
         self.s.wait_rows(lambda rs: any(self.s.has('topic-' + topic, rs) for topic in self.topics),
                          'the Sidebar shows none of the %d Topics' % SWIPE_CARDS)
-        self.wait_mode('topics')
+        self.wait_mode('board')
         self.require_motion()
         before = finished_burst_samples(self.logs)
         self.addCleanup(self.s.act, 'card_rebuild', views=0)
@@ -303,7 +303,7 @@ class DiagnosticsSwipeCost(SwipeSteps, unittest.TestCase):
             left = len(swipes) % 2 == 0
             swipes.append(time.time())
             self.sample('Swipe left' if left else 'Swipe right')
-            self.wait_mode('sessions' if left else 'topics')
+            self.wait_mode('sessions' if left else 'board')
         sample = wait(lambda: sorted(finished_burst_samples(self.logs) - before),
                       'the swipes made no sampled Burst in %s' % self.logs, 10)[0]
         # The Burst ends 3 seconds after the swipes stop.

@@ -37,15 +37,15 @@ enum SidebarRowState: Equatable {
     }
 }
 
-/// What a Session card shows, in Sessions mode and as the opened No Topic Session in Topics mode.
+/// What a Session card shows, in Sessions mode and as the opened No Topic Session in the Board view.
 struct SessionCardState: Equatable {
     let session: SessionGroup
     let isOpen: Bool
     let mark: CardMark?
-    /// A Locked Session is a Guest Session.
+    /// A Board Session among the Guests, which shows the Guest mark here too.
     let isGuest: Bool
     let formatted: SidebarFormats.Text
-    let items: [TopicsModel.SessionChildren.Item]
+    let items: [BoardModel.SessionChildren.Item]
     let rows: [String: SidebarRowState]
     /// The selected Window when it is one of the card's, so a selection that moves between other cards leaves this
     /// card as it was.
@@ -58,36 +58,36 @@ struct SessionCardState: Equatable {
 }
 
 extension WorkspaceStore {
-    func sidebarRowState(_ item: TopicsModel.SessionChildren.Item) -> SidebarRowState {
+    func sidebarRowState(_ item: BoardModel.SessionChildren.Item) -> SidebarRowState {
         switch item {
         case .window(let window):
             return .window(SidebarRowState.Window(
                 content: sidebarWindowRow(window), isSelected: window.id == selectedWindowID,
                 tooltips: config.sidebar.windowTooltips, tabCount: tabCount(for: window),
                 isGitViewOpen: isGitViewOpen(in: window.id),
-                usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
+                usesMainWorkingCopy: BoardModel.usesMainWorkingCopy(
                     window, record: records.first { $0.id == window.topicID }, sessionPaths: sessionPaths)))
         case .pane(let row):
             return .pane(SidebarRowState.Pane(
                 formatted: sidebarText(.pane, context: sidebarFormatContexts.panes[row.pane.id]),
-                mark: topics.agentMarks[row.pane.id],
+                mark: board.agentMarks[row.pane.id],
                 isSelected: !row.isUnderWindowRow && row.pane.isActive && row.window.id == selectedWindowID))
         }
     }
 
     /// The values of each row in `items`, by row ID.
-    func sidebarRowStates(_ items: [TopicsModel.SessionChildren.Item]) -> [String: SidebarRowState] {
+    func sidebarRowStates(_ items: [BoardModel.SessionChildren.Item]) -> [String: SidebarRowState] {
         Dictionary(items.map { ($0.id, sidebarRowState($0)) }, uniquingKeysWith: { first, _ in first })
     }
 
     func sessionCardState(_ session: SessionGroup, showsAllRows: Bool) -> SessionCardState {
-        let model = topics
+        let model = board
         let items = model.sessionChildren[session.id]?.items ?? []
         let selected = selectedWindowID.flatMap { id in session.windows.contains { $0.id == id } ? id : nil }
         return SessionCardState(
             session: session, isOpen: openSessionCards.contains(session.name),
             mark: model.sessionMarks[session.id].map(CardMark.agent),
-            isGuest: model.lockedSessionIDs.contains(session.id),
+            isGuest: model.boardSessionsBySession[session.id].map { id in model.split.guests.contains { $0.id == .session(id) } } ?? false,
             formatted: sidebarText(.session, context: sidebarFormatContexts.sessions[session.id]),
             items: items, rows: sidebarRowStates(items), selectedWindowID: selected,
             guestState: guestState(of: .session(session.id)),
@@ -95,9 +95,9 @@ extension WorkspaceStore {
     }
 }
 
-/// What a Topic card or a Locked card shows.
+/// What a Topic card or a Board Session card shows.
 struct TopicCardState: Equatable {
-    let topic: TopicsModel.Row
+    let topic: BoardModel.Row
     let titles: [String: String]
     let formatted: SidebarFormats.Text
     let tags: CardTags?
@@ -114,29 +114,30 @@ struct TopicCardState: Equatable {
 
 extension WorkspaceStore {
     /// `showsTags` is false for a closed card in a group, which shows no Tags.
-    func topicCardState(_ topic: TopicsModel.Row, titles: [String: String], holdsSelection: Bool, showsAllRows: Bool,
+    func topicCardState(_ topic: BoardModel.Row, titles: [String: String], holdsSelection: Bool, showsAllRows: Bool,
                         showsTags: Bool) -> TopicCardState {
-        let items = topic.sessions.flatMap { session -> [TopicsModel.SessionChildren.Item] in
+        let items = topic.sessions.flatMap { session -> [BoardModel.SessionChildren.Item] in
             if case .live(let children) = session.contents { return children.items }
             return []
         }
         let selected = selectedWindowID.flatMap { id in items.contains { $0.window.id == id } ? id : nil }
-        let formatted: SidebarFormats.Text
         var guest: Bool?
         var canBench = false
-        switch topic.id {
-        case .locked(let sessionID):
-            formatted = sidebarText(.session, context: sidebarFormatContexts.sessions[sessionID])
-        default:
-            formatted = sidebarText(.topic, context: sidebarFormatContexts.topics[topic.id])
-            if case .topic(let id) = topic.id {
-                guest = guestState(of: .topic(id))
-                canBench = self.canBench(.topic(id))
-            }
+        if case .topic(let id) = topic.id {
+            guest = guestState(of: .topic(id))
+            canBench = self.canBench(.topic(id))
         }
-        return TopicCardState(topic: topic, titles: titles, formatted: formatted, tags: showsTags ? cardTags(topic) : nil,
+        return TopicCardState(topic: topic, titles: titles, formatted: cardText(topic), tags: showsTags ? cardTags(topic) : nil,
                               holdsSelection: holdsSelection, showsAllRows: showsAllRows, selectedWindowID: selected,
                               rows: sidebarRowStates(items), guestState: guest, canBench: canBench,
                               changingTopic: changingTopic)
+    }
+
+    /// The title and Summary of a card on the Board, from the Topic card Formats, or from the Session card Formats for a
+    /// Board Session. A Dormant Board Session has no live Session to read: its card shows the Session it remembers.
+    func cardText(_ row: BoardModel.Row) -> SidebarFormats.Text {
+        guard case .session(let id) = row.id else { return sidebarText(.topic, context: sidebarFormatContexts.topics[row.id]) }
+        let live = row.sessions.first.flatMap { sidebarFormatContexts.sessions[$0.id.session] }
+        return sidebarText(.session, context: live ?? sidebarFormatContexts.dormantBoardSessions[id])
     }
 }

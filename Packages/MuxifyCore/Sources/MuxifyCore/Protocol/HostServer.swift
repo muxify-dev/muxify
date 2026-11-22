@@ -142,6 +142,7 @@ public enum HostServer {
     static func serve(_ request: ProtocolIncomingRequest, server: ProtocolServer, host: HostEnvironment, config: HostConfigFeed) {
         do {
             let nonce = server.client?.nonce
+            func declared(_ capability: HostCapability) -> Bool { server.client?.capabilities.contains(capability.rawValue) == true }
             let body = try request.body(HostRequest.self)
             if let needed = body.capability, server.client?.capabilities.contains(needed.rawValue) != true {
                 throw ProtocolError(.unsupported, "this client did not declare the capability \(needed.rawValue)")
@@ -153,7 +154,7 @@ public enum HostServer {
                 request.finish()
                 server.stop(.shutdown)
             case .subscribe(.environment):
-                host.subscribe(request, nonce: nonce)
+                host.subscribe(request, nonce: nonce, declaresBoard: declared(.board))
             case .subscribe(.config):
                 config.subscribe(request)
             case .subscribe(.repository(let repository)):
@@ -161,11 +162,11 @@ public enum HostServer {
             case .subscribe(.topic(let topic)):
                 host.subscribe(topic, for: request, nonce: nonce)
             case .subscribe(.snapshot):
-                host.subscribeSnapshot(request, nonce: nonce)
+                host.subscribeSnapshot(request, nonce: nonce, declaresBoard: declared(.board))
             case .subscribe(.focus):
                 host.subscribeFocus(request, nonce: nonce)
             case .environment(let environmentRequest):
-                host.run(environmentRequest, for: request, nonce: nonce)
+                host.run(environmentRequest, for: request, nonce: nonce, declaresBoard: declared(.board))
             case .markRead(let mark):
                 host.markRead(mark, for: request, nonce: nonce)
             case .view(let command):
@@ -321,12 +322,15 @@ final class HostEnvironment: @unchecked Sendable {
     private var state = EnvironmentState()
     private var hasState = false
     private var subscribers: [Int: ProtocolIncomingRequest] = [:]
+    /// The `environment` and `snapshot` subscribers whose client declared `board`.
+    private var boardSubscribers: Set<Int> = []
     /// The `snapshot` subscribers, the Config their items are computed with once it was read, and the JSON of the
-    /// last item computed, so an item goes out only when it differs.
+    /// last item computed of each view, keyed by whether the client declared `board`, so an item goes out
+    /// only when the view that its client gets differs.
     private var snapshotSubscribers: [Int: ProtocolIncomingRequest] = [:]
     private var snapshotConfig: Config?
     private var observesConfig = false
-    private var lastShown: Data?
+    private var lastShown: [Bool: Data] = [:]
     /// The `focus` subscribers, which get what the Listener heard of the focus in the Terminal's Window.
     private var focusSubscribers: [Int: ProtocolIncomingRequest] = [:]
     /// The `repository` subscriptions by request; `lock` guards it.
@@ -445,17 +449,20 @@ final class HostEnvironment: @unchecked Sendable {
 
     // MARK: - The subscription
 
-    func subscribe(_ request: ProtocolIncomingRequest, nonce: String?) {
+    func subscribe(_ request: ProtocolIncomingRequest, nonce: String?, declaresBoard: Bool) {
         Task {
             let publisher = await self.publisher(nonce: nonce)
             let id = request.id
             delivery.async { [self] in
                 guard !request.isCancelled else { return }
                 subscribers[id] = request
+                if declaresBoard { boardSubscribers.insert(id) }
                 // Before the publisher's first item, the subscriber gets that item whole.
-                if hasState { send(state.all, to: id, first: true) }
+                if hasState {
+                    send(declaresBoard ? state.all : state.olderClientChanges(state.all, lockOrdersBefore: state.lockOrders), to: id, first: true)
+                }
             }
-            request.onCancel { self.delivery.async { self.subscribers[id] = nil } }
+            request.onCancel { self.delivery.async { self.subscribers[id] = nil; self.boardSubscribers.remove(id) } }
             start(publisher)
         }
     }
@@ -516,6 +523,7 @@ final class HostEnvironment: @unchecked Sendable {
     /// On `delivery`: the first item of the publisher holds every key, and goes whole to each subscriber; each later
     /// change goes as an event of its own key, which replaces an unsent one.
     private func receive(_ changes: [EnvironmentChange]) {
+        let lockOrders = state.lockOrders
         state.apply(changes)
         let first = !hasState
         hasState = true
@@ -523,13 +531,17 @@ final class HostEnvironment: @unchecked Sendable {
             let socket = socket
             DispatchQueue.global(qos: .utility).async { socket.noteOption(server.browserSocket, serverRunning: server.isRunning) }
         }
+        let sent = first ? state.all : changes
+        let older = state.olderClientChanges(sent, lockOrdersBefore: lockOrders)
         for id in subscribers.keys.sorted() {
-            if first { send(state.all, to: id, first: true) } else { send(changes, to: id, first: false) }
+            send(boardSubscribers.contains(id) ? sent : older, to: id, first: first)
         }
         details.changed()
         if !snapshotSubscribers.isEmpty { sendSnapshot() }
     }
 
+    /// `changes` as the subscriber's client reads them: a client that did not declare `board` gets them as
+    /// `EnvironmentState.olderClientChanges` gives them.
     private func send(_ changes: [EnvironmentChange], to id: Int, first: Bool) {
         guard let request = subscribers[id] else { return }
         let sent = first
@@ -595,20 +607,21 @@ final class HostEnvironment: @unchecked Sendable {
 
     /// The `snapshot` subscription (ADR 0093): `environment show`'s view, computed from the state that the
     /// `environment` publisher keeps and the Config that the `config` feed reads, so an item costs no read of its own.
-    func subscribeSnapshot(_ request: ProtocolIncomingRequest, nonce: String?) {
+    func subscribeSnapshot(_ request: ProtocolIncomingRequest, nonce: String?, declaresBoard: Bool) {
         Task {
             let publisher = await self.publisher(nonce: nonce)
             let id = request.id
             delivery.async { [self] in
                 guard !request.isCancelled else { return }
                 snapshotSubscribers[id] = request
+                if declaresBoard { boardSubscribers.insert(id) }
                 if !observesConfig {
                     observesConfig = true
                     config.observe { [weak self] hostConfig in self?.delivery.async { self?.configRead(hostConfig) } }
                 }
                 sendSnapshot(first: id)
             }
-            request.onCancel { self.delivery.async { self.snapshotSubscribers[id] = nil } }
+            request.onCancel { self.delivery.async { self.snapshotSubscribers[id] = nil; self.boardSubscribers.remove(id) } }
             start(publisher)
         }
     }
@@ -624,18 +637,27 @@ final class HostEnvironment: @unchecked Sendable {
         sendSnapshot()
     }
 
-    /// On `delivery`: computes the view once the state and the Config are there, and sends it to every subscriber when
-    /// it differs from the last one, and to the subscriber `first` in any case. A newer item replaces an unsent one.
+    /// On `delivery`: computes the view once the state and the Config are there, and sends it to every subscriber whose
+    /// view differs from the last one, and to the subscriber `first` in any case. A newer item replaces an unsent one.
+    /// A client that did not declare `board` gets the view without its Dormant Board Sessions, so a change
+    /// of only those sends it nothing.
     private func sendSnapshot(first: Int? = nil) {
         guard hasState, let config = snapshotConfig, let tmux = state.snapshot else { return }
-        let shown = EnvironmentShown(contents: state.topicContents, tmux: tmux, config: config)
+        let whole = EnvironmentShown(contents: state.topicContents, tmux: tmux, config: config)
+        var older = whole
+        older.snapshot = whole.snapshot.withoutDormantSessions
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(shown) else { return }
-        let changed = data != lastShown
-        lastShown = data
-        for (id, request) in snapshotSubscribers where changed || id == first {
-            if !request.sendEvent(shown, key: "snapshot") { snapshotSubscribers[id] = nil }
+        var changed: [Bool: Bool] = [:]
+        for (declaresBoard, shown) in [(true, whole), (false, older)] {
+            guard let data = try? encoder.encode(shown) else { return }
+            changed[declaresBoard] = data != lastShown[declaresBoard]
+            lastShown[declaresBoard] = data
+        }
+        for (id, request) in snapshotSubscribers {
+            let declaresBoard = boardSubscribers.contains(id)
+            guard changed[declaresBoard] == true || id == first else { continue }
+            if !request.sendEvent(declaresBoard ? whole : older, key: "snapshot") { snapshotSubscribers[id] = nil }
         }
     }
 
@@ -644,7 +666,7 @@ final class HostEnvironment: @unchecked Sendable {
     /// Runs an `EnvironmentRequest` with the Host's Config, as the App Window's own Client, then reads, so the
     /// events of what it changed go out before its answer. One with a Request id runs through the Request ledger, as
     /// `muxify --request` does (ADR 0093): a second send gets the first answer and changes nothing.
-    func run(_ environmentRequest: EnvironmentRequest, for request: ProtocolIncomingRequest, nonce: String?) {
+    func run(_ environmentRequest: EnvironmentRequest, for request: ProtocolIncomingRequest, nonce: String?, declaresBoard: Bool) {
         let command = environmentRequest.command
         let reads = command.onlyReads
         let pending = PendingRequest(environmentRequest)
@@ -679,6 +701,8 @@ final class HostEnvironment: @unchecked Sendable {
             if !reads { await readAgain(publisher) }
             if case .failed(let failure) = response {
                 request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+            } else if case .snapshot(let snapshot) = response, !declaresBoard {
+                request.finish(EnvironmentResponse.snapshot(snapshot.withoutDormantSessions))
             } else {
                 request.finish(response)
             }

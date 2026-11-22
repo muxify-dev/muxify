@@ -1,6 +1,6 @@
 # The Topic records
 
-Every Topic record and the Open Places are rows in the state database, the
+Every Topic record, the Open Places and the Board Sessions are rows in the state database, the
 SQLite file `$XDG_STATE_HOME/muxify/muxify.db`. If `XDG_STATE_HOME` is absent,
 use `~/.local/state/muxify/muxify.db`. The Mac and each Host have their own. The
 database is in WAL mode; read it with the `sqlite3` command line tool:
@@ -21,7 +21,7 @@ bytes.
 | `title` | text or NULL | The Topic's title. |
 | `slug` | text or NULL | The slug of its Session names. Not unique. |
 | `outcome` | text or NULL | No build writes it now. Settle once recorded a note here. It stays because the schema never drops a column. |
-| `order` | real or NULL | Its place in the Topics list. |
+| `order` | real or NULL | Its place on the Board. |
 | `created_at`, `settled_at` | text or NULL | ISO 8601 times. |
 | `session_order` | text or NULL | `manual`, or NULL. |
 | `pinned`, `guest`, `unread` | integer | 1 or 0. |
@@ -29,8 +29,13 @@ bytes.
 | `sessions` | JSON text | The remembered Sessions, an array. |
 | `tags` | JSON text | The Tags, an array of names. |
 
-`open_places` holds one row for each Open Place of the Topics list: its `id`
+`open_places` holds one row for each Open Place of the Board: its `id`
 and its `order`, in the scale of the records' `order`.
+
+`board_sessions` holds one row for each Board Session: its `id`, its `order` in
+the scale of the records' `order`, its Guest mark in `guest`, 1 or 0 as in
+`topics`, and its Remembered Session in `session`, JSON text in the shape of one
+entry of a record's `sessions`. See [Board Sessions](#board-sessions).
 
 `sessions` and `tags` are JSON, and Muxify writes each one whole. A remembered
 Session and its Windows are open JSON: Muxify keeps a key that it does not know.
@@ -85,7 +90,7 @@ older Muxify that opens a database a newer one changed keeps working.
 An absent or null `title` gives an Untitled Topic. A slug such as `untitled-3`
 gives the label `Untitled 3`. Without that slug, the view assigns a free number
 in Topic id order. Manual display order does not change those numbers.
-A non-null `settled_at` removes the Topic from the Topics view.
+A non-null `settled_at` removes the Topic from the Board.
 
 `tags` holds the Topic's Tags, without `#`, A→Z. A Tag has only lower case
 letters `a` to `z`, digits and `-`, and it is not empty. Muxify reads an entry
@@ -256,36 +261,62 @@ remembered Session. It makes one shell Window there, with no Tabs and no Agent.
 When the new Sessions are live, the record remembers them in place of the old
 Windows.
 
-## Guest Sessions
+## Board Sessions
 
-A Guest Session has no record. It is a No Topic Session with a Lock (ADR 0018).
-tmux keeps the Lock in the Session option
-`@muxify_lock`. Its value is the place of the Session's card in the Topics list,
-in the same scale as the `order` of the Topic records:
+A Board Session has no Topic record. It is a No Topic Session with a card on the
+Board: a row of the `board_sessions` table. The live Session points at its row
+with the tmux Session option `@muxify_session_id`, whose value is the row's `id`:
 
 ```sh
-tmux set-option -t notes @muxify_lock 3.5
+sqlite3 ~/.local/state/muxify/muxify.db 'SELECT id, "order", guest, session FROM board_sessions'
 ```
 
-Only a No Topic Session can have a Lock. Muxify ignores the option on a Session
-whose `@muxify_topic` names an open Topic. A Lock is never Pinned, and its
-Session is always a Guest, so its card shows in the Guests. When a move
-renumbers the list, Muxify writes the new `order` values to the records and the
-new `@muxify_lock` values to tmux. A new Lock goes to the end of the Guests.
-The Lock ends when the user Benches the Guest Session, when the Session ends,
-and when the Session goes into a Topic. A Topic that the user makes from a
-Guest Session takes the Lock's value as its `order`, and the Guest mark.
+Only a No Topic Session can be a Board Session: a Session whose `@muxify_topic`
+names an open Topic is not one, whatever its `@muxify_session_id`. A Board
+Session is never Pinned and never on the Bench. With `guest` 0, its card holds
+an In Play place. With `guest` 1, its card is a Guest. A Board Session past the
+last place, after the Config made `topics.in_play` smaller, also shows among
+the Guests. A new row goes to the end of the Guests, with `guest` 1. Its `id` is
+the Session's `@muxify_session_id`, or an id that tmux gives the Session when it
+has none, which Muxify then writes to the option. Each read of the server writes
+the live Session's Windows, Panes, Tabs and Agents to `session`, as it does for
+a Topic's Remembered Sessions.
+
+When tmux has no Session for a Board Session, as after a tmux restart, the Board
+Session is Dormant: its card stays at its place, In Play or among the Guests,
+dimmed. Going to it Reopens it: Muxify creates the Session again in its folder,
+with its Windows, Panes, Tabs and Agents, and sets `@muxify_session_id` on it.
+Start Fresh creates the Session in its folder with one shell Window, and sets
+the same option, so the card also keeps its place. When the Session is live,
+`session` remembers it in place of the old Windows. The row ends, and the card
+leaves the Board, when the user Benches the Board Session, live or Dormant, when
+Muxify kills it, when it goes into a Topic, and when it ends on the same tmux
+server while Muxify watches. Each move that would send the Board Session to the
+Bench ends the row too, because the Bench holds only Topics. A card that leaves
+an In Play place leaves an Open Place there. A tmux restart and a Muxify launch
+do not end the row. A Topic that the user makes from a Board Session takes the
+row's `order` and its section: its In Play place, or its place among the Guests
+with the Guest mark.
 
 `muxify topic make-guest --session <name>` and `muxify topic bench --session
-<name>` set and end a Lock through the Topic service. `muxify session lock`,
-`muxify session unlock` and the URLs `muxify://topic/lock` and
-`muxify://topic/unlock` are gone.
+<name>` write and end a row through the Topic service. `muxify topic reopen
+--board-session <id>`, `muxify topic start-fresh --board-session <id>` and
+`muxify topic bench --board-session <id>` take a Board Session by its id, also a
+Dormant one, which `muxify environment show` gives on its `dormant session`
+line. `muxify session move`, `muxify topic fill-place`, `muxify topic
+replace-from-bench` and `muxify topic choose-in-play` take `--board-session
+<id>` too. `muxify session lock`, `muxify session unlock` and the URLs
+`muxify://topic/lock` and `muxify://topic/unlock` are gone.
 
-An older Muxify kept a Locked Session among the Topics while the Config did not
-set `topics.in_play`. When the app starts and finds a Lock outside the Guests,
-it writes the list again in the order of the three sections: the In Play
-places, the Guests, the Bench. A list that is already in this order does not
-change.
+An older Muxify kept the card of a No Topic Session in the tmux Session option
+`@muxify_lock`. When Muxify reads a Session that still has the option, it makes
+a Board Session among the Guests with the option's value as its `order`, points
+the Session at it, and removes the option.
+
+An older Muxify kept such a card among the Topics while the Config did not set
+`topics.in_play`. When the app starts, it writes the Board again in the order of
+the three sections: the In Play places, the Guests, the Bench. So each such card
+is among the Guests. A Board that is already in this order does not change.
 
 ## Forget
 

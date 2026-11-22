@@ -26,7 +26,7 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: path, encoding: .utf8),
                        "sidebar:\n  # mine\n  agents_scope: window  # keep\n\nui:\n  pulse: false\n")
         XCTAssertFalse(model.hasChanges)
-        XCTAssertEqual(store.config.sidebar.agentsScope[.topics], .window)
+        XCTAssertEqual(store.config.sidebar.agentsScope[.board], .window)
         XCTAssertFalse(store.config.pulse)
     }
 

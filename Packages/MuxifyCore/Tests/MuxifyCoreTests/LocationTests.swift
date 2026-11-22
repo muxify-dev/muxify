@@ -8,7 +8,7 @@ final class LocationTests: XCTestCase {
             (.emptyTopic(.topic("topic-1")), #"{"empty_topic":{"id":"topic-1"}}"#),
             (.emptyTopic(.noTopic), #"{"empty_topic":{"no_topic":true}}"#),
         ]
-        XCTAssertThrowsError(try JSONEncoder().encode(Location.emptyTopic(.locked("$2"))))
+        XCTAssertThrowsError(try JSONEncoder().encode(Location.emptyTopic(.session("$2"))))
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         for (location, json) in fixtures {

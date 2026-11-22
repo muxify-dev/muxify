@@ -113,7 +113,7 @@ final class WorkspaceStore {
     /// offers Add a Session, a Dormant or Settled one offers Reopen and Start Fresh. Selecting a Window ends it.
     func showEmptyTopic(_ id: String) {
         route(.go(.emptyTopic(.topic(id))))
-        sidebarMode = .topics
+        sidebarMode = .board
         if !palette.isOpen { surface?.window?.makeFirstResponder(nil) }
     }
 
@@ -141,21 +141,21 @@ final class WorkspaceStore {
     @ObservationIgnored private var topicRequests: [TopicIntent] = []
     /// The card whose queued step is running; a failure of it drops that card's other queued steps.
     @ObservationIgnored private var stepInFlight: GuestCard?
-    /// A Topic change ended and no snapshot after it is applied yet. Locks are tmux options, so until then the model
-    /// can show a Session's Lock as it was before the change, and a queued step waits.
+    /// A Topic change ended and no snapshot after it is applied yet. A Session points at its Board Session with a tmux option,
+    /// so until then the model can show a new Board Session as Dormant, and a queued step waits.
     @ObservationIgnored private var topicSnapshotPending = false
     private static let queuedMoveLimit = 4
 
     /// Move for the selected Window's Session, in the Command Palette's view. Nothing happens with Topics off.
     func presentMoveSession(keepingHistory: Bool = false) {
-        guard link.features.contains(.topics), topics.topicsEnabled, let window = selectedWindow else { return }
+        guard link.features.contains(.topics), board.topicsEnabled, let window = selectedWindow else { return }
         link.reloadTopics()
         palette.openMove(window, keepingHistory: keepingHistory)
     }
 
     /// Move for the selected Window, in the Command Palette's view. Nothing happens with Topics off.
     func presentMoveWindow(keepingHistory: Bool = false) {
-        guard link.features.contains(.topics), topics.topicsEnabled, let window = selectedWindow else { return }
+        guard link.features.contains(.topics), board.topicsEnabled, let window = selectedWindow else { return }
         link.reloadTopics()
         palette.openMove(window, scope: .window, keepingHistory: keepingHistory)
     }
@@ -211,14 +211,18 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.newSession(sessionPath: directory.path, name: name)), presenting: .newSession(directory))
     }
 
-    /// Goes to the Topic because the user asked to: a click, a Hint key, ↩ on its palette row or Go to Topic.
-    /// A Dormant Topic that remembers a Session is Reopened at once; any other Topic shows as in `showTopic`.
+    /// Goes to the Topic because the user asked to: a click, a Hint key, ↩ on its palette row, Go to Topic or Next
+    /// Topic. A Dormant Topic that remembers a Session and a Dormant Board Session are Reopened at once; any other card
+    /// shows as in `showTopic`.
     func goToTopic(_ id: TopicGroupID) {
-        if case .topic(let topicID) = id, entryWindow(of: id) == nil, !changingTopic, reopensOnArrival(topicID) {
-            reopenTopic(topicID, .reopen)
-        } else {
-            showTopic(id)
+        if entryWindow(of: id) == nil, !changingTopic {
+            switch id {
+            case .topic(let topicID) where reopensOnArrival(topicID): return reopenTopic(topicID, .reopen)
+            case .session(let boardSessionID) where boardSession(boardSessionID) != nil: return reopenBoardSession(boardSessionID, .reopen)
+            case .topic, .session, .noTopic: break
+            }
         }
+        showTopic(id)
     }
 
     /// Shows the Topic without creating anything, as Next Topic does: its entry Window, or its Reopen choice when it
@@ -227,8 +231,9 @@ final class WorkspaceStore {
         if let window = entryWindow(of: id) { select(window) }
         else if case .topic(let topicID) = id { showEmptyTopic(topicID) }
         else {
-            route(.go(.emptyTopic(.noTopic)))
-            sidebarMode = .topics
+            let page: TopicGroupID = if case .session(let boardSessionID) = id, boardSession(boardSessionID) != nil { id } else { .noTopic }
+            route(.go(.emptyTopic(page)))
+            sidebarMode = .board
             if !palette.isOpen { terminalHost.window?.makeFirstResponder(nil) }
         }
     }
@@ -245,7 +250,7 @@ final class WorkspaceStore {
         }
         if let pane = panes.first(where: { $0.windowID == window.id && worktree.contains(folders.folder($0.path)) && !$0.path.isEmpty }),
            !pane.isActive {
-            select(TopicsModel.PaneRow(pane: pane, window: window, agent: nil, isUnderWindowRow: true))
+            select(BoardModel.PaneRow(pane: pane, window: window, agent: nil, isUnderWindowRow: true))
         } else {
             select(window)
         }
@@ -283,15 +288,12 @@ final class WorkspaceStore {
     private func entryWindow(of id: TopicGroupID) -> TmuxWindow? {
         if id == .noTopic {
             let open = Set(records.filter { $0.settledAt == nil }.map(\.id))
-            let locked = Set(topics.rows.compactMap { row -> String? in
-                if case .locked(let sessionID) = row.id { return sessionID }
-                return nil
-            })
-            let members = windows.filter { ($0.topicID.map { !open.contains($0) } ?? true) && !locked.contains($0.sessionID) }
+            let onBoard = board.sessionIDsOnBoard
+            let members = windows.filter { ($0.topicID.map { !open.contains($0) } ?? true) && !onBoard.contains($0.sessionID) }
             if let last = members.first(where: { $0.id == topicSelection.lastWindowByGroup[.noTopic] }) { return last }
             return EntryWindow.ofSession(members)
         }
-        guard let row = topics.rows.first(where: { $0.id == id }) else { return nil }
+        guard let row = board.rows.first(where: { $0.id == id }) else { return nil }
         return EntryWindow.of(row, lastWindowByGroup: topicSelection.lastWindowByGroup, visits: visits)
     }
 
@@ -304,7 +306,7 @@ final class WorkspaceStore {
     }
 
     /// The Sidebar drag: the card goes next to another card.
-    func moveTopic(_ id: TopicListID, to placement: TopicPlacement) {
+    func moveTopic(_ id: BoardCardID, to placement: TopicPlacement) {
         guard let target = Self.target(of: id), let anchor = Self.ref(of: placement.anchorID) else { return }
         let move: CardMove = if case .before = placement { .before(anchor) } else { .after(anchor) }
         perform(EnvironmentRequest(.moveCard(move), target: target))
@@ -313,32 +315,31 @@ final class WorkspaceStore {
     /// The Sidebar drag across the Guests line or the Bench line: the two cards exchange their places. A card dropped
     /// on an Open Place fills it. While the Bench is hidden, the card that goes to the Bench shows under the line until
     /// the Sidebar folds it in.
-    func tradeCard(_ id: TopicListID, with other: TopicListID) {
-        let cut = topics.cut
-        if case .openPlace(let place) = other, case .topic(let topic) = id { return fillOpenPlace(place, with: topic) }
+    func tradeCard(_ id: BoardCardID, with other: BoardCardID) {
+        let cut = board.cut
+        if case .openPlace(let place) = other { return fillOpenPlace(place, with: id) }
         guard let target = Self.target(of: id), let ref = Self.ref(of: other) else { return }
         let rows = cut.compactMap(\.row)
         if !benchShown, benchPeek != .all, rows.bench.contains(where: { $0.id.listID == id || $0.id.listID == other }) {
             let leaving = rows.inPlay.map(\.id).first { $0.listID == id || $0.listID == other }
-            benchPeek = leaving.map(TopicsModel.BenchPeek.card)
+            benchPeek = leaving.map(BoardModel.BenchPeek.card)
         }
         perform(EnvironmentRequest(.moveCard(.trade(ref)), target: target))
     }
 
     /// Fill an Open Place goes through the Topic service, as `muxify topic fill-place` does. With `opening`, the
-    /// Location then goes to the Topic, as a fill from the Open Place page does.
-    func fillOpenPlace(_ placeID: String, with topic: String, opening: Bool = false) {
-        guard let place = topics.place(ofOpenPlace: placeID) else { return }
-        perform(EnvironmentRequest(.fillOpenPlace(place: place), target: .topic(.id(topic))),
-                presenting: opening ? .goTo(.topic(topic)) : .edit)
+    /// Location then goes to the card, as a fill from the Open Place page does.
+    func fillOpenPlace(_ placeID: String, with card: BoardCardID, opening: Bool = false) {
+        guard let place = board.place(ofOpenPlace: placeID), let target = Self.target(of: card), let group = TopicGroupID(card) else { return }
+        perform(EnvironmentRequest(.fillOpenPlace(place: place), target: target), presenting: opening ? .goTo(group) : .edit)
     }
 
     /// Goes to the Open Place page (ADR 0095): the Open Place becomes the Location, and the page's search field takes
     /// Focus. Nothing modal opens, so every App Window keybind still acts.
     func goToOpenPlace(_ placeID: String) {
-        guard link.features.contains(.topics), topics.place(ofOpenPlace: placeID) != nil else { return }
+        guard link.features.contains(.topics), board.place(ofOpenPlace: placeID) != nil else { return }
         route(.go(.openPlace(placeID)))
-        sidebarMode = .topics
+        sidebarMode = .board
         focusOpenPlaceField()
     }
 
@@ -350,42 +351,42 @@ final class WorkspaceStore {
 
     /// The Open Place page's rows, with the titles that the Sidebar cards show.
     var openPlaceChoices: OpenPlaceChoices {
-        OpenPlaceChoices(topics.split, query: openPlacePage.query) { row in
-            sidebarText(.topic, context: sidebarFormatContexts.topics[row.id]).title
-        }
+        OpenPlaceChoices(board.split, query: openPlacePage.query) { cardText($0).title }
     }
 
-    /// ↩ on the Open Place page: the selected Topic fills the place and opens.
-    func fillOpenPlaceFromPage(with topic: String) {
+    /// ↩ on the Open Place page: the selected card fills the place and opens.
+    func fillOpenPlaceFromPage(with card: BoardCardID) {
         guard case .openPlace(let place) = location else { return }
-        fillOpenPlace(place, with: topic, opening: true)
+        fillOpenPlace(place, with: card, opening: true)
     }
 
     /// Move Up and Move Down: MuxifyCore decides the step (`TopicCards.step`) with the Bench as the Sidebar shows it.
     /// The service acts as if the Bench shows, so Make a Guest from a hidden Bench goes as its own request.
-    func moveCard(_ id: TopicListID, _ step: TopicCards.Step) {
+    func moveCard(_ id: BoardCardID, _ step: TopicCards.Step) {
         guard let target = Self.target(of: id) else { return }
-        let outcome = topics.steps(of: id).outcome(step)
+        let outcome = board.steps(of: id).outcome(step)
         if outcome == .makeGuest, case .topic(let topic) = id {
             perform(EnvironmentRequest(.makeGuest, target: .topic(.id(topic))))
             return
         }
-        if outcome == .bench, !benchShown, benchPeek != .all, topics.activeTopic?.listID != id { benchPeek = TopicGroupID(id).map(TopicsModel.BenchPeek.card) }
+        if outcome == .bench, !benchShown, benchPeek != .all, board.activeTopic?.listID != id { benchPeek = TopicGroupID(id).map(BoardModel.BenchPeek.card) }
         perform(EnvironmentRequest(.moveCard(step == .up ? .up : .down), target: target))
     }
 
-    private static func target(of card: TopicListID) -> EnvironmentTarget? {
+    /// A Board Session's card goes by its id, live or Dormant. Only a server that sends Board Sessions gives the Sidebar
+    /// such a card, and such a server takes the `board_session` target and card.
+    private static func target(of card: BoardCardID) -> EnvironmentTarget? {
         switch card {
         case .topic(let id): return .topic(.id(id))
-        case .lock(let sessionID): return SessionID(rawValue: sessionID).map(EnvironmentTarget.session)
+        case .session(let id): return .boardSession(id)
         case .openPlace: return nil
         }
     }
 
-    private static func ref(of card: TopicListID) -> TopicListRef? {
+    private static func ref(of card: BoardCardID) -> BoardCardRef? {
         switch card {
         case .topic(let id): return .topic(.id(id))
-        case .lock(let sessionID): return SessionID(rawValue: sessionID).map(TopicListRef.lock)
+        case .session(let id): return .boardSession(id)
         case .openPlace(let id): return .openPlace(id)
         }
     }
@@ -394,65 +395,73 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(pinned ? .pin : .unpin, target: .topic(.id(id))))
     }
 
-    /// A card that Make a Guest and Bench act on: a Topic, or a No Topic Session, which is a Guest through its Lock.
+    /// A card that Make a Guest and Bench act on: a Topic, a live No Topic Session by its tmux id, which has a card when
+    /// it is a Board Session, or a Board Session, live or Dormant, by its id.
     enum GuestCard: Equatable {
         case topic(String)
         case session(String)
-
-        var id: TopicGroupID {
-            switch self {
-            case .topic(let id): .topic(id)
-            case .session(let id): .locked(id)
-            }
-        }
+        case boardSession(String)
 
         var target: EnvironmentTarget? {
             switch self {
             case .topic(let id): .topic(.id(id))
             case .session(let id): SessionID(rawValue: id).map(EnvironmentTarget.session)
+            case .boardSession(let id): .boardSession(id)
             }
         }
     }
 
-    /// Whether the card is a Guest; nil when Make a Guest does not apply to it: the card is a Topic that is not on the
-    /// Bench or a Session in an open Topic, or Topics are off or Remote. A Guest leaves through Bench.
+    /// The card that `card` is on the Board; a No Topic Session that is not a Board Session has none of its own.
+    private func group(of card: GuestCard) -> TopicGroupID {
+        switch card {
+        case .topic(let id): .topic(id)
+        case .session(let id): board.boardSessionsBySession[id].map(TopicGroupID.session) ?? .noTopic
+        case .boardSession(let id): .session(id)
+        }
+    }
+
+    /// Whether Make a Guest has made the card's Guest already: false for a Benched Topic or a No Topic Session with no
+    /// card, which Make a Guest takes, and true for a Board Session, which has its card, in a place or among the Guests.
+    /// Nil when Make a Guest does not apply: a Topic that is not on the Bench, a Session in an open Topic, or Topics
+    /// are off or Remote. A card leaves through Bench.
     func guestState(of card: GuestCard) -> Bool? {
-        guard link.features.contains(.topics), topics.topicsEnabled else { return nil }
+        guard link.features.contains(.topics), board.topicsEnabled else { return nil }
         switch card {
         case .session(let id):
             guard let window = windows.first(where: { $0.sessionID == id }) else { return nil }
             if let topic = window.topicID, records.contains(where: { $0.id == topic && $0.settledAt == nil }) { return nil }
-            return topics.lockedSessionIDs.contains(id)
-        case .topic(let id): return topics.split.bench.contains { $0.id == .topic(id) } ? false : nil
+            return board.sessionIDsOnBoard.contains(id)
+        case .boardSession(let id): return boardSession(id) == nil ? nil : true
+        case .topic(let id): return board.split.bench.contains { $0.id == .topic(id) } ? false : nil
         }
     }
 
-    /// Bench applies to a card In Play: a Topic in an In Play place, a Guest Topic or a Guest Session. Not to a
-    /// Benched or Pinned Topic.
+    /// Bench applies to a card In Play: a Topic in an In Play place, a Guest Topic or a Board Session, which is always
+    /// In Play. Not to a Benched or Pinned Topic.
     func canBench(_ card: GuestCard) -> Bool {
-        guard link.features.contains(.topics), topics.topicsEnabled else { return false }
+        guard link.features.contains(.topics), board.topicsEnabled else { return false }
         switch card {
-        case .topic(let id): return topics.split.inPlay.contains { $0.id == .topic(id) }
-        case .session: return guestState(of: card) == true
+        case .topic(let id): return board.split.inPlay.contains { $0.id == .topic(id) }
+        case .session, .boardSession: return guestState(of: card) == true
         }
     }
 
     /// Bench goes through the Topic service, as `muxify topic bench` does. A Topic goes to the top of the Bench; a
-    /// Session has no record to wait there, so it leaves its Lock and waits in No Topic. When the
+    /// Board Session has no record to wait there, so its card leaves the Board and a live one waits in No Topic. When the
     /// user is on the card, the Next Topic opens, as after Settle, but only when it shows: the card's Sessions stay, so
     /// with no other card In Play the user stays on it rather than on another Benched card.
     func bench(_ card: GuestCard) {
         guard canBench(card), !changingTopic else { return }
         guard let target = card.target else { return }
         let request = EnvironmentRequest(.benchTopic, target: target)
-        if let next = nextCard(leaving: card.id), topics.shows(next) { perform(request, presenting: .goTo(next)) } else { perform(request) }
+        if let next = nextCard(leaving: group(of: card)), board.shows(next) { perform(request, presenting: .goTo(next)) } else { perform(request) }
     }
 
     /// The card that opens when `card` leaves the Sidebar while the user is on it: the Next Topic. Nil while the user
     /// is on another card, so that the Location stays.
     private func nextCard(leaving card: TopicGroupID) -> TopicGroupID? {
-        guard topics.activeTopic == card, topics.rows.contains(where: { $0.id == card }) else { return nil }
-        return topics.nextTopic(after: card)
+        guard board.activeTopic == card, board.rows.contains(where: { $0.id == card }) else { return nil }
+        return board.nextTopic(after: card)
     }
 
     /// The card that the Make a Guest and Bench Commands act on: the Active Topic, else the Session of the Location.
@@ -461,27 +470,27 @@ final class WorkspaceStore {
         return selectedWindow.map { .session($0.sessionID) }
     }
 
-    /// Make a Guest goes through the Topic service, as `muxify topic make-guest` does (ADR 0032). A Session is a Guest
-    /// through its Lock.
+    /// Make a Guest goes through the Topic service, as `muxify topic make-guest` does (ADR 0032). A No Topic Session
+    /// becomes a Board Session among the Guests.
     func makeGuest(_ card: GuestCard) {
         guard guestState(of: card) == false, let target = card.target else { return }
         perform(EnvironmentRequest(.makeGuest, target: target))
     }
 
-    /// Whether Move Topic Up (`previous`) or Down (`next`) can move the card of the Active Topic or Locked Session, as
+    /// Whether Move Topic Up (`previous`) or Down (`next`) can move the card of the Active Topic or Board Session, as
     /// the card's own Move Up and Move Down do. Not at that end of the cards with its Pin, for a Settled
-    /// Topic, and outside Topics mode, where the cards do not show. The opened No Topic Session has Up only: Make a
+    /// Topic, and outside the Board view, where the cards do not show. The opened No Topic Session has Up only: Make a
     /// Guest.
     /// While a change runs or waits for its snapshot, a press waits in the queue instead, up to `queuedMoveLimit` for
     /// the card. The queued step is decided when it runs, so a press at the end of the cards is accepted and then does
     /// nothing.
     func canMoveActiveCard(_ direction: StepDirection) -> Bool {
-        guard link.features.contains(.topics), topics.mode == .topics, let active = topics.activeTopic else { return false }
+        guard link.features.contains(.topics), board.mode == .board, let active = board.activeTopic else { return false }
         if changingTopic || topicSnapshotPending {
             guard let card = currentGuestCard else { return false }
             return topicRequests.filter { $0.isMove(of: card) }.count < Self.queuedMoveLimit
         }
-        return topics.steps(of: active).canMove(direction == .previous ? .up : .down)
+        return board.steps(of: active).canMove(direction == .previous ? .up : .down)
     }
 
     func moveActiveCard(_ direction: StepDirection) {
@@ -497,9 +506,10 @@ final class WorkspaceStore {
         switch card {
         case .topic(let id): group = .topic(id)
         case .session(let id):
-            group = topics.lockedSessionIDs.contains(id) ? .locked(id) : topics.openedNoTopicSession?.id.session == id ? .noTopic : nil
+            group = board.boardSessionsBySession[id].map(TopicGroupID.session) ?? (board.openedNoTopicSession?.id.session == id ? .noTopic : nil)
+        case .boardSession(let id): group = .session(id)
         }
-        guard let group, topics.steps(of: group).canMove(step) else {
+        guard let group, board.steps(of: group).canMove(step) else {
             topicRequests.removeAll { $0.isMove(of: card) }
             return
         }
@@ -654,15 +664,15 @@ final class WorkspaceStore {
 
     /// The open Topic of the Window the user looks at, or of the empty-Topic view; nil for No Topic.
     var activeTopicID: String? {
-        if case .topic(let id) = topics.activeTopic { return id }
+        if case .topic(let id) = board.activeTopic { return id }
         return nil
     }
 
-    /// A Locked Session that an older Muxify kept among the Topics becomes a Guest in the Guests (ADR 0061). The order of
+    /// A Board Session that an older Muxify kept among the Topics becomes a Guest in the Guests (ADR 0061). The order of
     /// the list says when there is one to gather, so a list that is already in its three sections is not written again.
     private func gatherGuests() {
-        guard link.features.contains(.topics), topics.topicsEnabled, !changingTopic else { return }
-        let cards = TopicCards.order(records: records, windows: windows, openPlaces: openPlaces)
+        guard link.features.contains(.topics), board.topicsEnabled, !changingTopic else { return }
+        let cards = TopicCards.order(records: records, boardSessions: boardSessions, openPlaces: openPlaces)
         guard !TopicOrder.isInSections(cards, inPlay: topicConfig.inPlay) else { return }
         let service = environmentService()
         guard service != nil || link.runsRequests else { return }
@@ -712,12 +722,27 @@ final class WorkspaceStore {
     }
 
     func reopenTopic(_ id: String, _ choice: TopicReopening.Choice) {
+        reopen(.topic(.id(id)), choice)
+    }
+
+    /// The Board Session with this id, live or Dormant; nil once its card has left the Board.
+    private func boardSession(_ id: String) -> BoardSession? {
+        boardSessions.first { $0.id == id }
+    }
+
+    /// Creates the Session of a Dormant Board Session again and shows it: with its Windows, Panes, Tabs and Agents for
+    /// Reopen, with one shell Window for Start Fresh.
+    func reopenBoardSession(_ id: String, _ choice: TopicReopening.Choice) {
+        reopen(.boardSession(id), choice)
+    }
+
+    private func reopen(_ target: EnvironmentTarget, _ choice: TopicReopening.Choice) {
         let command: EnvironmentCommand
         switch choice {
         case .reopen: command = .reopen
         case .startFresh: command = .startFresh
         }
-        perform(EnvironmentRequest(command, target: .topic(.id(id))))
+        perform(EnvironmentRequest(command, target: target))
     }
 
     /// The open Topic has a Session to create, the same test that makes the empty-Topic view offer the Reopen choice.
@@ -726,6 +751,11 @@ final class WorkspaceStore {
         guard records.contains(where: { $0.id == id && $0.settledAt == nil && !$0.sessions.isEmpty }),
               case .success(let reopening)? = reopening(id, .reopen) else { return false }
         return !reopening.sessions.isEmpty
+    }
+
+    /// What `reopenBoardSession` would create now, for the page to show before the user chooses.
+    func boardSessionReopening(_ id: String, _ choice: TopicReopening.Choice) -> Result<TopicReopening.Session, Error>? {
+        boardSession(id).map { boardSession in Result { try TopicReopening.Session(boardSession: boardSession, windows: windows, choice: choice) } }
     }
 
     /// What `reopenTopic` would create now, for the panel to show before the user chooses.
@@ -758,18 +788,21 @@ final class WorkspaceStore {
 
     /// The process's one answer per Environment, shared by every App Window.
     private static var reopenAtLaunch = ReopenAtLaunch()
-    /// The Topics that Reopen at launch has asked for and that have not finished.
-    @ObservationIgnored private var launchReopens: Set<String> = []
+    /// The cards that Reopen at launch has asked for and that have not finished.
+    @ObservationIgnored private var launchReopens: Set<BoardCardID> = []
 
-    /// `topics.reopen_at_launch`: the first snapshot of this launch Reopens every Dormant open Topic, one after another
-    /// through the Topic request path, as going to each would, without moving the Location. A Remote Environment has
-    /// no Topics: they stay on this Mac (ADR 0062).
+    /// `topics.reopen_at_launch`: the first snapshot of this launch Reopens every Dormant open Topic and every Dormant
+    /// Board Session, one after another through the Topic request path, as going to each would, without moving the
+    /// Location. A Remote Environment has no Topics: they stay on this Mac (ADR 0062).
     private func reopenDormantTopicsAtLaunch() {
         guard link.features.contains(.topics) else { return }
-        let ids = Self.reopenAtLaunch.topics(in: environmentName, enabled: topicConfig.reopenAtLaunch,
-                                             records: records, windows: windows)
-        launchReopens.formUnion(ids)
-        for id in ids { enqueueTopicRequest(EnvironmentRequest(.reopen, target: .topic(.id(id))), presenting: .reopenedAtLaunch(id)) }
+        let cards = Self.reopenAtLaunch.cards(in: environmentName, enabled: topicConfig.reopenAtLaunch,
+                                              contents: TopicContents(records: records, openPlaces: openPlaces, boardSessions: boardSessions), windows: windows)
+        launchReopens.formUnion(cards)
+        for card in cards {
+            guard let target = Self.target(of: card) else { continue }
+            enqueueTopicRequest(EnvironmentRequest(.reopen, target: target), presenting: .reopenedAtLaunch(card))
+        }
     }
 
     /// How the app shows a finished Topic request.
@@ -788,7 +821,7 @@ final class WorkspaceStore {
         /// Forget Settled Older Than… answers with the Topics it forgot, and the palette closes.
         case forgetSettled
         /// Reopen at launch: the Location stays. Once the last one finishes, the App Window attaches as at any launch.
-        case reopenedAtLaunch(String)
+        case reopenedAtLaunch(BoardCardID)
     }
 
     /// The one path for every Topic edit that the user asks for in the app. The app's unsaved memory goes to disk and to tmux first,
@@ -914,7 +947,7 @@ final class WorkspaceStore {
                 case .window(let id)?:
                     route(.result(.window(id), lastStartedRead: lastStartedRead))
                     // A new tmux Window or Session names no Topic and leaves the Sidebar in its mode.
-                    if change.topicID != nil { sidebarMode = .topics }
+                    if change.topicID != nil { sidebarMode = .board }
                     moveFocusIntoWindow()
                     if surface == nil || surface?.processExited == true {
                         do {
@@ -1001,9 +1034,10 @@ final class WorkspaceStore {
         (try? visitStore.times(environment: environment?.name)) ?? [:]
     }
 
-    /// The Topic records and the Open Places, as the link's last `topics` event left them.
+    /// The Topic records, the Open Places and the Board Sessions, as the link's last `topics` event left them.
     private(set) var records: [TopicRecord] = []
     private(set) var openPlaces: [OpenPlace] = []
+    private(set) var boardSessions: [BoardSession] = []
     var topicSelection = TopicSelection()
     private(set) var topicBranches = TopicBranches()
     /// The last read, so a refresh runs `ps` only when a Topic Pane starts another program.
@@ -1013,18 +1047,18 @@ final class WorkspaceStore {
     var topicGroups = TopicGroupsState()
     /// Whether the Bench shows. Only the user shows or hides it. Each App Window has its own, and no restart keeps it.
     var benchShown = false
-    var benchPeek: TopicsModel.BenchPeek?
+    var benchPeek: BoardModel.BenchPeek?
 
     /// Built again only after a change to what it reads. The Sidebar, the menus
     /// and the terminal area read it many times in each update, and each build is expensive.
-    var topics: TopicsModel { topicsCache.value }
-    @ObservationIgnored private lazy var topicsCache = ObservedCache { [unowned self] in buildTopics() }
+    var board: BoardModel { boardCache.value }
+    @ObservationIgnored private lazy var boardCache = ObservedCache { [unowned self] in buildBoard() }
 
-    private func buildTopics() -> TopicsModel {
+    private func buildBoard() -> BoardModel {
         var config = self.config
         // Topic records and SessionPaths are on this Mac; a Remote App Window shows Sessions only.
-        if !link.features.contains(.topics) { config.sidebar.topics = false }
-        return TopicsModel(records: records, openPlaces: openPlaces, windows: windows, config: config,
+        if !link.features.contains(.topics) { config.sidebar.board = false }
+        return BoardModel(records: records, openPlaces: openPlaces, boardSessions: boardSessions, windows: windows, config: config,
                            selection: topicSelection, location: location, mode: sidebarMode, groups: topicGroups, benchShown: benchShown,
                            benchPeek: benchPeek, agents: agents,
                            panes: panesVisible ? panes : nil)
@@ -1032,48 +1066,47 @@ final class WorkspaceStore {
 
     var sidebarFormatContexts: SidebarFormatContexts { sidebarFormatsCache.value }
     @ObservationIgnored private lazy var sidebarFormatsCache = ObservedCache { [unowned self] in
-        SidebarFormatContexts(model: topics, windows: windows, panes: panes, agents: agents,
-                              branches: topicBranches, records: records, sessionPaths: sessionPaths,
+        SidebarFormatContexts(model: board, windows: windows, panes: panes, agents: agents,
+                              branches: topicBranches, records: records, boardSessions: boardSessions, sessionPaths: sessionPaths,
                               tabCounts: Dictionary(windows.map { ($0.id, tabCount(for: $0)) },
                                                     uniquingKeysWith: { first, _ in first }),
                               isOnThisMac: link.isOnThisMac, features: link.features)
     }
 
     func sidebarWindowRow(_ window: TmuxWindow) -> SidebarFormats.WindowRowContent {
-        config.sidebar.formats.windowRow(in: sidebarFormatContexts.windows[window.id] ?? .init(), mode: topics.mode)
+        config.sidebar.formats.windowRow(in: sidebarFormatContexts.windows[window.id] ?? .init(), mode: board.mode)
     }
 
     func sidebarText(_ object: SidebarFormats.Object, context: SidebarFormat.Context?) -> SidebarFormats.Text {
-        config.sidebar.formats.text(for: object, in: context ?? .init(), mode: topics.mode)
+        config.sidebar.formats.text(for: object, in: context ?? .init(), mode: board.mode)
     }
 
     /// What the `topic.tags` Format gives for each of the card's Tags; nil when it shows none or `tag_placement` is `none`.
-    func cardTags(_ row: TopicsModel.Row) -> CardTags? {
+    func cardTags(_ row: BoardModel.Row) -> CardTags? {
         guard config.sidebar.tagPlacement != .none, !row.tags.isEmpty, let context = sidebarFormatContexts.topics[row.id] else { return nil }
-        let items = config.sidebar.formats.topicTags[topics.mode].items(in: context).compactMap { item in
+        let items = config.sidebar.formats.topicTags[board.mode].items(in: context).compactMap { item in
             row.tags.indices.contains(item.index) ? CardTags.Item(shown: row.tags[item.index], text: item.text) : nil
         }
         return items.isEmpty ? nil : CardTags(placement: config.sidebar.tagPlacement, items: items, identifier: row.id.accessibilityID)
     }
 
-    /// Shows or hides the Bench, while the Topics list has one.
+    /// Shows or hides the Bench, while the Board has one.
     func toggleBench() {
-        guard topics.isBenchShown != nil else { return }
+        guard board.isBenchShown != nil else { return }
         benchPeek = nil
         benchShown.toggle()
     }
 
     /// Choose In Play needs a card that is not Pinned. In Sessions mode too: In Play is a place in
-    /// the Topics list, which both modes share.
+    /// the Board, which both modes share.
     var canChooseInPlay: Bool {
-        link.features.contains(.topics) && !changingTopic && topics.topicsEnabled && topics.rows.contains { !$0.isPinned }
+        link.features.contains(.topics) && !changingTopic && board.topicsEnabled && board.rows.contains { !$0.isPinned }
     }
 
-    /// The check step of Choose In Play, with the In Play Topics and the Guest Topics checked.
+    /// The check step of Choose In Play, with the cards In Play checked: the places and the Guests.
     func presentChooseInPlay(keepingHistory: Bool = false) {
         guard canChooseInPlay else { return }
-        let topics = self.topics.split.inPlay.filter { if case .topic = $0.id { return true } else { return false } }
-        let draft = CheckDraft(action: .chooseInPlay(places: topicConfig.inPlay), checked: Set(topics.map(\.id)))
+        let draft = CheckDraft(action: .chooseInPlay(places: topicConfig.inPlay), checked: Set(board.split.inPlay.map(\.id)))
         palette.begin(.check(draft), keepingHistory: keepingHistory)
     }
 
@@ -1083,10 +1116,10 @@ final class WorkspaceStore {
     }
 
     /// The card of the Location while it is In Play and the Bench has a card for Replace from Bench to put in its place.
-    /// In Sessions mode too: In Play is a place in the Topics list, which both modes share.
+    /// In Sessions mode too: In Play is a place on the Board, which both modes share.
     private var replaceableCard: TopicGroupID? {
-        guard link.features.contains(.topics), !changingTopic, topics.topicsEnabled, let active = topics.activeTopic else { return nil }
-        let cards = topics.split
+        guard link.features.contains(.topics), !changingTopic, board.topicsEnabled, let active = board.activeTopic else { return nil }
+        let cards = board.split
         return !cards.bench.isEmpty && cards.inPlay.contains { $0.id == active } ? active : nil
     }
 
@@ -1106,7 +1139,7 @@ final class WorkspaceStore {
 
     /// Going to a Settled Topic opens its group, so the Sidebar shows it; leaving the group closes it.
     func updateTopicSelection() {
-        let model = topics
+        let model = board
         var groups = topicGroups
         groups.follow(model)
         if groups != topicGroups { topicGroups = groups }
@@ -1139,7 +1172,7 @@ final class WorkspaceStore {
 
     /// What the window title names: the Location's Session, or the Open Place of its page.
     var locationTitle: String? {
-        if case .openPlace(let id) = location { return topics.place(ofOpenPlace: id).map { "Open Place \($0)" } }
+        if case .openPlace(let id) = location { return board.place(ofOpenPlace: id).map { "Open Place \($0)" } }
         return selectedWindow?.sessionName
     }
 
@@ -1206,7 +1239,7 @@ final class WorkspaceStore {
     @ObservationIgnored private var lastFocusCommand = Date.distantPast
     static let ownFocusChangeDelay: TimeInterval = 0.5
 
-    /// The Sidebar mode the user picked. `TopicsModel.mode` is the one shown, because the Config can turn a mode off.
+    /// The Sidebar mode the user picked. `BoardModel.mode` is the one shown, because the Config can turn a mode off.
     var sidebarMode: SidebarMode {
         didSet {
             defaults.set(sidebarMode.rawValue, forKey: "sidebarWorkView")
@@ -1214,7 +1247,7 @@ final class WorkspaceStore {
         }
     }
     /// The open Session cards, by name (names survive tmux server restarts, ids don't). Sessions mode and the
-    /// No Topic card in Topics mode share them, so a card opened in either is open in both.
+    /// No Topic card in the Board view share them, so a card opened in either is open in both.
     var openSessionCards: Set<String> {
         didSet { defaults.set(Array(openSessionCards), forKey: "expandedSessions") }
     }
@@ -1235,7 +1268,7 @@ final class WorkspaceStore {
     /// rebuilt on every tmux refresh, as it would be through `topics`.
     var shownSidebarMode: SidebarMode {
         var sidebar = configStore.config.sidebar
-        if !link.features.contains(.topics) { sidebar.topics = false }
+        if !link.features.contains(.topics) { sidebar.board = false }
         return sidebar.shownMode(chosen: sidebarMode)
     }
     /// One value for both Sidebar modes, off until the user turns it on.
@@ -1385,7 +1418,7 @@ final class WorkspaceStore {
         self.visitStore = visitStore
         LegacyVisits.move(from: defaults, to: visitStore)
         visits = VisitLog(times: (try? visitStore.times(environment: environment?.name)) ?? [:])
-        sidebarMode = SidebarMode(rawValue: defaults.string(forKey: "sidebarWorkView") ?? "") ?? .topics
+        sidebarMode = SidebarMode(rawValue: defaults.string(forKey: "sidebarWorkView") ?? "") ?? .board
         openSessionCards = Set(defaults.stringArray(forKey: "expandedSessions") ?? [])
         sidebarVisible = defaults.object(forKey: "sidebarVisible") as? Bool ?? true
         sessionsVisible = defaults.object(forKey: "sessionsVisible") as? Bool ?? true
@@ -1624,6 +1657,7 @@ final class WorkspaceStore {
         link = next
         records = []
         openPlaces = []
+        boardSessions = []
         subscribeToLink()
         startPolling()
         refresh()
@@ -1736,9 +1770,10 @@ final class WorkspaceStore {
     private func receive(_ event: EnvironmentEvent) {
         switch event {
         case .topics(let contents):
-            guard records != contents.records || openPlaces != contents.openPlaces else { return }
+            guard records != contents.records || openPlaces != contents.openPlaces || boardSessions != contents.boardSessions else { return }
             if records != contents.records { records = contents.records }
             if openPlaces != contents.openPlaces { openPlaces = contents.openPlaces }
+            if boardSessions != contents.boardSessions { boardSessions = contents.boardSessions }
             // A page whose Topic or Open Place is gone leaves now, not at the next change in tmux.
             route(.topicsChanged)
         case .snapshot(let snapshot):
@@ -2103,7 +2138,7 @@ final class WorkspaceStore {
     }
 
     /// Shows the Pane's Window with that Pane active.
-    func select(_ pane: TopicsModel.PaneRow) {
+    func select(_ pane: BoardModel.PaneRow) {
         sendView(.selectPane(target: pane.pane.id))
         select(pane.window)
     }
@@ -2222,7 +2257,7 @@ final class WorkspaceStore {
         case .pane(let id):
             return "Zoomed Pane: " + (panes.first { $0.id == id }?.label ?? id)
         case .topic(let id):
-            return "Topic: " + (topics.titles[id] ?? id)
+            return "Topic: " + (board.titles[id] ?? id)
         default: return nil
         }
     }
@@ -2253,7 +2288,7 @@ final class WorkspaceStore {
     }
 
     private func routingFacts(snapshot: TmuxSnapshot? = nil, allowAttach: Bool = false) -> Router.Facts {
-        let groups = Set(topics.rows.map(\.id)).union([.noTopic])
+        let groups = Set(board.rows.map(\.id)).union([.noTopic])
         let entries = Dictionary(uniqueKeysWithValues: groups.compactMap { group -> (TopicGroupID, WindowID)? in
             guard let window = entryWindow(of: group), let id = WindowID(rawValue: window.id) else { return nil }
             return (group, id)
@@ -2261,7 +2296,7 @@ final class WorkspaceStore {
         let tty = clientTTY ?? (link.isOnThisMac ? surface?.ttyName : nil)
         let client = snapshot?.clients.first { $0.tty == tty && !$0.isControl }
         return Router.Facts(windows: windows, ownClientWindow: client.flatMap { WindowID(rawValue: $0.windowID) },
-                            records: records, entryWindows: entries, openPlaces: topics.openPlaceIDs,
+                            records: records, entryWindows: entries, openPlaces: board.openPlaceIDs, boardSessions: Set(boardSessions.map(\.id)),
                             hasTerminal: surface != nil && surface?.processExited == false,
                             allowAttach: allowAttach, rememberedWindow: snapshot?.lastWindowID.flatMap(WindowID.init(rawValue:)),
                             initialWindow: Self.initialWindow(in: windows).flatMap { WindowID(rawValue: $0.id) }, now: Date())
@@ -2938,13 +2973,13 @@ final class WorkspaceStore {
     var sidebarModeSwitchRefusal: String? {
         if !link.features.contains(.topics) { return topicsUnavailableNote ?? "A Remote App Window shows only Sessions" }
         let sidebar = configStore.config.sidebar
-        if !sidebar.topics { return "sidebar.topics is off in the Config" }
+        if !sidebar.board { return "sidebar.board is off in the Config" }
         if !sidebar.sessions { return "sidebar.sessions is off in the Config" }
         return nil
     }
 
-    /// "Switch to Sessions" while Topics shows, "Switch to Topics" while Sessions shows.
-    var sidebarModeSwitchTitle: String { "Switch to " + (shownSidebarMode == .topics ? SidebarMode.sessions : .topics).rawValue }
+    /// "Switch to Sessions" while the Board shows, "Switch to Board" while the Sessions show.
+    var sidebarModeSwitchTitle: String { "Switch to " + (shownSidebarMode == .board ? SidebarMode.sessions : .board).title }
 
     /// Does what the other header button does, and shows a hidden Sidebar in the other mode. When only one mode can
     /// show, an Explanation Pill says why.
@@ -2953,7 +2988,7 @@ final class WorkspaceStore {
             pills.show(Pill(.explanation, title: "Not switched", value: refusal))
             return
         }
-        sidebarMode = shownSidebarMode == .topics ? .sessions : .topics
+        sidebarMode = shownSidebarMode == .board ? .sessions : .board
         if !sidebarShown { toggleSidebar() }
     }
 
@@ -3368,7 +3403,7 @@ final class WorkspaceStore {
             openPlacePage.selectedID = choices.moving(from: choices.selected(openPlacePage.selectedID)?.id, by: delta)?.id
             return true
         case .jumpTo?:
-            if let choice = choices.selected(openPlacePage.selectedID) { fillOpenPlaceFromPage(with: choice.topicID) }
+            if let choice = choices.selected(openPlacePage.selectedID) { fillOpenPlaceFromPage(with: choice.card) }
             return true
         default:
             return false

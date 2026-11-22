@@ -5,7 +5,7 @@ import XCTest
 @testable import MuxifyCore
 
 @Observable private final class PagerModel {
-    var mode = SidebarMode.topics
+    var mode = SidebarMode.board
     var animates = true
     var title = "Topics"
 }
@@ -86,7 +86,7 @@ final class SidebarPagerTests: XCTestCase {
         }
 
         private func hints(for mode: SidebarMode) -> HintPresentation {
-            let shown = Self.hintTarget(mode == .topics ? "topics-page" : "sessions-page")
+            let shown = Self.hintTarget(mode == .board ? "topics-page" : "sessions-page")
             return HintPresentation(modifiers: .control, keybinds: .defaults,
                                     targets: QuickSwitchTargets(cards: [shown], windows: [], topicWindows: [], tabs: [],
                                                                 sessions: [], topics: []),
@@ -244,7 +244,7 @@ final class SidebarPagerTests: XCTestCase {
             XCTAssertEqual(host.layer?.opacity, 1)
         }
         // The frames reach the layers in the same turn as the transforms, so the switch shows no frame between.
-        pages.slide.settle(.topics)
+        pages.slide.settle(.board)
         XCTAssertEqual(pages.hosts[0].layer?.frame.minX, 0)
         XCTAssertEqual(pages.hosts[1].layer?.frame.minX, pages.bounds.width)
     }
@@ -284,10 +284,10 @@ final class SidebarPagerTests: XCTestCase {
         // Motion turned off, then a press back to Topics.
         model.animates = false
         settle()
-        model.mode = .topics
+        model.mode = .board
         settle()
         XCTAssertGreaterThan(slide.updates, updates, "the committed mode never reached the pages container")
-        XCTAssertEqual(slide.mode, .topics)
+        XCTAssertEqual(slide.mode, .board)
         XCTAssertEqual(seen.cards, cards, "a swipe or a mode commit ran the cards' bodies again")
         XCTAssertEqual(BodyCount.counts["SidebarCard", default: 0], sidebarCards,
                        "the Hints that moved with the mode ran the Sidebar cards' bodies again")

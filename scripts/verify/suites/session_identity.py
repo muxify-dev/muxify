@@ -54,7 +54,7 @@ class SessionIdentity(unittest.TestCase):
         topic = self.topic('exact-topic')
         sid = self.session('debug/exact-topic', path, topic)
         key = 'palette-row-session-path:' + str(path)
-        for mode in ['topics', 'sessions']:
+        for mode in ['board', 'sessions']:
             self.s.act('press', 'sidebar-view-' + mode)
             rows = self.search('exact', key)
             self.assertTrue(self.s.has('palette-row-session:' + sid, rows), self.s.ids(rows))
@@ -99,7 +99,7 @@ class SessionIdentity(unittest.TestCase):
         source = self.session('move-source', path)
         window = self.s.tmux('display-message', '-p', '-t', source + ':', '#{window_id}')
         self.s.show(window)
-        self.s.act('press', 'sidebar-view-topics')
+        self.s.act('press', 'sidebar-view-board')
         row = 'topic-window-' + window
         self.s.reveal(row)
         self.s.act('action', row, 'Move Window to Topic…')

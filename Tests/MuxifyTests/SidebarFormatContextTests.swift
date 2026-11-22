@@ -18,16 +18,28 @@ final class SidebarFormatContextTests: XCTestCase {
         let branches = TopicBranches(records: [record], paths: [window.sessionPath, pane.path].map(Folder.local)) {
             $0 == "/trees/feature/.git/HEAD" ? "ref: refs/heads/feature" : nil
         }
-        let model = TopicsModel(records: [record], windows: [window], config: Config(), selection: TopicSelection(),
+        let model = BoardModel(records: [record], windows: [window], config: Config(), selection: TopicSelection(),
                                 agents: agents, panes: nil)
         let contexts = SidebarFormatContexts(model: model, windows: [window], panes: [pane], agents: agents,
                                              branches: branches, records: [record], sessionPaths: [], tabCounts: ["@1": 4])
         let topic = try XCTUnwrap(contexts.topics[.topic("topic")])
-        XCTAssertEqual(SidebarFormats.defaults.text(for: .topic, in: topic, mode: .topics).summary, "app-feature · 1 Window")
+        XCTAssertEqual(SidebarFormats.defaults.text(for: .topic, in: topic, mode: .board).summary, "app-feature · 1 Window")
         XCTAssertEqual(try SidebarFormat("#{S:#{branch}}").expand(in: topic), "feature")
         XCTAssertEqual(try SidebarFormat("#{P:#{session_name}/#{window_index}/#{pane_index}/#{branch}/#{tab_count}}").expand(in: topic),
                        "app-feature/2/3/feature/4")
         XCTAssertEqual(try SidebarFormat("#{pane_count}/#{agent_count}/#{agents_working}/#{agents_unread}").expand(in: topic), "1/1/1/1")
+    }
+
+    func testADormantBoardSessionShowsTheSessionThatItRemembers() throws {
+        let windows: [JSONValue] = [.object(["name": .string("shell")]), .object(["name": .string("logs")])]
+        let dormant = BoardSession(id: "g1", order: 0, isGuest: true, session: .object(["name": .string("notes"), "base_name": .string("notes"),
+                                                                     "windows": .array(windows)]))
+        let model = BoardModel(records: [], boardSessions: [dormant], windows: [], config: Config(), selection: TopicSelection())
+        let contexts = SidebarFormatContexts(model: model, windows: [], panes: [], agents: [], branches: TopicBranches(), records: [],
+                                             boardSessions: [dormant], sessionPaths: [], tabCounts: [:])
+        let text = SidebarFormats.defaults.text(for: .session, in: try XCTUnwrap(contexts.dormantBoardSessions["g1"]), mode: .board)
+        XCTAssertEqual(text.title, "notes")
+        XCTAssertEqual(text.summary, "2 Windows")
     }
 
     func testAgentDefaultsKeepGroupTextAndHideItInScopedSections() throws {
@@ -38,11 +50,11 @@ final class SidebarFormatContextTests: XCTestCase {
             let pane = TmuxPane(id: "%1", windowID: window.id, title: "Agent task", command: "sleep",
                                 agent: "codex", agentStatus: "working", unread: false)
             let agents = Agent.list(panes: [pane], windows: [window])
-            for mode in [SidebarMode.topics, .sessions] {
+            for mode in [SidebarMode.board, .sessions] {
                 for scope in [Config.Sidebar.AgentsScope.all, .active, .window] {
                     var config = Config()
                     config.sidebar.agentsScope = .init(scope)
-                    let model = TopicsModel(records: records, windows: [window], config: config,
+                    let model = BoardModel(records: records, windows: [window], config: config,
                                             selection: TopicSelection(), location: WindowID(rawValue: window.id).map(Location.window), mode: mode, agents: agents)
                     let contexts = SidebarFormatContexts(model: model, windows: [window], panes: [pane], agents: agents,
                                                          branches: TopicBranches(), records: records, sessionPaths: [], tabCounts: [:])
@@ -71,14 +83,14 @@ final class SidebarFormatContextTests: XCTestCase {
         ]
         let records = [TopicRecord(id: "topic", title: "Task", slug: "task")]
         let agents = Agent.list(panes: panes, windows: [window])
-        let model = TopicsModel(records: records, windows: [window], config: Config(),
+        let model = BoardModel(records: records, windows: [window], config: Config(),
                                 selection: TopicSelection(), location: WindowID(rawValue: window.id).map(Location.window), agents: agents)
         let contexts = SidebarFormatContexts(model: model, windows: [window], panes: panes, agents: agents,
                                              branches: TopicBranches(), records: records, sessionPaths: [], tabCounts: [:])
         var formats = SidebarFormats.defaults
         formats.agent.title = .init(try SidebarFormat("#{topic_title} / #{window_name}"))
         formats.agent.summary = .init(try SidebarFormat("#{pane_label} / #{pane_current_path} / #{agent_status}"))
-        let text = formats.text(for: .agent, in: try XCTUnwrap(contexts.panes["%1"]), mode: .topics)
+        let text = formats.text(for: .agent, in: try XCTUnwrap(contexts.panes["%1"]), mode: .board)
         XCTAssertEqual(text.title, "Task / shell")
         XCTAssertEqual(text.summary, "Agent task / /agent / working")
     }
@@ -91,7 +103,7 @@ final class SidebarFormatContextTests: XCTestCase {
         XCTAssertEqual(branches[.local(window.sessionPath)], "local")
         let pane = TmuxPane(id: "%1", windowID: window.id, path: window.sessionPath, command: "sleep",
                             agent: "codex", agentStatus: "working", unread: false)
-        let model = TopicsModel(records: [], windows: [window], config: Config(), selection: TopicSelection())
+        let model = BoardModel(records: [], windows: [window], config: Config(), selection: TopicSelection())
         let contexts = SidebarFormatContexts(model: model, windows: [window], panes: [pane], agents: [], branches: branches,
                                              records: [], sessionPaths: [], tabCounts: [:], isOnThisMac: false, features: [.git])
         XCTAssertEqual(try SidebarFormat("#{branch}").expand(in: XCTUnwrap(contexts.sessions["$1"])), "")
@@ -105,7 +117,7 @@ final class SidebarFormatContextTests: XCTestCase {
         let panes = [TmuxPane(id: "%1", windowID: "@1", command: "sleep", agent: "codex", agentStatus: "working", unread: false),
                      TmuxPane(id: "%2", windowID: "@2", command: "sleep", agent: "claude", agentStatus: "done", unread: false)]
         let agents = Agent.list(panes: panes, windows: windows)
-        let model = TopicsModel(records: [], windows: windows, config: config, selection: TopicSelection(), agents: agents)
+        let model = BoardModel(records: [], windows: windows, config: config, selection: TopicSelection(), agents: agents)
         XCTAssertEqual(model.agentsScope, .everyAgent)
         XCTAssertEqual(Set(model.visibleAgents.map(\.paneID)), ["%1", "%2"])
     }

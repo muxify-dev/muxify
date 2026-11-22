@@ -21,37 +21,46 @@ final class ReopenAtLaunchTests: XCTestCase {
          topic("settled", settled: true), topic("empty", remembers: false), topic("live", order: 4)]
     }
 
-    private var windows: [TmuxWindow] { [.fixture(topicID: "live"), .fixture(id: "@2", sessionID: "$2")] }
+    /// Two Board Sessions: `scratch` is live, `notes` is Dormant.
+    private var contents: TopicContents {
+        TopicContents(records: records, boardSessions: [BoardSession(id: "notes", order: 9, isGuest: true), BoardSession(id: "scratch", order: 10, isGuest: true)])
+    }
+
+    private var windows: [TmuxWindow] {
+        [.fixture(topicID: "live"), .fixture(id: "@2", sessionID: "$2"), .fixture(id: "@3", sessionID: "$3", savedSessionID: "scratch")]
+    }
+
+    private let dormantTopics: [BoardCardID] = [.topic("pinned"), .topic("in-play"), .topic("guest"), .topic("bench-1"), .topic("bench-2")]
 
     func testTheKeyOffReopensNoTopic() {
         var reopen = ReopenAtLaunch()
-        XCTAssertEqual(reopen.topics(in: "Local", enabled: false, records: records, windows: []), [])
-        XCTAssertEqual(reopen.topics(in: "Local", enabled: false, records: records, windows: windows), [])
+        XCTAssertEqual(reopen.cards(in: "Local", enabled: false, contents: contents, windows: []), [])
+        XCTAssertEqual(reopen.cards(in: "Local", enabled: false, contents: contents, windows: windows), [])
     }
 
-    func testTheKeyOnReopensEveryDormantOpenTopicAndNoSettledEmptyOrLiveOne() {
+    func testTheKeyOnReopensEveryDormantOpenTopicAndBoardSessionAndNoSettledEmptyOrLiveOne() {
         var reopen = ReopenAtLaunch()
-        XCTAssertEqual(reopen.topics(in: "Local", enabled: true, records: records, windows: windows),
-                       ["pinned", "in-play", "guest", "bench-1", "bench-2"])
+        XCTAssertEqual(reopen.cards(in: "Local", enabled: true, contents: contents, windows: windows), dormantTopics + [.session("notes")])
     }
 
-    func testAfterARestartEveryOpenTopicThatRemembersASessionIsChosen() {
-        XCTAssertEqual(ReopenAtLaunch.dormant(records: records, windows: []), ["pinned", "in-play", "guest", "bench-1", "bench-2", "live"])
+    func testAfterARestartEveryOpenTopicThatRemembersASessionAndEveryBoardSessionIsChosen() {
+        XCTAssertEqual(ReopenAtLaunch.dormant(contents: contents, windows: []),
+                       dormantTopics + [.topic("live"), .session("notes"), .session("scratch")])
     }
 
     func testEachEnvironmentGetsOneAnswerPerLaunchSoATmuxRestartReopensNothing() {
         var reopen = ReopenAtLaunch()
-        XCTAssertEqual(reopen.topics(in: "Local", enabled: true, records: records, windows: windows).count, 5)
-        // The tmux server restarted while Muxify ran: every open Topic is Dormant again.
-        XCTAssertEqual(reopen.topics(in: "Local", enabled: true, records: records, windows: []), [])
-        XCTAssertEqual(reopen.topics(in: "devbox", enabled: true, records: records, windows: windows).count, 5)
-        XCTAssertEqual(reopen.topics(in: "devbox", enabled: true, records: records, windows: windows), [])
+        XCTAssertEqual(reopen.cards(in: "Local", enabled: true, contents: contents, windows: windows).count, 6)
+        // The tmux server restarted while Muxify ran: every open Topic and Board Session is Dormant again.
+        XCTAssertEqual(reopen.cards(in: "Local", enabled: true, contents: contents, windows: []), [])
+        XCTAssertEqual(reopen.cards(in: "devbox", enabled: true, contents: contents, windows: windows).count, 6)
+        XCTAssertEqual(reopen.cards(in: "devbox", enabled: true, contents: contents, windows: windows), [])
     }
 
     func testTheFirstAnswerCountsEvenWithTheKeyOff() {
         var reopen = ReopenAtLaunch()
-        XCTAssertEqual(reopen.topics(in: "Local", enabled: false, records: records, windows: []), [])
+        XCTAssertEqual(reopen.cards(in: "Local", enabled: false, contents: contents, windows: []), [])
         // Turning the key on while Muxify runs waits for the next launch.
-        XCTAssertEqual(reopen.topics(in: "Local", enabled: true, records: records, windows: []), [])
+        XCTAssertEqual(reopen.cards(in: "Local", enabled: true, contents: contents, windows: []), [])
     }
 }

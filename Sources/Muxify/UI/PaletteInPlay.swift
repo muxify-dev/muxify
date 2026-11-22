@@ -1,6 +1,6 @@
 import MuxifyCore
 
-extension TopicsModel {
+extension BoardModel {
     /// The rows that are not Pinned, cut at the Guests line and the Bench line, without the Open Places.
     var split: InPlayCut<Row> { cut.compactMap(\.row) }
 }
@@ -12,15 +12,16 @@ struct OrderDraft: Equatable {
     let cards: [TopicGroupID]
     /// The In Play places.
     let places: Int
-    /// The checked Guest Topics. A Guest that no place takes stays a Guest, so it has no place on the Bench to choose.
-    var guests: Set<TopicGroupID> = []
+    /// The checked cards that never wait on the Bench: a Guest that no place takes stays a Guest, and a Board Session
+    /// that no place takes leaves the Board. Neither has a place on the Bench to choose.
+    var benchless: Set<TopicGroupID> = []
     /// The card chosen for each place so far.
     var placed: [TopicGroupID] = []
 
     /// The rows of the next place: the cards not placed yet, in list order, so ↩ on each place keeps the order. Once
-    /// the In Play places are full, without the Guests.
+    /// the In Play places are full, without the cards that never wait on the Bench.
     var remaining: [TopicGroupID] {
-        cards.filter { !placed.contains($0) && (placed.count < places || !guests.contains($0)) }
+        cards.filter { !placed.contains($0) && (placed.count < places || !benchless.contains($0)) }
     }
 
     var place: Int { placed.count + 1 }
@@ -55,33 +56,33 @@ extension CommandPalette {
 
     func orderRows(_ draft: OrderDraft) -> PickList<PaletteItem> {
         guard let store else { return .empty }
-        let candidates = draft.remaining.compactMap { id in store.topics.rows.first { $0.id == id } }.map { cardCandidate($0, choice: .card($0.id), prefix: "place-") }
+        let candidates = draft.remaining.compactMap { id in store.board.rows.first { $0.id == id } }.map { cardCandidate($0, choice: .card($0.id), prefix: "place-") }
         return FuzzyRanker.list([PickSectionInput(id: "place", title: "Place \(draft.place)", rule: .ranked(showsWhenEmpty: true),
                                                   candidates: candidates)], query: FuzzyQuery(query), rules: PickRules())
     }
 
-    /// A row for a card of the Topics list: a Topic, or a Locked Session. A query such as `#work` narrows by Tag. A step
+    /// A row for a card of the Board: a Topic, or a Board Session. A query such as `#work` narrows by Tag. A step
     /// that follows another one with the same cards gives its rows a `prefix`: SwiftUI keeps the accessibility action of
     /// a row with the same id, so a press there would still check the card.
-    func cardCandidate(_ row: TopicsModel.Row, choice: PaletteChoice, prefix: String = "") -> PickCandidate<PaletteItem> {
-        let kind: RowKind = if case .locked = row.id { .session } else { .topic }
+    func cardCandidate(_ row: BoardModel.Row, choice: PaletteChoice, prefix: String = "") -> PickCandidate<PaletteItem> {
+        let kind: RowKind = if case .session = row.id { .session } else { .topic }
         return PickCandidate(id: prefix + row.id.accessibilityID, kind: kind, title: row.title,
                              fields: (row.idleLabel.map { [.detail($0)] } ?? []) + row.sessions.map { .label($0.baseName) }
                                 + SearchField.tags(row.tags),
-                             trailing: store?.topics.activeTopic == row.id ? "Active" : "", mark: row.mark,
+                             trailing: store?.board.activeTopic == row.id ? "Active" : "", mark: row.mark,
                              pick: .available(PaletteItem(ref: .choice(choice))))
     }
 
-    /// The title of a card of the Topics list.
+    /// The title of a card of the Board.
     func cardTitle(_ id: TopicGroupID) -> String {
         if case .topic(let topic) = id { return topicTitle(id: topic) }
-        return store?.topics.rows.first { $0.id == id }?.title ?? ""
+        return store?.board.rows.first { $0.id == id }?.title ?? ""
     }
 
     /// Replace from Bench: one row for each Benched card.
     func benchRows() -> PickList<PaletteItem> {
         guard let store else { return .empty }
-        let cut = store.topics.split
+        let cut = store.board.split
         let candidates = cut.bench.map { cardCandidate($0, choice: .card($0.id)) }
         return FuzzyRanker.list([PickSectionInput(id: "bench", title: "Bench", rule: .ranked(showsWhenEmpty: true), candidates: candidates)],
                                 query: FuzzyQuery(query), rules: PickRules())

@@ -1,7 +1,7 @@
 import MuxifyCore
 
-extension DropPlacement where ID == TopicListID {
-    /// The placement of a dragged Topic or Locked card, as the Topic order takes it.
+extension DropPlacement where ID == BoardCardID {
+    /// The placement of a dragged Topic or Board Session card, as the Topic order takes it.
     var topicPlacement: TopicPlacement {
         switch self {
         case .before(let id): return .before(id)

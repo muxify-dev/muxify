@@ -19,10 +19,19 @@ public struct ConfigSyntaxError: Error, Equatable {
     public let problem: ConfigProblem
 }
 
-/// What the Sidebar lists above the Agents section. Raw values are the stored choice and the button titles.
+/// What the Sidebar lists above the Agents section: the Board or the Sessions. Raw values are the stored choice and the
+/// names of the keys stored by mode, as an older Muxify wrote them, so the Board keeps "Topics".
 public enum SidebarMode: String, Sendable {
-    case topics = "Topics"
+    case board = "Topics"
     case sessions = "Sessions"
+
+    /// The name that the buttons, the menus and the Commands show.
+    public var title: String {
+        switch self {
+        case .board: "Board"
+        case .sessions: "Sessions"
+        }
+    }
 }
 
 /// The Config: how Muxify itself behaves, read from a YAML file.
@@ -130,11 +139,12 @@ public struct Config: Equatable {
     }
 
     public struct Sidebar: Equatable {
-        public var topics = true
+        /// `sidebar.board`: the Board view.
+        public var board = true
         public var sessions = true
-        /// Animate switching between Topics and Sessions. False keeps swipes and buttons, with an instant switch.
+        /// Animate switching between the Board and the Sessions. False keeps swipes and buttons, with an instant switch.
         public var animateSwitching = true
-        /// The Agents section, for each Sidebar mode. Nil leaves that mode to the View menu's Show Agents;
+        /// The Agents section, for each Sidebar view. Nil leaves that view to the View menu's Show Agents;
         /// a value decides, and the menu item is disabled in that mode.
         public var agents = PerMode<Bool?>(nil)
         /// The Pane rows. Nil leaves the choice to the View menu's Show Panes; a value decides in both modes.
@@ -158,7 +168,7 @@ public struct Config: Equatable {
             case any
         }
 
-        /// When a Window row opens its hover label, in either Sidebar mode.
+        /// When a Window row opens its hover label, in either Sidebar view.
         public enum WindowTooltips: String {
             case off
             /// Only when the row cuts off its formatted title.
@@ -170,9 +180,9 @@ public struct Config: Equatable {
         public enum TagPlacement: String {
             /// No Tags on the cards.
             case none
-            /// One Tag Mark per Tag in the right corner of the title's first line, after the Pin or Lock.
+            /// One Tag Mark per Tag in the right corner of the title's first line, after the Pin or the Guest mark.
             case corner
-            /// The first Tag as a chip, and "+N", in the right corner of the title's first line, after the Pin or Lock.
+            /// The first Tag as a chip, and "+N", in the right corner of the title's first line, after the Pin or the Guest mark.
             case title
             /// Chips on their own line under the title.
             case line
@@ -180,28 +190,28 @@ public struct Config: Equatable {
 
         /// The mode the Sidebar shows when the user chose `chosen`; a mode that is off gives way to the other.
         public func shownMode(chosen: SidebarMode) -> SidebarMode {
-            topics && (!sessions || chosen == .topics) ? .topics : .sessions
+            board && (!sessions || chosen == .board) ? .board : .sessions
         }
 
-        /// A setting with its own value in Topics mode and in Sessions mode.
+        /// A setting with its own value in the Board view and in the Sessions view.
         public struct PerMode<Value: Equatable>: Equatable {
-            public var topics: Value
+            public var board: Value
             public var sessions: Value
 
             public init(_ both: Value) {
-                topics = both
+                board = both
                 sessions = both
             }
 
             public subscript(mode: SidebarMode) -> Value {
-                get { mode == .topics ? topics : sessions }
-                set { if mode == .topics { topics = newValue } else { sessions = newValue } }
+                get { mode == .board ? board : sessions }
+                set { if mode == .board { board = newValue } else { sessions = newValue } }
             }
         }
 
         /// Which Agents the Agents section lists.
         public enum AgentsScope: String {
-            /// Those of the Active Topic in Topics mode, of the selected Window's Session in Sessions mode.
+            /// Those of the Active Topic in the Board view, of the selected Window's Session in the Sessions view.
             case active
             case window
             case all
@@ -463,9 +473,9 @@ public struct Config: Equatable {
         #     # forward_agent: false  # Agent forwarding is enabled by default.
         #
         # sidebar:
-        #   topics: true
+        #   board: true
         #   sessions: true
-        #   # false switches Topics/Sessions instantly, without a swipe preview or animation.
+        #   # false switches the Board and the Sessions instantly, without a swipe preview or animation.
         #   animate_switching: true
         #   # The Agents section and the Pane rows. Leave them out to choose in the
         #   # View menu; a value here decides, and the menu item is disabled.
@@ -474,12 +484,12 @@ public struct Config: Equatable {
         #   # active: Agents of the Topic or Session you look at. all: every Agent.
         #   # window: Agents of the selected Window; every Agent if none is selected.
         #   agents_scope: active
-        #   # agents and agents_scope also take one value for each Sidebar mode:
+        #   # agents and agents_scope also take one value for each Sidebar view:
         #   # agents:
-        #   #   topics: true
+        #   #   board: true
         #   #   sessions: false
         #   # agents_scope:
-        #   #   topics: active
+        #   #   board: active
         #   #   sessions: all
         #   # A long Topic or Session card title wraps onto more lines. false keeps
         #   # it on one line and cuts it with "…" at the card's edge.
@@ -624,14 +634,14 @@ public struct Config: Equatable {
         #   # showed before, as tmux's last-window does; again, it goes back. It
         #   # acts whatever has Focus and is unbound.
         #   # select_next_topic_window and select_prev_topic_window step
-        #   # through every Window of the Active Topic in Topics mode, and
-        #   # wrap within the Session in Sessions mode. They are unbound.
+        #   # through every Window of the Active Topic in the Board view, and
+        #   # wrap within the Session in the Sessions view. They are unbound.
         #   # While the Browser has Focus, these four Window step actions
         #   # select the next or previous Tab instead.
         #   # select_next_session and select_prev_session step through the
-        #   # Sessions the Sidebar shows: in Topics mode, those of the Active
+        #   # Sessions the Sidebar shows: in the Board view, those of the Active
         #   # Topic. select_next_topic and select_prev_topic go to the Topic
-        #   # below or above in the Topics list. All four wrap and are unbound.
+        #   # below or above on the Board. All four wrap and are unbound.
         #   # The defaults:
         \(spell(ConfigAction.defaultSpelling, indent: "   "))
         #   # While a Command Palette is open, these act instead:
@@ -1096,13 +1106,16 @@ private struct ConfigReader {
     public mutating func readSidebar(_ node: Node) {
         for (name, key, value) in entries(of: node, "sidebar") {
             switch name {
-            case "topics", "sessions", "animate_switching", "panes":
+            case "board", "topics", "sessions", "animate_switching", "panes":
                 guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
                     problem(at: value, "sidebar.\(name): expected a boolean")
                     continue
                 }
                 switch name {
-                case "topics": config.sidebar.topics = enabled
+                case "board": config.sidebar.board = enabled
+                case "topics":
+                    problem(at: key, "sidebar.topics is now sidebar.board: rename the key")
+                    config.sidebar.board = enabled
                 case "sessions": config.sidebar.sessions = enabled
                 case "animate_switching": config.sidebar.animateSwitching = enabled
                 default: config.sidebar.panes = enabled
@@ -1195,7 +1208,7 @@ private struct ConfigReader {
                 if object == .topic, part == "tags" {
                     config.sidebar.formats.topicTags = perMode(value, place, SidebarFormats.defaults.topicTags,
                                                                expected: "a Format string or null") { node in
-                        if node.null != nil { return SidebarFormats.defaults.topicTags.topics }
+                        if node.null != nil { return SidebarFormats.defaults.topicTags.board }
                         guard node.tag == Yams.Tag(.str), let source = node.string else { return nil }
                         return try SidebarTagsFormat(source)
                     }
@@ -1756,8 +1769,9 @@ private struct ConfigReader {
         return mapping.map { ($0.key.string ?? "", $0.key, $0.value) }
     }
 
-    /// One value for both Sidebar modes, or a mapping with a value for `topics`, `sessions` or both.
-    /// A mode that the mapping leaves out keeps `current`.
+    /// One value for both Sidebar views, or a mapping with a value for `board`, `sessions` or both. The older key
+    /// `topics` still reads as `board`, with a problem that names the new key. A view that the mapping leaves out keeps
+    /// `current`.
     private mutating func perMode<Value>(_ node: Node, _ place: String, _ current: Config.Sidebar.PerMode<Value>,
                                          expected: String, parse: (Node) throws -> Value?) -> Config.Sidebar.PerMode<Value> {
         guard node.mapping != nil else {
@@ -1774,11 +1788,12 @@ private struct ConfigReader {
         }
         var result = current
         for (name, key, value) in entries(of: node, place) {
-            let modes: [String: SidebarMode] = ["topics": .topics, "sessions": .sessions]
+            let modes: [String: SidebarMode] = ["board": .board, "topics": .board, "sessions": .sessions]
             guard let mode = modes[name] else {
                 problem(at: key, "unknown key \"\(place).\(name)\"")
                 continue
             }
+            if name == "topics" { problem(at: key, "\(place).topics is now \(place).board: rename the key") }
             do {
                 guard let parsed = try parse(value) else {
                     problem(at: value, "\(place).\(name): expected \(expected)")

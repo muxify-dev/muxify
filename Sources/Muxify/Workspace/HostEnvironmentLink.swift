@@ -347,7 +347,12 @@ final class HostEnvironmentLink: EnvironmentLink {
             return
         }
         if state.topicContents != topics { events.send(.topics(state.topicContents)) }
-        if changes.contains(where: { if case .topic = $0 { false } else if case .openPlaces = $0 { false } else { true } }) {
+        if changes.contains(where: {
+            switch $0 {
+            case .topic, .openPlaces, .boardSessions: false
+            case .session, .server: true
+            }
+        }) {
             events.send(.changed)
         }
         if hadOwnClient, state.server?.ownClient == nil, sawOwnClient {
@@ -609,7 +614,7 @@ final class HostEnvironmentLink: EnvironmentLink {
     func topicsReloaded() async {}
     func topicsCaughtUp() async {}
 
-    func writeTopics<T>(locks: [SessionLock], _ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
+    func writeTopics<T>(_ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
         throw EnvironmentLinkError.unsupported("Writing Topic records on the Mac")
     }
 
@@ -657,7 +662,7 @@ final class HostEnvironmentLink: EnvironmentLink {
         }
     }
 
-    /// An older Muxify's Locked Sessions are a Mac's records only: nothing to gather on a Host.
+    /// An older Muxify's Board Sessions are a Mac's records only: nothing to gather on a Host.
     func gatherGuests(local: EnvironmentService?) async -> TopicFailure? { nil }
 
     func markTopicsRead(_ ids: Set<String>) async throws {

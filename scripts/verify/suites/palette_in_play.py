@@ -21,8 +21,17 @@ class PaletteInPlay(PaletteFixture):
     def config_text(cls, tags=None):
         return super().config_text(tags) + '  in_play: 2\n'
 
+    def base_board_session(self):
+        """The Board Session of the fixture's base Session in the state database, or None."""
+        return next((row for row in self.store.board_sessions() if row['session'].get('name') == 'base'), None)
+
+    def take_base_off_board(self):
+        for row in self.store.board_sessions():
+            if row['session'].get('name') == 'base':
+                self.store.remove_board_session(row['id'])
+
     def order(self, prefix):
-        """The ids of the check's Topics in the order of the Topics list."""
+        """The ids of the check's Topics in the order of the Board."""
         records = [r for r in self.records() if r['id'].startswith(prefix) and not r.get('settled_at')]
         return [r['id'] for r in sorted(records, key=lambda r: r.get('order', 0))]
 
@@ -58,10 +67,10 @@ class PaletteInPlay(PaletteFixture):
         s.act('action', 'palette-search', 'Space')
         rs = s.wait_rows(lambda rs: checked(rs) == [key('b'), key('c'), key('d')],
                          'Space in the empty field did not uncheck the first row: %s' % checked(s.rows()))
-        self.assertIn('3 checked for 2 In Play places. The last 1 go to the top of the Bench, and a Guest of them stays a Guest.', self.text('palette-note', rs))
+        self.assertIn('3 checked for 2 In Play places. The last 1 go to the top of the Bench; a Guest of them stays a Guest, and a Board Session leaves the Board.', self.text('palette-note', rs))
         s.act('press', key('a'))
         rs = s.wait_rows(lambda rs: len(checked(rs)) == 4, 'a click did not check the row: %s' % checked(s.rows()))
-        self.assertIn('4 checked for 2 In Play places. The last 2 go to the top of the Bench, and a Guest of them stays a Guest.', self.text('palette-note', rs))
+        self.assertIn('4 checked for 2 In Play places. The last 2 go to the top of the Bench; a Guest of them stays a Guest, and a Board Session leaves the Board.', self.text('palette-note', rs))
 
         s.act('action', 'palette-search', 'Accept')
         place = lambda name: 'palette-row-place-topic-cip-' + name
@@ -165,13 +174,12 @@ class PaletteInPlay(PaletteFixture):
         self.topic('mns-a', order=0)
         s.wait_rows(lambda rs: s.has('topic-mns-a', rs), 'the Topics did not appear')
         self.select(self.base)
-        lock = lambda: s.tmux('show-options', '-qv', '-t', 'base', '@muxify_lock').strip()
-        self.addCleanup(s.tmux_ok, 'set-option', '-u', '-t', 'base', '@muxify_lock')
-        self.assertEqual(lock(), '', 'the No Topic Session starts Locked')
+        self.addCleanup(self.take_base_off_board)
+        self.assertIsNone(self.base_board_session(), 'the No Topic Session starts on the Board')
         self.assertTrue(self.absent('Move Topic Down'), 'Move Topic Down shows on the No Topic Session')
 
         self.s.run_command('Move Topic Up')
-        wait(lambda: lock() != '', 'Move Topic Up did not Lock the No Topic Session, which makes it a Guest')
+        wait(self.base_board_session, 'Move Topic Up did not make the No Topic Session a Board Session among the Guests')
         s.wait_shown(self.base)
 
     def test_fast_presses_of_move_topic_up_on_the_no_topic_session_make_it_a_guest_and_then_the_top_guest(self):
@@ -181,16 +189,15 @@ class PaletteInPlay(PaletteFixture):
         self.topic('fns-g', order=2, guest=True)
         s.wait_rows(lambda rs: s.has('topic-fns-g', rs), 'the Topics did not appear')
         self.select(self.base)
-        lock = lambda: s.tmux('show-options', '-qv', '-t', 'base', '@muxify_lock').strip()
-        self.addCleanup(s.tmux_ok, 'set-option', '-u', '-t', 'base', '@muxify_lock')
-        self.assertEqual(lock(), '', 'the No Topic Session starts Locked')
+        self.addCleanup(self.take_base_off_board)
+        self.assertIsNone(self.base_board_session(), 'the No Topic Session starts on the Board')
 
         self.press_key('⌥⌘↑')
         self.press_key('⌥⌘↑')
-        wait(lambda: lock() != '', 'the first press did not Lock the No Topic Session, which makes it a Guest')
-        wait(lambda: float(lock()) < self.record('fns-g')['order'],
-             'the second press, made while the Lock ran, did not move the Locked Session above the Guest fns-g: '
-             'Lock order %s, Guest order %s' % (lock(), self.record('fns-g')['order']))
+        wait(self.base_board_session, 'the first press did not make the No Topic Session a Board Session among the Guests')
+        wait(lambda: self.base_board_session()['order'] < self.record('fns-g')['order'],
+             lambda: 'the second press, made while Make a Guest ran, did not move the Board Session above the Guest fns-g: '
+             'Board Session %s, Guest order %s' % (self.base_board_session(), self.record('fns-g')['order']))
         self.assertEqual(self.order('fns-'), ['fns-a', 'fns-b', 'fns-g'], 'a press moved a card that is not the Session')
 
 

@@ -74,7 +74,7 @@ final class SidebarSlide {
         let advances = !cancelled && abs(travel) > 0.035 && abs(projected) > 0.22
         let destination = advances ? min(1, max(0, start + (projected > 0 ? 1 : -1))) : start
         origin = nil
-        return destination == 0 ? .topics : .sessions
+        return destination == 0 ? .board : .sessions
     }
 
     /// A press of a header button ends the swipe that tracks.
@@ -207,7 +207,7 @@ final class SidebarSlide {
 
 extension SidebarMode {
     /// The pager's position at rest on this mode.
-    var rest: CGFloat { self == .topics ? 0 : 1 }
+    var rest: CGFloat { self == .board ? 0 : 1 }
 }
 
 /// The two Sidebar pages, each in its own `NSHostingView`, in an AppKit view that the pager places once. Each page's
@@ -298,7 +298,7 @@ final class SidebarPagesView: NSView {
 
     /// The page of the committed mode. The other one is out of the accessibility tree; its root does not know the
     /// mode, so this container alone decides.
-    var accessiblePages: [SidebarPageHost] { [hosts[slide.mode == .topics ? 0 : 1]] }
+    var accessiblePages: [SidebarPageHost] { [hosts[slide.mode == .board ? 0 : 1]] }
 
     override func accessibilityChildren() -> [Any]? {
         NSAccessibility.unignoredChildren(from: accessiblePages + subviews.filter { !($0 is SidebarPageHost) })

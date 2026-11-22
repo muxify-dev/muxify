@@ -43,7 +43,7 @@ enum PaletteCommand: String, CaseIterable {
     case showSidebar = "Show Sidebar"
     case hideSidebar = "Hide Sidebar"
     case switchToSessions = "Switch to Sessions"
-    case switchToTopics = "Switch to Topics"
+    case switchToBoard = "Switch to Board"
     case toggleBench = "Toggle Bench"
     case chooseInPlay = "Choose In Play…"
     case replaceFromBench = "Replace from Bench…"
@@ -120,7 +120,7 @@ enum PaletteCommand: String, CaseIterable {
         case .closeTab: .closeTab
         case .reopenClosedTab: .reopenClosedTab
         case .showSidebar, .hideSidebar: .toggleSidebar
-        case .switchToSessions, .switchToTopics: .toggleSidebarMode
+        case .switchToSessions, .switchToBoard: .toggleSidebarMode
         case .toggleBench: .toggleBench
         case .chooseInPlay: .chooseInPlay
         case .replaceFromBench: .replaceFromBench
@@ -169,7 +169,7 @@ enum PaletteCommand: String, CaseIterable {
         case .equalizePanes:
             .noMirror("An Agent spreads a Window's Panes out with tmux's own select-layout.")
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser, .showSidebar, .hideSidebar,
-             .switchToSessions, .switchToTopics, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
+             .switchToSessions, .switchToBoard, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
              .newAppWindow, .toggleBench:
             .noMirror("It changes only the view of one App Window.")
         case .newTab, .closeTab, .reopenClosedTab, .openLocation, .nextTab, .previousTab, .back, .forward, .reloadPage, .copyURL, .developerTools:
@@ -196,7 +196,7 @@ enum PaletteCommand: String, CaseIterable {
     var isLayout: Bool {
         switch self {
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser,
-             .showSidebar, .hideSidebar, .switchToSessions, .switchToTopics, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: true
+             .showSidebar, .hideSidebar, .switchToSessions, .switchToBoard, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: true
         default: false
         }
     }
@@ -205,7 +205,7 @@ enum PaletteCommand: String, CaseIterable {
 extension CommandPalette {
     var commands: [PaletteCommand] {
         guard let store else { return [] }
-        let canChangeTopics = store.link.features.contains(.topics) && !store.changingTopic && store.topics.topicsEnabled
+        let canChangeTopics = store.link.features.contains(.topics) && !store.changingTopic && store.board.topicsEnabled
         let hasOpenTopic = store.records.contains { $0.id == store.activeTopicID && $0.settledAt == nil }
         return PaletteCommand.allCases.filter { command in
             switch command {
@@ -217,13 +217,13 @@ extension CommandPalette {
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
             case .addSession, .settleTopic: return canChangeTopics && hasOpenTopic
             case .editTags: return canChangeTopics && hasOpenTopic && store.topicConfig.tags != nil
-            case .forgetTopic, .renameTopic, .setTopicNote: return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
+            case .forgetTopic, .renameTopic, .setTopicNote: return canChangeTopics && hasOpenTopic && store.board.mode == .board
             case .forgetSettledOlderThan: return canChangeTopics && store.records.contains { $0.settledAt != nil }
             case .clearTopicNote:
-                return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
+                return canChangeTopics && hasOpenTopic && store.board.mode == .board
                     && store.records.contains { $0.id == store.activeTopicID && $0.note != nil }
             case .removeSessionFromTopic:
-                return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
+                return canChangeTopics && hasOpenTopic && store.board.mode == .board
                     && store.selectedWindow?.topicID == store.activeTopicID
             case .moveTopicUp: return canChangeTopics && store.canMoveActiveCard(.previous)
             case .moveTopicDown: return canChangeTopics && store.canMoveActiveCard(.next)
@@ -254,9 +254,9 @@ extension CommandPalette {
             case .zoomPane, .splitPaneRight, .splitPaneDown, .splitPaneLeft, .splitPaneUp, .splitWindowRight, .splitWindowDown, .equalizePanes, .renameWindow: return store.selectedWindow != nil
             case .showSidebar: return !store.sidebarShown
             case .hideSidebar: return store.sidebarShown
-            case .switchToSessions, .switchToTopics:
+            case .switchToSessions, .switchToBoard:
                 return store.sidebarModeSwitchRefusal == nil && store.sidebarModeSwitchTitle == command.rawValue
-            case .toggleBench: return store.topics.isBenchShown != nil
+            case .toggleBench: return store.board.isBenchShown != nil
             case .chooseInPlay: return store.canChooseInPlay
             case .replaceFromBench: return store.canReplaceFromBench
             case .showTerminal: return !store.panelLayout.shows(.terminal) && store.canToggle(.terminal)
@@ -361,7 +361,7 @@ extension CommandPalette {
         case .developerTools: store.currentBrowser?.activeTab?.showDeveloperTools()
         case .clearBrowserHistory: begin(.clearHistory, keepingHistory: true)
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser,
-             .showSidebar, .hideSidebar, .switchToSessions, .switchToTopics, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: break
+             .showSidebar, .hideSidebar, .switchToSessions, .switchToBoard, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: break
         }
     }
 

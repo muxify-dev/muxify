@@ -194,6 +194,9 @@ struct CardHeader<Details: View>: View {
     var isPinned = false
     /// A Guest's card shows the Guest mark where a Pinned Topic's card shows its pin.
     var isGuest = false
+    /// A Board Session's card on the Board shows a small terminal glyph before its title, so it reads as a Session
+    /// among the Topic cards. The Sessions view's cards have none.
+    var isBoardSession = false
     var hintTarget: QuickSwitchTarget? = nil
     /// Words for the accessibility value after the open state, such as "Dormant".
     var notes: [String] = []
@@ -225,7 +228,7 @@ struct CardHeader<Details: View>: View {
 
     private var showsSummary: Bool { !isOpen && !summary.isEmpty }
 
-    /// Tag Marks and Tag chips sit in the right corner of the title's first line, after the Pin or Lock.
+    /// Tag Marks and Tag chips sit in the right corner of the title's first line, after the Pin or the Guest mark.
     private var tagsInTitleLine: CardTags? {
         guard let tags, tags.placement == .corner || tags.placement == .title else { return nil }
         return tags
@@ -243,6 +246,7 @@ struct CardHeader<Details: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .titleLine, spacing: 5) {
+                if isBoardSession { BoardSessionGlyph() }
                 ZStack(alignment: .topLeading) {
                     if !titleMarks.isEmpty {
                         Text(Highlighted(text: title, marks: titleMarks).attributed)
@@ -314,7 +318,8 @@ struct CardHeader<Details: View>: View {
     }
 
     private var accessibilityValue: String {
-        ([isOpen ? "expanded" : "collapsed"] + notes + [mark?.rawValue, note.map { "Note: " + $0 }].compactMap { $0 }).joined(separator: ", ")
+        ([isOpen ? "expanded" : "collapsed"] + (isBoardSession ? ["Board Session"] : []) + notes
+            + [mark?.rawValue, note.map { "Note: " + $0 }].compactMap { $0 }).joined(separator: ", ")
     }
 }
 
@@ -359,6 +364,15 @@ struct PinMark: View {
     }
 }
 
+/// The glyph before a Board Session's title on the Board.
+struct BoardSessionGlyph: View {
+    @Environment(\.interfaceFontSize) private var fontSize
+
+    var body: some View {
+        Image(systemName: "terminal").font(fontSize.font(9)).foregroundStyle(.secondary)
+    }
+}
+
 /// The mark after a Guest's title: a card In Play above `topics.in_play`.
 struct GuestMark: View {
     @Environment(\.interfaceFontSize) private var fontSize
@@ -371,7 +385,7 @@ struct GuestMark: View {
 struct CardBlock: Identifiable {
     /// The Session ID.
     let id: String
-    let items: [TopicsModel.SessionChildren.Item]
+    let items: [BoardModel.SessionChildren.Item]
 }
 
 /// The room between the rows of an open card, and between its Session blocks, where their divider is.
@@ -393,9 +407,9 @@ struct WindowRowDrag {
 private struct WindowUnit: Identifiable {
     let id: String
     let window: TmuxWindow?
-    var items: [TopicsModel.SessionChildren.Item]
+    var items: [BoardModel.SessionChildren.Item]
 
-    static func units(_ items: [TopicsModel.SessionChildren.Item]) -> [WindowUnit] {
+    static func units(_ items: [BoardModel.SessionChildren.Item]) -> [WindowUnit] {
         var units: [WindowUnit] = []
         for item in items {
             switch item {
@@ -429,7 +443,7 @@ struct CardList<Heading: View, Row: View>: View {
     var blockDrag: ListDrag<String>? = nil
     let windows: WindowRowDrag
     @ViewBuilder var heading: (CardBlock) -> Heading
-    @ViewBuilder var row: (TopicsModel.SessionChildren.Item) -> Row
+    @ViewBuilder var row: (BoardModel.SessionChildren.Item) -> Row
 
     @State private var windowDrag = ListDrag<String>(spacing: CardSpacing.row)
     @Environment(\.interfaceFontSize) private var fontSize
@@ -494,7 +508,7 @@ struct CardList<Heading: View, Row: View>: View {
         }
     }
 
-    private func markedRow(_ item: TopicsModel.SessionChildren.Item) -> some View {
+    private func markedRow(_ item: BoardModel.SessionChildren.Item) -> some View {
         row(item).overlay(alignment: .leading) {
             if let mark = agentSpines[item.id] {
                 AgentMarkSpine(mark: mark)

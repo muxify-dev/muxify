@@ -1,21 +1,24 @@
 import Foundation
 
-/// The Topic records and the Open Places at one moment.
+/// The Topic records, the Open Places and the Board Sessions at one moment.
 public struct TopicContents: Equatable, Sendable {
     /// The Topic records, in id order.
     public var records: [TopicRecord]
-    /// The Open Places of the Topics list.
+    /// The Open Places of the Board.
     public var openPlaces: [OpenPlace] = []
+    /// The Board Sessions, live or Dormant, in id order.
+    public var boardSessions: [BoardSession] = []
 
-    public init(records: [TopicRecord], openPlaces: [OpenPlace] = []) {
+    public init(records: [TopicRecord], openPlaces: [OpenPlace] = [], boardSessions: [BoardSession] = []) {
         self.records = records
         self.openPlaces = openPlaces
+        self.boardSessions = boardSessions
     }
 }
 
-/// The Topic records in the state database: the `topics` and `open_places` tables (`TopicTable`). It keeps no records
-/// of its own: every read and write goes to the database, so the app and the command line tool can both write. Each
-/// store has its own connection, which its copies share.
+/// The Topic records in the state database: the `topics`, `open_places` and `board_sessions` tables (`TopicTable`). It
+/// keeps no records of its own: every read and write goes to the database, so the app and the command line tool can
+/// both write. Each store has its own connection, which its copies share.
 public struct TopicStore: Sendable {
     public let paths: MuxifyPaths
     /// The Config's `topics.in_play`. A write that takes a card out of an In Play place leaves an Open Place by it.
@@ -44,8 +47,8 @@ public struct TopicStore: Sendable {
         }
     }
 
-    /// The records and the Open Places as the database has them now. Without a state folder there is nothing to read,
-    /// and the read creates nothing.
+    /// The records, the Open Places and the Board Sessions as the database has them now. Without a state folder there is nothing
+    /// to read, and the read creates nothing.
     public func read() throws -> TopicContents {
         try database.use(creating: false) { try TopicTable.contents($0) } ?? TopicContents(records: [])
     }
@@ -62,19 +65,18 @@ public struct TopicStore: Sendable {
     /// Runs `body` on the records as they are now, in one database transaction, and writes what `body` changed:
     /// a new record is inserted, a removed one deleted, and a changed one updates only the columns that differ, so a
     /// field that another writer changed meanwhile keeps its value unless `body` changed it too. A write that changes
-    /// nothing writes nothing. `locks` are the Locked Sessions as tmux has them now: a write that changes the order
-    /// places the Topics among them.
+    /// nothing writes nothing.
     @discardableResult
-    public func write<T>(locks: [SessionLock] = [], _ body: (inout TopicTransaction) throws -> T) throws -> T {
+    public func write<T>(_ body: (inout TopicTransaction) throws -> T) throws -> T {
         try database.use(creating: true) { connection in
             try connection.transaction {
                 let start = try TopicTable.contents(connection)
                 var transaction = TopicTransaction(records: start.records, inPlay: inPlay)
-                transaction.locks = locks
+                transaction.boardSessions = start.boardSessions
                 transaction.openPlaces = start.openPlaces
                 let result = try body(&transaction)
-                try TopicTable.save(from: start, to: TopicContents(records: transaction.records, openPlaces: transaction.openPlaces),
-                                    connection)
+                try TopicTable.save(from: start, to: TopicContents(records: transaction.records, openPlaces: transaction.openPlaces,
+                                                                   boardSessions: transaction.boardSessions), connection)
                 if let request { try RequestTable.start(request, now: Date(), connection) }
                 return result
             }
@@ -91,12 +93,11 @@ public struct TopicStore: Sendable {
 /// The records as one write found them in its transaction. Its changes are written when the write's body returns.
 public struct TopicTransaction {
     public private(set) var records: [TopicRecord]
-    /// The Locked Sessions, which share the records' order. A change of order that moves or renumbers them returns
-    /// the Locks it changed, and the caller writes them to tmux.
-    public internal(set) var locks: [SessionLock] = []
+    /// The Board Sessions, live or Dormant, which share the records' order.
+    public internal(set) var boardSessions: [BoardSession] = []
     /// The Open Places, which share the records' order.
     public internal(set) var openPlaces: [OpenPlace] = []
-    /// The Config's `topics.in_play`: a regular card that leaves an In Play place leaves an Open Place.
+    /// The Config's `topics.in_play`: a card that leaves an In Play place leaves an Open Place.
     public let inPlay: Int
 
     init(records: [TopicRecord], inPlay: Int = Config.Topics.defaultInPlay) {
@@ -114,26 +115,26 @@ public struct TopicTransaction {
         }
     }
 
-    public var entries: [TopicListEntry] {
-        records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) + openPlaces.map(TopicListEntry.openPlace)
+    public var entries: [BoardCard] {
+        records.map(BoardCard.topic) + boardSessions.map(BoardCard.session) + openPlaces.map(BoardCard.openPlace)
     }
 
-    /// Adds a new Topic as a Guest: at the end of the Guests, or in the place of the Lock of `lockedSessionID`, which then
-    /// ends. A Pinned record goes last among the Pinned Topics. An id that a record has is taken. The plan that makes the Topic ends the Lock in tmux, so the result leaves it out.
-    @discardableResult
-    public mutating func create(_ record: TopicRecord, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLockChange] {
+    /// Adds a new Topic as a Guest at the end of the Guests. In the place of the Board Session `replacedSession`, whose
+    /// card leaves the Board, it takes that card's place and section: its In Play place, or its place among the Guests.
+    /// A Pinned record goes last among the Pinned Topics. An id that a record has is taken.
+    public mutating func create(_ record: TopicRecord, replacingSession replacedSession: String? = nil) throws {
         try TopicStore.check(record)
         guard !records.contains(where: { $0.id == record.id }) else {
             throw CocoaError(.fileWriteFileExists)
         }
-        if let lock = locks.first(where: { $0.sessionID == lockedSessionID }) {
+        if let replaced = boardSessions.first(where: { $0.id == replacedSession }) {
             var placed = record
-            placed.order = lock.order
-            placed.isGuest = true
-            return put(TopicListChange([.topic(placed)], endedLocks: [lock.sessionID])).filter { $0 != .end(sessionID: lock.sessionID) }
+            placed.order = replaced.order
+            placed.isGuest = TopicOrder.cut(entries, inPlay: inPlay).guests.contains { $0.id == .session(replaced.id) }
+            return put(BoardChange([.topic(placed)], endedSessions: [replaced.id]))
         }
         if record.isPinned { return put(TopicOrder.inserting(record, inPlay: inPlay, in: entries)) }
-        return put(TopicOrder.insertingGuest(record, inPlay: inPlay, in: entries))
+        put(TopicOrder.insertingGuest(record, inPlay: inPlay, in: entries))
     }
 
     public mutating func update(_ id: String, _ mutate: (inout TopicRecord) throws -> Void) throws {
@@ -156,13 +157,15 @@ public struct TopicTransaction {
     /// Writes what a plan changed from the record it read, onto the record as it is now: for each column,
     /// `after` when it differs from `before`, else the value in the database. A Tag that another writer set while
     /// the plan ran stays. When two writers change one column, the last write wins for that column. A Topic that is
-    /// not in the database is created only when the plan read no previous record, as `create` does.
-    @discardableResult
-    public mutating func apply(_ change: TopicRecordChange, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLockChange] {
+    /// not in the database is created only when the plan read no previous record, as `create` does, in the place of
+    /// the Board Session `endedSession`. When the record is there, that card just leaves the Board: its Session went
+    /// into the Topic.
+    public mutating func apply(_ change: TopicRecordChange, endingSession endedSession: String? = nil) throws {
         guard let current = records.first(where: { $0.id == change.after.id }) else {
             guard change.before == nil else { throw Failure.topicUnavailable(change.after.id) }
-            return try create(change.after, replacingLockOf: lockedSessionID)
+            return try create(change.after, replacingSession: endedSession)
         }
+        if let endedSession { takeOffBoard(endedSession) }
         let before = TopicTable.values(of: change.before ?? TopicRecord(id: current.id))
         let after = TopicTable.values(of: change.after)
         var merged = TopicTable.values(of: current)
@@ -174,7 +177,7 @@ public struct TopicTransaction {
         if current.settledAt != nil, record.settledAt == nil {
             return put(TopicOrder.inserting(record, inPlay: inPlay, in: entries))
         }
-        return put([.topic(record)])
+        put([.topic(record)])
     }
 
     /// Changes the Tags of the open Topic `id`, and nothing else in it. The app and the CLI both change Tags here,
@@ -193,138 +196,130 @@ public struct TopicTransaction {
         records[index].note = line.isEmpty ? nil : line
     }
 
-    @discardableResult
-    public mutating func forget(_ ids: [String]) throws -> [SessionLockChange] {
+    public mutating func forget(_ ids: [String]) throws {
         if let missing = ids.first(where: { id in !records.contains { $0.id == id } }) { throw Failure.topicUnavailable(missing) }
         let before = entries
         let forgotten = Set(ids)
         records.removeAll { forgotten.contains($0.id) }
-        return put(TopicListChange([]), from: before)
+        put(BoardChange([]), from: before)
     }
 
-    @discardableResult
-    public mutating func move(_ id: TopicListID, to placement: TopicPlacement) throws -> [SessionLockChange] {
+    public mutating func move(_ id: BoardCardID, to placement: TopicPlacement) throws {
         put(try TopicOrder.moving(id, to: placement, in: entries))
     }
 
-    @discardableResult
-    public mutating func trade(_ id: TopicListID, with other: TopicListID) throws -> [SessionLockChange] {
+    public mutating func trade(_ id: BoardCardID, with other: BoardCardID) throws {
         put(try TopicOrder.trading(id, with: other, inPlay: inPlay, in: entries))
     }
 
     /// Writes what one step of a card does (`TopicCards.step`), with the operation that each effect already has.
-    /// `atEnd` and `hidden` change nothing, and `refused` throws its failure.
-    @discardableResult
-    public mutating func apply(_ outcome: TopicCards.Outcome, to id: TopicListID) throws -> [SessionLockChange] {
-        func topicID() throws -> String {
-            guard case .topic(let topic) = id else { throw TopicOrder.Failure.guestSession }
-            return topic
-        }
+    /// `atEnd` and `hidden` change nothing. A new Board Session comes through `addToBoard`, not through Make a Guest.
+    public mutating func apply(_ outcome: TopicCards.Outcome, to id: BoardCardID) throws {
         switch outcome {
-        case .reorder(let placement): return try move(id, to: placement)
-        case .toGuests: return put(try TopicOrder.sendingToGuests(topicID(), inPlay: inPlay, in: entries))
-        case .fill(let place): return try fillOpenPlace(place, with: topicID(), inPlay: inPlay)
-        case .trade(let other): return try trade(id, with: other)
-        case .takePlace: return put(try TopicOrder.takingNextPlace(topicID(), inPlay: inPlay, in: entries))
-        case .bench:
-            guard case .lock(let sessionID) = id else { return try bench(topicID(), inPlay: inPlay) }
-            return unlock(sessionID)
-        case .makeGuest:
-            guard case .lock(let sessionID) = id else { return try makeGuest(topicID(), inPlay: inPlay) }
-            return lock(sessionID)
-        case .refused(let failure): throw failure
-        case .atEnd, .hidden: return []
+        case .reorder(let placement): try move(id, to: placement)
+        case .toGuests: put(try TopicOrder.sendingToGuests(id, inPlay: inPlay, in: entries))
+        case .fill(let place): try fillOpenPlace(place, with: id, inPlay: inPlay)
+        case .trade(let other): try trade(id, with: other)
+        case .takePlace: put(try TopicOrder.takingNextPlace(id, inPlay: inPlay, in: entries))
+        case .bench: try bench(id, inPlay: inPlay)
+        case .makeGuest: try makeGuest(id, inPlay: inPlay)
+        case .atEnd, .hidden: break
         }
     }
 
-    @discardableResult
-    public mutating func pin(_ id: String, _ pinned: Bool) throws -> [SessionLockChange] {
+    public mutating func pin(_ id: String, _ pinned: Bool) throws {
         put(try TopicOrder.pinning(id, pinned, inPlay: inPlay, in: entries))
     }
 
-    @discardableResult
-    public mutating func chooseInPlay(_ chosen: [TopicListID], inPlay: Int) throws -> [SessionLockChange] {
+    public mutating func chooseInPlay(_ chosen: [BoardCardID], inPlay: Int) throws {
         put(try TopicOrder.choosingInPlay(chosen, inPlay: inPlay, in: entries))
     }
 
-    /// Bench of a Topic: the In Play Topic goes to the top of the Bench. From a place it leaves an Open Place there.
-    @discardableResult
-    public mutating func bench(_ id: String, inPlay: Int) throws -> [SessionLockChange] {
+    /// Bench: the In Play Topic goes to the top of the Bench, and a Board Session leaves the Board. From a place the card
+    /// leaves an Open Place there.
+    public mutating func bench(_ id: BoardCardID, inPlay: Int) throws {
         put(try TopicOrder.benching(id, inPlay: inPlay, in: entries))
     }
 
-    /// The Guest Topic or Benched Topic `id` fills the Open Place `place`.
-    @discardableResult
-    public mutating func fillOpenPlace(_ place: String, with id: String, inPlay: Int) throws -> [SessionLockChange] {
+    /// The Guest or Benched Topic `id` fills the Open Place `place`.
+    public mutating func fillOpenPlace(_ place: String, with id: BoardCardID, inPlay: Int) throws {
         put(try TopicOrder.fillingOpenPlace(place, with: id, inPlay: inPlay, in: entries))
     }
 
-    @discardableResult
-    public mutating func replaceFromBench(_ card: TopicListID, with benched: TopicListID, inPlay: Int) throws -> [SessionLockChange] {
+    public mutating func replaceFromBench(_ card: BoardCardID, with benched: BoardCardID, inPlay: Int) throws {
         put(try TopicOrder.replacingFromBench(card, with: benched, inPlay: inPlay, in: entries))
     }
 
-    @discardableResult
-    public mutating func makeGuest(_ id: String, inPlay: Int) throws -> [SessionLockChange] {
+    public mutating func makeGuest(_ id: BoardCardID, inPlay: Int) throws {
         put(try TopicOrder.makingGuest(id, inPlay: inPlay, in: entries))
     }
 
-    /// Writes the order in the three sections, so each Locked Session that an older Muxify kept among the Topics is a Guest.
-    @discardableResult
-    public mutating func gatherGuests(inPlay: Int) -> [SessionLockChange] {
+    /// Writes the order in the three sections, so each Board Session that an older Muxify kept among the Topics is a Guest.
+    public mutating func gatherGuests(inPlay: Int) {
         put(TopicOrder.gatheringGuests(inPlay: inPlay, in: entries))
     }
 
-    /// Locks the Session at the end of the Guests. A Session that is already Locked keeps its place.
-    @discardableResult
-    public mutating func lock(_ sessionID: String) -> [SessionLockChange] {
-        guard !locks.contains(where: { $0.sessionID == sessionID }) else { return [] }
-        return put(TopicOrder.appendingLock(of: sessionID, inPlay: inPlay, in: entries))
+    /// Make a Guest of a No Topic Session: its new Board Session goes to the end of the Guests. A Board Session with
+    /// that id keeps its place, so a second Make a Guest of the same Session changes nothing.
+    public mutating func addToBoard(_ session: BoardSession) {
+        guard !boardSessions.contains(where: { $0.id == session.id }) else { return }
+        put(TopicOrder.appendingBoardSession(session, inPlay: inPlay, in: entries))
     }
 
-    /// Ends the Lock of the Session. It is a Guest that leaves, so it leaves no Open Place.
-    @discardableResult
-    public mutating func unlock(_ sessionID: String) -> [SessionLockChange] {
-        guard locks.contains(where: { $0.sessionID == sessionID }) else { return [] }
-        return put(TopicListChange([], endedLocks: [sessionID]))
+    /// Takes the Board Session's card off the Board, when its Session went into a Topic or ended. From an In Play
+    /// place it leaves an Open Place there; a Guest leaves none.
+    public mutating func takeOffBoard(_ id: String) {
+        guard boardSessions.contains(where: { $0.id == id }) else { return }
+        let before = entries
+        boardSessions.removeAll { $0.id == id }
+        put(BoardChange([]), from: before)
     }
 
-    @discardableResult
-    private mutating func put(_ changed: [TopicListEntry]) -> [SessionLockChange] {
-        put(TopicListChange(changed))
+    /// The import of a card that an older Muxify kept in the tmux option `BoardSession.legacyOption`: it keeps the
+    /// order that the option had. A Board Session with that id stays as it is.
+    public mutating func importBoardSession(_ session: BoardSession) {
+        guard !boardSessions.contains(where: { $0.id == session.id }) else { return }
+        boardSessions.append(session)
     }
 
-    /// Writes the change into the transaction and returns what tmux must change. A Settled or Pinned Topic loses its
-    /// Guest mark. When a regular card left an In Play place since `before`, it leaves an Open Place there
+    /// Saves a Board Session's Remembered Session, with the same rule as `remember(_:of:)`: the last write wins, and
+    /// False, with nothing written, when the card has left the Board meanwhile.
+    public mutating func remember(_ session: JSONValue, ofBoardSession id: String) -> Bool {
+        guard let index = boardSessions.firstIndex(where: { $0.id == id }) else { return false }
+        boardSessions[index].session = session
+        return true
+    }
+
+    private mutating func put(_ changed: [BoardCard]) {
+        put(BoardChange(changed))
+    }
+
+    /// Writes the change into the transaction. A Settled or Pinned Topic loses its Guest mark. When a card left an In
+    /// Play place since `before`, and the change did not fill or open that place itself, it leaves an Open Place there
     /// (`TopicOrder.keepingPlaces`).
-    private mutating func put(_ change: TopicListChange, from before: [TopicListEntry]? = nil) -> [SessionLockChange] {
+    private mutating func put(_ change: BoardChange, from before: [BoardCard]? = nil) {
         let before = before ?? entries
-        let written = apply(change)
-        return merging(written, apply(TopicOrder.keepingPlaces(from: before, in: entries, inPlay: inPlay)))
+        apply(change)
+        apply(TopicOrder.keepingPlaces(from: before, in: entries, inPlay: inPlay,
+                                       handled: Set(change.endedSessions.map(BoardCardID.session))))
     }
 
-    private mutating func apply(_ change: TopicListChange) -> [SessionLockChange] {
+    private mutating func apply(_ change: BoardChange) {
         for var record in change.entries.records {
             if record.settledAt != nil || record.isPinned { record.isGuest = false }
             if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
             else { records.append(record) }
         }
-        for lock in change.entries.locks {
-            if let index = locks.firstIndex(where: { $0.sessionID == lock.sessionID }) { locks[index] = lock }
-            else { locks.append(lock) }
+        for boardSession in change.entries.boardSessions {
+            if let index = boardSessions.firstIndex(where: { $0.id == boardSession.id }) { boardSessions[index] = boardSession }
+            else { boardSessions.append(boardSession) }
         }
         for place in change.entries.openPlaces {
             if let index = openPlaces.firstIndex(where: { $0.id == place.id }) { openPlaces[index] = place }
             else { openPlaces.append(place) }
         }
-        locks.removeAll { change.endedLocks.contains($0.sessionID) }
+        boardSessions.removeAll { change.endedSessions.contains($0.id) }
         openPlaces.removeAll { change.closedPlaces.contains($0.id) }
-        return change.entries.locks.map(SessionLockChange.set) + change.endedLocks.map { SessionLockChange.end(sessionID: $0) }
-    }
-
-    /// One change for each Session: the later one wins.
-    private func merging(_ first: [SessionLockChange], _ second: [SessionLockChange]) -> [SessionLockChange] {
-        first.filter { change in !second.contains { $0.sessionID == change.sessionID } } + second
     }
 }
 

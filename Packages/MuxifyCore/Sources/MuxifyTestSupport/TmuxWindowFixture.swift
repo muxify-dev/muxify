@@ -10,7 +10,7 @@ extension TmuxWindow {
         paneTitle: String = "", path: String = "/work", command: String = "zsh", isActive: Bool = true, paneCount: Int = 1,
         hasBell: Bool = false, sessionActivity: Int = 0, agent: String = "", storedBrowser: StoredBrowser = StoredBrowser(),
         openRequests: [String] = [], homeDirectory: String? = nil, hostName: String? = nil, isRemote: Bool = false,
-        sourceID: String = "", topicID: String? = nil, savedSessionID: String = "", lockOrder: Double? = nil,
+        sourceID: String = "", topicID: String? = nil, savedSessionID: String = "", legacyLockOrder: Double? = nil,
         sessionPath: String = "", activePaneID: String = "", startCommand: String = "", sessionCreated: Int = 0,
         layout: String = "", isZoomed: Bool = false, isLastWindow: Bool = false
     ) -> TmuxWindow {
@@ -24,7 +24,7 @@ extension TmuxWindow {
         window.sourceID = sourceID
         window.topicID = topicID
         window.savedSessionID = savedSessionID
-        window.lockOrder = lockOrder
+        window.legacyLockOrder = legacyLockOrder
         window.sessionPath = sessionPath
         window.activePaneID = activePaneID
         window.startCommand = startCommand

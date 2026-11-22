@@ -10,23 +10,23 @@ final class TopicOrderTests: XCTestCase {
         return record
     }
 
-    private func applying(_ edits: [TopicListEntry], to entries: [TopicListEntry]) -> [TopicListEntry] {
+    private func applying(_ edits: [BoardCard], to entries: [BoardCard]) -> [BoardCard] {
         entries.map { entry in edits.first { $0.id == entry.id } ?? entry }
             + edits.filter { edit in !entries.contains { $0.id == edit.id } }
     }
 
-    /// Each entry's Topic id, or `lock:` and its Session ID.
-    private func ids(_ entries: [TopicListEntry]) -> [String] {
+    /// Each entry's Topic id, or `session:` and its Board Session id.
+    private func ids(_ entries: [BoardCard]) -> [String] {
         entries.map {
             switch $0.id {
             case .topic(let id): return id
-            case .lock(let sessionID): return "lock:" + sessionID
+            case .session(let id): return "session:" + id
             case .openPlace(let id): return "open:" + id
             }
         }
     }
 
-    private func shown(_ entries: [TopicListEntry]) -> [String] { ids(TopicOrder.sorted(entries)) }
+    private func shown(_ entries: [BoardCard]) -> [String] { ids(TopicOrder.sorted(entries)) }
 
     func testADraggedCardPassesAnotherWhenThePointerPassesItsMiddle() {
         // a at 0–40, b at 46–146, c at 152–192.
@@ -306,7 +306,7 @@ final class TopicOrderTests: XCTestCase {
     }
 
     func testMovesUseOnlyTheMovedRankWhenThereIsAFiniteGap() throws {
-        let entries = [record("a", order: 0), record("b", order: 1), record("c", order: 2), record("d", order: 3)].map(TopicListEntry.topic)
+        let entries = [record("a", order: 0), record("b", order: 1), record("c", order: 2), record("d", order: 3)].map(BoardCard.topic)
         let cases: [(String, TopicPlacement, [String])] = [
             ("a", .after(.topic("d")), ["b", "c", "d", "a"]),
             ("d", .before(.topic("a")), ["d", "a", "b", "c"]),
@@ -330,7 +330,7 @@ final class TopicOrderTests: XCTestCase {
     func testEqualAbsentAndExhaustedRanksNormalizeOnlyOpenRecords() throws {
         let cases: [[Double?]] = [[0, 0, 0, 0], [nil, nil, nil, nil], [0, 1, Double(1).nextUp, 2]]
         for ranks in cases {
-            let entries = zip(["a", "b", "c", "d"], ranks).map { TopicListEntry.topic(record($0, order: $1)) }
+            let entries = zip(["a", "b", "c", "d"], ranks).map { BoardCard.topic(record($0, order: $1)) }
             let reordered = applying(try TopicOrder.moving(.topic("d"), to: .before(.topic("c")), in: entries), to: entries)
             XCTAssertEqual(shown(reordered), ["a", "b", "d", "c"])
             XCTAssertTrue(reordered.allSatisfy { $0.order?.isFinite == true })
@@ -342,7 +342,7 @@ final class TopicOrderTests: XCTestCase {
         }
         var settled = record("settled", order: -100)
         settled.settledAt = "1970-01-01T00:00:00Z"
-        let entries = [record("a", order: 0), record("b", order: 0), record("c", order: 0), settled].map(TopicListEntry.topic)
+        let entries = [record("a", order: 0), record("b", order: 0), record("c", order: 0), settled].map(BoardCard.topic)
         let edits = try TopicOrder.moving(.topic("c"), to: .before(.topic("b")), in: entries)
         XCTAssertEqual(shown(applying(edits, to: entries)), ["a", "c", "b"])
         XCTAssertFalse(ids(edits).contains("settled"))
@@ -354,12 +354,12 @@ final class TopicOrderTests: XCTestCase {
     }
 
     func testAReturningTopicGoesToTheTopOfTheBenchAfterMovesAndAtFiniteLimits() throws {
-        let original = [record("a", order: 0), record("b", order: 1), record("c", order: 2)].map(TopicListEntry.topic)
+        let original = [record("a", order: 0), record("b", order: 1), record("c", order: 2)].map(BoardCard.topic)
         let moved = applying(try TopicOrder.moving(.topic("c"), to: .before(.topic("a")), in: original), to: original)
         let new = TopicRecord(newTopic: "new", title: "New", slug: "new", now: Date())
         let placed = applying(TopicOrder.inserting(new, inPlay: 2, in: moved), to: moved)
         XCTAssertEqual(shown(placed), ["c", "a", "new", "b"])
-        let extreme = [record("a", order: -.greatestFiniteMagnitude), record("b", order: .greatestFiniteMagnitude)].map(TopicListEntry.topic)
+        let extreme = [record("a", order: -.greatestFiniteMagnitude), record("b", order: .greatestFiniteMagnitude)].map(BoardCard.topic)
         let inserted = applying(TopicOrder.inserting(record("new", order: nil), inPlay: 5, in: extreme), to: extreme)
         XCTAssertEqual(shown(inserted), ["a", "b", "new"], "with a free place, after the last place")
         XCTAssertTrue(inserted.allSatisfy { $0.order?.isFinite == true })
@@ -368,26 +368,26 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertTrue(bottom.allSatisfy { $0.order?.isFinite == true })
     }
 
-    func testALockGoesToTheEndOfTheGuestsAndMovesAsAnUnpinnedTopic() throws {
+    func testANewBoardSessionGoesToTheEndOfTheGuestsAndMovesAsAnUnpinnedTopic() throws {
         var pinned = record("p", order: 9)
         pinned.isPinned = true
-        let entries = [pinned, record("a", order: 0), record("b", order: 1)].map(TopicListEntry.topic)
-            + [.lock(SessionLock(sessionID: "$1", order: 0.5))]
-        XCTAssertEqual(shown(entries), ["p", "a", "lock:$1", "b"])
-        let locked = applying(TopicOrder.appendingLock(of: "$2", inPlay: 5, in: entries), to: entries)
-        XCTAssertEqual(shown(locked), ["p", "a", "b", "lock:$1", "lock:$2"], "the Lock that was among the Topics goes to the Guests too")
-        let moved = applying(try TopicOrder.moving(.lock(sessionID: "$2"), to: .before(.topic("p")), in: locked), to: locked)
-        XCTAssertEqual(shown(moved), ["p", "lock:$2", "a", "b", "lock:$1"], "a Lock is never Pinned, so it stays below the Pinned Topics")
+        let entries = [pinned, record("a", order: 0), record("b", order: 1)].map(BoardCard.topic)
+            + [.session(BoardSession(id: "$1", order: 0.5, isGuest: true))]
+        XCTAssertEqual(shown(entries), ["p", "a", "session:$1", "b"])
+        let appended = applying(TopicOrder.appendingBoardSession(BoardSession(id: "$2", order: 0, isGuest: true), inPlay: 5, in: entries), to: entries)
+        XCTAssertEqual(shown(appended), ["p", "a", "b", "session:$1", "session:$2"], "the Board Session that was among the Topics goes to the Guests too")
+        let moved = applying(try TopicOrder.moving(.session("$2"), to: .before(.topic("p")), in: appended), to: appended)
+        XCTAssertEqual(shown(moved), ["p", "session:$2", "a", "b", "session:$1"], "a Board Session is never Pinned, so it stays below the Pinned Topics")
         let added = applying(TopicOrder.inserting(record("new", order: nil), inPlay: 5, in: moved), to: moved)
-        XCTAssertEqual(shown(added), ["p", "lock:$2", "a", "b", "new", "lock:$1"], "a returning Topic goes after the last place, and a Lock takes none")
+        XCTAssertEqual(shown(added), ["p", "session:$2", "a", "b", "new", "session:$1"], "a returning Topic goes after the last place, and a Board Session takes none")
     }
 
-    func testARenumberGivesTheLocksTheirNewOrderToo() throws {
-        let entries = [record("a", order: 0), record("b", order: Double(0).nextUp)].map(TopicListEntry.topic)
-            + [.lock(SessionLock(sessionID: "$1", order: 2))]
-        let edits = try TopicOrder.moving(.lock(sessionID: "$1"), to: .before(.topic("b")), in: entries)
-        XCTAssertEqual(shown(applying(edits, to: entries)), ["a", "lock:$1", "b"])
-        XCTAssertEqual(edits.locks.map(\.sessionID), ["$1"])
+    func testARenumberGivesTheBoardSessionsTheirNewOrderToo() throws {
+        let entries = [record("a", order: 0), record("b", order: Double(0).nextUp)].map(BoardCard.topic)
+            + [.session(BoardSession(id: "$1", order: 2, isGuest: true))]
+        let edits = try TopicOrder.moving(.session("$1"), to: .before(.topic("b")), in: entries)
+        XCTAssertEqual(shown(applying(edits, to: entries)), ["a", "session:$1", "b"])
+        XCTAssertEqual(edits.boardSessions.map(\.id), ["$1"])
         XCTAssertTrue(edits.allSatisfy { $0.order?.isFinite == true })
     }
 }

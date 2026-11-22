@@ -3,40 +3,43 @@ import XCTest
 
 final class PaletteCheckTests: XCTestCase {
     func testReturnGoesOnWithTheCheckedCardsOnAnyRowElseWithTheRowsCard() {
-        let draft = CheckDraft(action: .chooseInPlay(places: 2), checked: [.topic("a"), .locked("$1")])
-        XCTAssertEqual(draft.goingOn(from: .topic("z")), [.topic("a"), .locked("$1")], "not with the highlighted card")
+        let draft = CheckDraft(action: .chooseInPlay(places: 2), checked: [.topic("a"), .session("$1")])
+        XCTAssertEqual(draft.goingOn(from: .topic("z")), [.topic("a"), .session("$1")], "not with the highlighted card")
         XCTAssertEqual(CheckDraft(action: .chooseInPlay(places: 2)).goingOn(from: .topic("z")), [.topic("z")])
     }
 
     func testChooseInPlayAsksForEveryCheckedCardUntilOneIsLeftAndThePlacesAfterInPlayAreOnTheBench() {
-        let cards: [TopicGroupID] = [.topic("a"), .locked("$1"), .topic("b"), .topic("c")]
+        let cards: [TopicGroupID] = [.topic("a"), .session("$1"), .topic("b"), .topic("c")]
         var draft = OrderDraft(cards: cards, places: 2)
         XCTAssertNil(draft.chosen)
         XCTAssertFalse(draft.placeIsOnBench)
         draft = draft.placing(.topic("b"))
         XCTAssertEqual(draft.place, 2)
-        XCTAssertEqual(draft.remaining, [.topic("a"), .locked("$1"), .topic("c")], "the rows of a place keep the list order")
+        XCTAssertEqual(draft.remaining, [.topic("a"), .session("$1"), .topic("c")], "the rows of a place keep the list order")
         XCTAssertFalse(draft.placeIsOnBench)
         draft = draft.placing(.topic("c"))
         XCTAssertNil(draft.chosen, "the cards after the last In Play place are ordered too")
         XCTAssertEqual(draft.place, 3)
         XCTAssertTrue(draft.placeIsOnBench)
-        XCTAssertEqual(draft.placing(.locked("$1")).chosen, [.topic("b"), .topic("c"), .locked("$1"), .topic("a")],
+        XCTAssertEqual(draft.placing(.session("$1")).chosen, [.topic("b"), .topic("c"), .session("$1"), .topic("a")],
                        "the last remaining card needs no choice")
         XCTAssertEqual(OrderDraft(cards: [.topic("a"), .topic("b")], places: 5).placing(.topic("b")).chosen, [.topic("b"), .topic("a")])
         XCTAssertEqual(OrderDraft(cards: [.topic("a")], places: 5).chosen, [.topic("a")])
     }
 
-    func testAGuestThatNoPlaceTakesHasNoPlaceOnTheBenchToChoose() {
-        let draft = OrderDraft(cards: [.topic("a"), .topic("g"), .topic("b"), .topic("c")], places: 1, guests: [.topic("g")])
-        XCTAssertEqual(draft.remaining, [.topic("a"), .topic("g"), .topic("b"), .topic("c")], "a Guest can fill a place")
+    func testAGuestOrABoardSessionThatNoPlaceTakesHasNoPlaceOnTheBenchToChoose() {
+        let draft = OrderDraft(cards: [.topic("a"), .topic("g"), .session("$1"), .topic("b"), .topic("c")], places: 1,
+                               benchless: [.topic("g"), .session("$1")])
+        XCTAssertEqual(draft.remaining, [.topic("a"), .topic("g"), .session("$1"), .topic("b"), .topic("c")],
+                       "a Guest or a Board Session can fill a place")
         let full = draft.placing(.topic("b"))
-        XCTAssertEqual(full.remaining, [.topic("a"), .topic("c")], "once the places are full, the Guest stays a Guest")
+        XCTAssertEqual(full.remaining, [.topic("a"), .topic("c")],
+                       "once the places are full, a Guest stays a Guest and a Board Session leaves the Board")
         XCTAssertEqual(full.placing(.topic("c")).chosen, [.topic("b"), .topic("c"), .topic("a")])
     }
 
     func testTheCheckNoteSaysHowManyCheckedCardsGoToTheTopOfTheBench() {
-        XCTAssertEqual(CheckAction.chooseInPlay(places: 2).outcome(4), "4 checked for 2 In Play places. The last 2 go to the top of the Bench, and a Guest of them stays a Guest.")
+        XCTAssertEqual(CheckAction.chooseInPlay(places: 2).outcome(4), "4 checked for 2 In Play places. The last 2 go to the top of the Bench; a Guest of them stays a Guest, and a Board Session leaves the Board.")
         XCTAssertEqual(CheckAction.chooseInPlay(places: 2).outcome(2), "2 checked for 2 In Play places.")
         XCTAssertEqual(CheckAction.chooseInPlay(places: 3).outcome(1), "1 checked for 3 In Play places. 2 places stay Open Places.")
         XCTAssertEqual(CheckAction.chooseInPlay(places: 2).outcome(1), "1 checked for 2 In Play places. 1 place stays an Open Place.")

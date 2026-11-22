@@ -5,8 +5,8 @@ import SwiftUI
 /// only its cards scroll, so the user can always close the open group.
 struct TopicGroupBlock: View {
     let store: WorkspaceStore
-    let model: TopicsModel
-    let group: TopicsModel.Group
+    let model: BoardModel
+    let group: BoardModel.Group
     @Binding var showingAllRows: Set<TopicGroupID>
     /// The most height the open group's cards take before they scroll.
     let cardsLimit: CGFloat

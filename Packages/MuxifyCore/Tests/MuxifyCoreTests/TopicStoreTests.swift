@@ -185,10 +185,10 @@ final class TopicStoreTests: XCTestCase {
         try paths.withStateDatabase { try $0.execute("UPDATE topics SET note = 'Bisect' WHERE id = 'b'") }
         try store.write { try $0.move(.topic("c"), to: .before(.topic("b"))) }
         let moved = try records(TopicStore(paths: paths))
-        XCTAssertEqual(TopicOrder.sorted(moved.map(TopicListEntry.topic)).records.map(\.id), ["a", "c", "b"])
+        XCTAssertEqual(TopicOrder.sorted(moved.map(BoardCard.topic)).records.map(\.id), ["a", "c", "b"])
         XCTAssertEqual(moved.first { $0.id == "b" }?.note, "Bisect")
         try store.write { try $0.create(record("new", order: nil)) }
-        XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["a", "c", "b", "new"])
+        XCTAssertEqual(TopicOrder.sorted(try records(store).map(BoardCard.topic)).records.map(\.id), ["a", "c", "b", "new"])
     }
 
     func testAWriteWhoseBodyFailsChangesNothing() throws {
@@ -202,10 +202,10 @@ final class TopicStoreTests: XCTestCase {
             throw Refused()
         })
         XCTAssertEqual(try paths.storedTopicRows(), before)
-        XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["a", "b", "c"])
+        XCTAssertEqual(TopicOrder.sorted(try records(store).map(BoardCard.topic)).records.map(\.id), ["a", "b", "c"])
     }
 
-    private func shown(_ store: TopicStore) throws -> [String] { TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id) }
+    private func shown(_ store: TopicStore) throws -> [String] { TopicOrder.sorted(try records(store).map(BoardCard.topic)).records.map(\.id) }
 
     func testPinPutsATopicLastAmongPinnedTopicsAndUnpinAtTheTopOfTheBench() throws {
         let store = TopicStore(paths: paths, inPlay: 2)
@@ -316,12 +316,12 @@ final class TopicStoreTests: XCTestCase {
             var pinned = record("p", order: 0)
             pinned.isPinned = true
             var transaction = TopicTransaction(records: [pinned, record("a", order: edge)])
-            transaction.locks = [SessionLock(sessionID: "$1", order: edge)]
-            let moved = try transaction.create(record("new", order: nil))
+            transaction.boardSessions = [BoardSession(id: "guest", order: edge, isGuest: true)]
+            try transaction.create(record("new", order: nil))
             let shown = TopicOrder.sorted(transaction.entries)
             XCTAssertEqual(shown.records.map(\.id), ["p", "a", "new"])
             XCTAssertTrue(shown.allSatisfy { $0.order?.isFinite == true })
-            XCTAssertEqual(moved, transaction.locks.filter { $0.order != edge }.map(SessionLockChange.set), "a Lock that got a new order goes to tmux")
+            XCTAssertTrue(transaction.boardSessions.allSatisfy { $0.order.isFinite }, "a renumber gives the Board Session a finite order too")
         }
     }
 
@@ -345,7 +345,7 @@ final class TopicStoreTests: XCTestCase {
                 try transaction.apply(TopicRecordChange(before: topic, after: saved))
             }
             let expected = settled ? ["first", "last", "returning"] : ["first", "returning", "last"]
-            XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), expected,
+            XCTAssertEqual(TopicOrder.sorted(transaction.records.map(BoardCard.topic)).records.map(\.id), expected,
                            "pinned \(pinned), settled \(settled), \(choice), remembered \(remembered)")
         }
     }
@@ -362,8 +362,8 @@ final class TopicStoreTests: XCTestCase {
         var transaction = TopicTransaction(records: [pinned, current, record("a", order: 0)])
         let change = TopicRecordChange(before: settled, after: reopened)
         try transaction.apply(change)
-        XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), ["p", "returning", "a"])
+        XCTAssertEqual(TopicOrder.sorted(transaction.records.map(BoardCard.topic)).records.map(\.id), ["p", "returning", "a"])
         try transaction.apply(change)
-        XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), ["p", "returning", "a"])
+        XCTAssertEqual(TopicOrder.sorted(transaction.records.map(BoardCard.topic)).records.map(\.id), ["p", "returning", "a"])
     }
 }

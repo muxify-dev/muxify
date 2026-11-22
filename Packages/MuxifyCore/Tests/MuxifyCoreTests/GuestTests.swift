@@ -2,14 +2,15 @@ import XCTest
 @testable import MuxifyCore
 
 /// The cases of the In Play design, with `topics.in_play` 3. A Sidebar is written as its cards in order: `📌name` is
-/// Pinned, `_` is an Open Place, `name(G)` is a Guest Topic, `~name(G)` is a Guest Session, `🔒name` is a Locked Session
-/// that an older Muxify kept among the Topics, `+` is the Guests line and `|` is the Bench line.
+/// Pinned, `_` is an Open Place, `name(G)` is a Guest Topic, `~name` is a Board Session and `~name(G)` one in the Guests,
+/// `🔒name` is a Board Session that an older Muxify kept among the Topics as a Guest, `+` is the Guests line and `|` is
+/// the Bench line.
 final class GuestTests: XCTestCase {
     private let limit = 3
 
     /// The transaction for `sidebar`, with each card in the order that it has there.
     private func transaction(_ sidebar: String, inPlay: Int = 3) -> TopicTransaction {
-        var records: [TopicRecord] = [], locks: [SessionLock] = [], places: [OpenPlace] = []
+        var records: [TopicRecord] = [], boardSessions: [BoardSession] = [], places: [OpenPlace] = []
         for (order, card) in sidebar.split(separator: " ").filter({ $0 != "|" && $0 != "+" }).enumerated() {
             var name = String(card)
             if name == "_" {
@@ -19,7 +20,7 @@ final class GuestTests: XCTestCase {
             let guest = name.hasSuffix("(G)")
             if guest { name.removeLast(3) }
             if name.hasPrefix("~") || name.hasPrefix("🔒") {
-                locks.append(SessionLock(sessionID: String(name.dropFirst()), order: Double(order)))
+                boardSessions.append(BoardSession(id: String(name.dropFirst()), order: Double(order), isGuest: guest || name.hasPrefix("🔒")))
                 continue
             }
             let pinned = name.hasPrefix("📌")
@@ -31,7 +32,7 @@ final class GuestTests: XCTestCase {
             records.append(record)
         }
         var transaction = TopicTransaction(records: records, inPlay: inPlay)
-        transaction.locks = locks
+        transaction.boardSessions = boardSessions
         transaction.openPlaces = places
         return transaction
     }
@@ -44,10 +45,10 @@ final class GuestTests: XCTestCase {
         return (pinned + sections[0] + ["+"] + sections[1] + ["|"] + sections[2]).joined(separator: " ")
     }
 
-    private func name(_ entry: TopicListEntry) -> String {
+    private func name(_ entry: BoardCard) -> String {
         switch entry {
-        case .topic(let record): return record.id + (entry.isGuest ? "(G)" : "")
-        case .lock(let lock): return "~" + lock.sessionID + "(G)"
+        case .topic(let record): return record.id + (entry.hasGuestMark ? "(G)" : "")
+        case .session(let session): return "~" + session.id + (entry.hasGuestMark ? "(G)" : "")
         case .openPlace: return "_"
         }
     }
@@ -68,17 +69,22 @@ final class GuestTests: XCTestCase {
 
     func testMakeAGuestPutsTheCardAtTheEndOfTheGuests() throws {
         var a = transaction("📌notes payments auth-bug docs + scratch(G) | infra release")
-        try a.makeGuest("infra", inPlay: limit)
+        try a.makeGuest(.topic("infra"), inPlay: limit)
         XCTAssertEqual(sidebar(a), "📌notes payments auth-bug docs + scratch(G) infra(G) | release")
         assertWrittenInOrder(a)
 
         var b = transaction("payments auth-bug docs + infra(G) | release")
-        XCTAssertEqual(b.lock("scratch").map(\.sessionID), ["scratch"])
-        XCTAssertEqual(b.lock("scratch"), [], "a Locked Session keeps its place")
-        XCTAssertEqual(sidebar(b), "payments auth-bug docs + infra(G) ~scratch(G) | release", "with in_play, a Lock is a Guest")
+        b.addToBoard(BoardSession(id: "scratch", order: 0, isGuest: true, session: .object(["name": .string("scratch")])))
+        let before = b.entries
+        b.addToBoard(BoardSession(id: "scratch", order: 0, isGuest: true))
+        XCTAssertEqual(b.entries, before, "a Board Session keeps its place and its Remembered Session")
+        XCTAssertEqual(sidebar(b), "payments auth-bug docs + infra(G) ~scratch(G) | release", "a new Board Session is the last Guest")
+        assertWrittenInOrder(b)
 
         var inPlay = transaction("payments auth-bug docs + | infra")
-        XCTAssertThrowsError(try inPlay.makeGuest("docs", inPlay: limit), "a card In Play cannot be made a Guest")
+        XCTAssertThrowsError(try inPlay.makeGuest(.topic("docs"), inPlay: limit), "a card In Play cannot be made a Guest")
+        var session = transaction("payments ~scratch docs + | infra")
+        XCTAssertThrowsError(try session.makeGuest(.session("scratch"), inPlay: limit), "nor a Board Session in a place")
     }
 
     func testAGuestNeverSitsBetweenThePlaces() throws {
@@ -111,9 +117,10 @@ final class GuestTests: XCTestCase {
         try settling("infra", in: &settled)
         XCTAssertEqual(sidebar(settled), "payments auth-bug docs + ~scratch(G) | release", "Settle of a Guest")
 
-        var unlocked = transaction("payments auth-bug docs + ~scratch(G) | release")
-        XCTAssertEqual(unlocked.unlock("scratch"), [.end(sessionID: "scratch")])
-        XCTAssertEqual(sidebar(unlocked), "payments auth-bug docs + | release", "Bench of a Guest Session Unlocks it")
+        var ended = transaction("payments auth-bug docs + ~scratch(G) | release")
+        ended.takeOffBoard("scratch")
+        XCTAssertEqual(sidebar(ended), "payments auth-bug docs + | release", "a Board Session in the Guests that ends")
+        XCTAssertEqual(ended.boardSessions, [], "its row goes")
 
         var pinned = transaction("payments auth-bug docs + infra(G) | release")
         try pinned.pin("infra", true)
@@ -137,13 +144,26 @@ final class GuestTests: XCTestCase {
             try transaction.apply(TopicRecordChange(before: before, after: after))
         }
         let read = try store.read()
-        let cut = TopicOrder.cut(TopicListEntry.all(records: read.records, windows: [], openPlaces: read.openPlaces), inPlay: limit)
+        let cut = TopicOrder.cut(BoardCard.all(records: read.records, openPlaces: read.openPlaces), inPlay: limit)
         XCTAssertEqual(cut.places.map(\.slot), [.regular, .openPlace, .regular], "a new read shows the Open Place")
         XCTAssertEqual(cut.bench.map(\.id), [.topic("release")])
 
-        try store.write { try $0.fillOpenPlace(read.openPlaces[0].id, with: "release", inPlay: limit) }
+        try store.write { try $0.fillOpenPlace(read.openPlaces[0].id, with: .topic("release"), inPlay: limit) }
         XCTAssertEqual(try store.read().openPlaces, [], "a filled Open Place closes")
         XCTAssertEqual(try paths.storedOpenPlaces(), [])
+    }
+
+    func testABoardSessionKeepsItsSectionThroughARead() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = TopicStore(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": root.path], home: "/nonexistent"), inPlay: limit)
+        try store.write { $0.addToBoard(BoardSession(id: "scratch", order: 0, isGuest: false)) }
+        XCTAssertEqual(try store.read().boardSessions.map(\.isGuest), [true], "Make a Guest of a Session makes a Guest")
+        try store.write { try $0.apply(.takePlace, to: .session("scratch")) }
+        XCTAssertEqual(try store.read().boardSessions.map(\.isGuest), [false], "the guest column keeps its place")
+        try store.write { try $0.apply(.toGuests, to: .session("scratch")) }
+        XCTAssertEqual(try store.read().boardSessions.map(\.isGuest), [true])
+        XCTAssertEqual(try store.read().openPlaces.count, 1, "it left an Open Place")
     }
 
     func testAnOpenPlaceClosesPastTheLastPlace() throws {
@@ -156,35 +176,35 @@ final class GuestTests: XCTestCase {
     func testFillAnOpenPlaceWithAGuestOrABenchedTopic() throws {
         var guest = transaction("payments _ docs + infra(G) ~scratch(G) | release")
         let place = guest.openPlaces[0].id
-        try guest.fillOpenPlace(place, with: "infra", inPlay: limit)
+        try guest.fillOpenPlace(place, with: .topic("infra"), inPlay: limit)
         XCTAssertEqual(sidebar(guest), "payments infra docs + ~scratch(G) | release", "the Guest loses its mark")
         XCTAssertEqual(guest.openPlaces, [])
 
         var benched = transaction("payments _ docs + infra(G) | release ci")
-        try benched.fillOpenPlace(benched.openPlaces[0].id, with: "ci", inPlay: limit)
+        try benched.fillOpenPlace(benched.openPlaces[0].id, with: .topic("ci"), inPlay: limit)
         XCTAssertEqual(sidebar(benched), "payments ci docs + infra(G) | release")
 
         var session = transaction("payments _ docs + ~scratch(G) | release")
-        XCTAssertThrowsError(try session.fillOpenPlace(session.openPlaces[0].id, with: "scratch", inPlay: limit),
-                             "a Guest Session is no Topic")
+        try session.fillOpenPlace(session.openPlaces[0].id, with: .session("scratch"), inPlay: limit)
+        XCTAssertEqual(sidebar(session), "payments ~scratch docs + | release", "a Board Session fills a place as a Topic does")
         var inPlay = transaction("payments _ docs + | release")
-        XCTAssertThrowsError(try inPlay.fillOpenPlace(inPlay.openPlaces[0].id, with: "docs", inPlay: limit))
+        XCTAssertThrowsError(try inPlay.fillOpenPlace(inPlay.openPlaces[0].id, with: .topic("docs"), inPlay: limit))
     }
 
     func testBenchTopicLeavesAnOpenPlaceForAPlaceAndNoneForAGuest() throws {
         var place = transaction("payments auth-bug docs + infra(G) | release")
-        try place.bench("auth-bug", inPlay: limit)
+        try place.bench(.topic("auth-bug"), inPlay: limit)
         XCTAssertEqual(sidebar(place), "payments _ docs + infra(G) | auth-bug release", "it keeps its Sessions; its place is open")
         assertWrittenInOrder(place)
 
         var guest = transaction("payments auth-bug docs + infra(G) ~scratch(G) | release")
-        try guest.bench("infra", inPlay: limit)
-        XCTAssertEqual(sidebar(guest), "payments auth-bug docs + ~scratch(G) | infra release", "as Bench of a Guest Session")
+        try guest.bench(.topic("infra"), inPlay: limit)
+        XCTAssertEqual(sidebar(guest), "payments auth-bug docs + ~scratch(G) | infra release", "as Bench of a Board Session")
 
         var benched = transaction("payments auth-bug docs + | release")
-        XCTAssertThrowsError(try benched.bench("release", inPlay: limit), "a Benched Topic is not In Play")
+        XCTAssertThrowsError(try benched.bench(.topic("release"), inPlay: limit), "a Benched Topic is not In Play")
         var pinned = transaction("📌notes payments + | release")
-        XCTAssertThrowsError(try pinned.bench("notes", inPlay: limit), "a Pinned Topic is not In Play")
+        XCTAssertThrowsError(try pinned.bench(.topic("notes"), inPlay: limit), "a Pinned Topic is not In Play")
     }
 
     func testATradeAcrossTheGuestsLineMovesTheMarkToTheCardThatLeaves() throws {
@@ -198,8 +218,10 @@ final class GuestTests: XCTestCase {
         XCTAssertEqual(sidebar(open), "payments infra docs + | release", "a Guest dropped on an Open Place fills it")
 
         var into = transaction("payments auth-bug docs + ~scratch(G) | release")
-        XCTAssertThrowsError(try into.trade(.lock(sessionID: "scratch"), with: .topic("docs")), "a Guest Session takes no place")
-        XCTAssertThrowsError(try into.trade(.topic("docs"), with: .lock(sessionID: "scratch")), "nor the other way")
+        try into.trade(.session("scratch"), with: .topic("docs"))
+        XCTAssertEqual(sidebar(into), "payments auth-bug ~scratch + docs(G) | release", "a Board Session takes the place")
+        try into.trade(.topic("docs"), with: .session("scratch"))
+        XCTAssertEqual(sidebar(into), "payments auth-bug docs + ~scratch(G) | release", "and gives it back")
     }
 
     func testATradeAcrossTheBenchLineKeepsWorking() throws {
@@ -212,9 +234,15 @@ final class GuestTests: XCTestCase {
         XCTAssertEqual(sidebar(guest), "payments auth-bug docs + release(G) | infra ci", "the card that comes into the Guests is a Guest")
 
         var session = transaction("payments auth-bug docs + ~scratch(G) | release ci")
-        let ended = try session.trade(.lock(sessionID: "scratch"), with: .topic("release"))
-        XCTAssertEqual(sidebar(session), "payments auth-bug docs + release(G) | ci", "the Session cannot wait on the Bench")
-        XCTAssertTrue(ended.contains(.end(sessionID: "scratch")))
+        try session.trade(.session("scratch"), with: .topic("release"))
+        XCTAssertEqual(sidebar(session), "payments auth-bug docs + release(G) | ci", "the Bench holds only Topics")
+        XCTAssertEqual(session.boardSessions, [], "the Board Session leaves the Board")
+
+        var placed = transaction("payments ~scratch docs + | release ci")
+        try placed.trade(.session("scratch"), with: .topic("release"))
+        XCTAssertEqual(sidebar(placed), "payments release docs + | ci", "the Topic takes the place, and no Open Place is left")
+        XCTAssertEqual(placed.boardSessions, [])
+        XCTAssertEqual(placed.openPlaces, [])
 
         var open = transaction("payments _ docs + | release ci")
         try open.trade(.topic("ci"), with: open.openPlaces.map { .openPlace($0.id) }[0])
@@ -228,10 +256,18 @@ final class GuestTests: XCTestCase {
             ("payments auth-bug docs + infra(G) | release", "docs", .toGuests, "payments auth-bug _ + docs(G) infra(G) | release"),
             ("payments auth-bug docs + infra(G) | release", "infra", .trade(.topic("docs")), "payments auth-bug infra + docs(G) | release"),
             ("payments auth-bug + infra(G) |", "infra", .takePlace, "payments auth-bug infra + |"),
+            ("payments auth-bug ~scratch + infra(G) | release", "~scratch", .toGuests, "payments auth-bug _ + ~scratch(G) infra(G) | release"),
+            ("payments _ docs + ~scratch(G) | release", "~scratch", .fill(openPlace: "open"), "payments ~scratch docs + | release"),
+            ("payments auth-bug docs + ~scratch(G) | release", "~scratch", .trade(.topic("docs")), "payments auth-bug ~scratch + docs(G) | release"),
+            ("payments auth-bug + ~scratch(G) |", "~scratch", .takePlace, "payments auth-bug ~scratch + |"),
+            ("payments auth-bug docs + infra(G) ~scratch(G) | release", "~scratch", .bench, "payments auth-bug docs + infra(G) | release"),
         ]
         for (start, card, outcome, after) in cases {
             var list = transaction(start)
-            try list.apply(outcome, to: .topic(card))
+            if case .fill = outcome, let open = list.openPlaces.first {
+                list.openPlaces = [OpenPlace(id: "open", order: open.order)]
+            }
+            try list.apply(outcome, to: card.hasPrefix("~") ? .session(String(card.dropFirst())) : .topic(card))
             XCTAssertEqual(sidebar(list), after, "\(outcome) of \(card) in \(start)")
             assertWrittenInOrder(list)
         }
@@ -255,17 +291,62 @@ final class GuestTests: XCTestCase {
         var place = transaction("payments auth-bug docs + infra(G) | release ci")
         try place.replaceFromBench(.topic("docs"), with: .topic("release"), inPlay: limit)
         XCTAssertEqual(sidebar(place), "payments auth-bug release + infra(G) | ci docs")
+
+        var session = transaction("payments ~scratch docs + ~tmp(G) | release ci")
+        try session.replaceFromBench(.session("scratch"), with: .topic("ci"), inPlay: limit)
+        try session.replaceFromBench(.session("tmp"), with: .topic("release"), inPlay: limit)
+        XCTAssertEqual(sidebar(session), "payments ci docs + release(G) |", "a replaced Board Session leaves the Board")
+        XCTAssertEqual(session.boardSessions, [])
     }
 
-    func testANewTopicFromAGuestSessionTakesItsPlaceAndItsMark() throws {
+    func testANewTopicFromABoardSessionTakesItsPlaceAndItsSection() throws {
         var j = transaction("payments auth-bug docs + ~scratch(G) | release")
-        let changes = try j.create(TopicRecord(id: "scratch-fix", title: "scratch-fix"), replacingLockOf: "scratch")
+        try j.create(TopicRecord(id: "scratch-fix", title: "scratch-fix"), replacingSession: "scratch")
         XCTAssertEqual(sidebar(j), "payments auth-bug docs + scratch-fix(G) | release")
-        XCTAssertFalse(changes.contains(.end(sessionID: "scratch")), "the plan ends the Lock in tmux")
+        XCTAssertEqual(j.boardSessions, [], "the Topic takes the card off the Board")
+
+        var placed = transaction("payments ~scratch docs + infra(G) | release")
+        try placed.create(TopicRecord(id: "scratch-fix", title: "scratch-fix"), replacingSession: "scratch")
+        XCTAssertEqual(sidebar(placed), "payments scratch-fix docs + infra(G) | release", "from a place, the Topic takes the place")
+        XCTAssertEqual(placed.openPlaces, [], "and leaves no Open Place")
+
+        var pastLastPlace = transaction("payments auth-bug docs ~scratch | release")
+        XCTAssertEqual(sidebar(pastLastPlace), "payments auth-bug docs + ~scratch | release")
+        try pastLastPlace.create(TopicRecord(id: "scratch-fix", title: "scratch-fix"), replacingSession: "scratch")
+        XCTAssertEqual(sidebar(pastLastPlace), "payments auth-bug docs + scratch-fix(G) | release",
+                       "a Board Session without the mark past the last place is among the Guests, so the Topic is a Guest, not Benched")
 
         var none = transaction("payments auth-bug docs + ~scratch(G) | release")
-        try none.create(TopicRecord(id: "new", title: "new"), replacingLockOf: "gone")
-        XCTAssertEqual(sidebar(none), "payments auth-bug docs + ~scratch(G) new(G) | release", "a Topic from no Lock goes where a new Topic goes")
+        try none.create(TopicRecord(id: "new", title: "new"), replacingSession: "gone")
+        XCTAssertEqual(sidebar(none), "payments auth-bug docs + ~scratch(G) new(G) | release", "a Topic from no card goes where a new Topic goes")
+    }
+
+    func testABoardSessionThatLeavesAPlaceLeavesOneOpenPlace() throws {
+        var benched = transaction("payments ~scratch docs + infra(G) | release")
+        try benched.bench(.session("scratch"), inPlay: limit)
+        XCTAssertEqual(sidebar(benched), "payments _ docs + infra(G) | release", "Bench takes it off the Board, not to the Bench")
+        XCTAssertEqual(benched.boardSessions, [])
+        XCTAssertEqual(benched.openPlaces.count, 1)
+        assertWrittenInOrder(benched)
+
+        var ended = transaction("payments ~scratch docs + infra(G) | release")
+        ended.takeOffBoard("scratch")
+        XCTAssertEqual(sidebar(ended), "payments _ docs + infra(G) | release", "its Session went into a Topic or ended")
+
+        var moved = transaction("payments ~scratch docs + | release")
+        let before = moved.records.first { $0.id == "docs" }!
+        try moved.apply(TopicRecordChange(before: before, after: before), endingSession: "scratch")
+        XCTAssertEqual(sidebar(moved), "payments _ docs + | release", "its Session moved into an open Topic")
+    }
+
+    func testABoardSessionIsNeverOnTheBench() throws {
+        let fewer = transaction("payments docs ~scratch + infra(G) | release", inPlay: 2)
+        XCTAssertEqual(sidebar(fewer, inPlay: 2), "payments docs + ~scratch infra(G) | release",
+                       "past the last place, after a smaller in_play, it is among the Guests")
+
+        var pushed = transaction("payments docs ~scratch + | release")
+        try pushed.move(.topic("release"), to: .before(.topic("payments")))
+        XCTAssertEqual(sidebar(pushed), "release payments docs + ~scratch |", "a drag across the Bench line does not bench it")
     }
 
     func testANewTopicIsTheLastGuestAndLeavesAnOpenPlaceOpen() throws {
@@ -305,22 +386,35 @@ final class GuestTests: XCTestCase {
         XCTAssertEqual(refill.openPlaces, [], "the old Open Place closes")
 
         var session = transaction(start)
-        XCTAssertThrowsError(try session.chooseInPlay([.lock(sessionID: "scratch")], inPlay: limit), "a Guest Session takes no place")
+        try session.chooseInPlay([.session("scratch")], inPlay: limit)
+        XCTAssertEqual(sidebar(session), "~scratch _ _ + infra(G) | payments auth-bug docs release ci", "a Board Session takes a place")
+
+        var unchecked = transaction("payments ~scratch docs + ~tmp(G) | release")
+        try unchecked.chooseInPlay([.topic("payments"), .topic("docs"), .topic("release")], inPlay: limit)
+        XCTAssertEqual(sidebar(unchecked), "payments docs release + ~tmp(G) |",
+                       "a Board Session that held a place and gets none leaves the Board; a Guest stays")
+        XCTAssertEqual(unchecked.boardSessions.map(\.id), ["tmp"])
+
+        var late = transaction("payments ~scratch docs + | release")
+        try late.chooseInPlay([.topic("payments"), .topic("docs"), .topic("release"), .session("scratch")], inPlay: limit)
+        XCTAssertEqual(sidebar(late), "payments docs release + |", "chosen past the places, it does not lead the Bench")
     }
 
-    func testTheGatherPutsEachLockThatWasAmongTheTopicsInTheGuests() throws {
+    func testTheGatherPutsEachBoardSessionThatWasAmongTheTopicsInTheGuests() throws {
         var s1 = transaction("payments 🔒scratch auth-bug docs infra 🔒tmp")
         XCTAssertFalse(TopicOrder.isInSections(s1.entries, inPlay: limit))
         s1.gatherGuests(inPlay: limit)
         XCTAssertEqual(sidebar(s1), "payments auth-bug docs + ~scratch(G) ~tmp(G) | infra")
         assertWrittenInOrder(s1)
-        XCTAssertEqual(s1.gatherGuests(inPlay: limit), [], "a second gather changes nothing")
+        let gathered = s1.entries
+        s1.gatherGuests(inPlay: limit)
+        XCTAssertEqual(s1.entries, gathered, "a second gather changes nothing")
 
         var moved = transaction("payments auth-bug docs + ~scratch(G) | infra release")
         try moved.move(.topic("release"), to: .before(.topic("infra")))
         XCTAssertTrue(TopicOrder.isInSections(moved.entries, inPlay: limit))
         let before = moved.entries
-        XCTAssertEqual(moved.gatherGuests(inPlay: limit), [], "a list in its sections is not numbered again")
-        XCTAssertEqual(moved.entries, before)
+        moved.gatherGuests(inPlay: limit)
+        XCTAssertEqual(moved.entries, before, "a list in its sections is not numbered again")
     }
 }

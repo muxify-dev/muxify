@@ -58,25 +58,34 @@ final class NewTopicTests: XCTestCase {
         var selection = TopicSelection()
         selection.windowID = "@1"
         let page = Location.emptyTopic(.topic("empty"))
-        let shown = TopicsModel(records: [topic], windows: [window(topic: nil)], config: config, selection: selection, location: page)
+        let shown = BoardModel(records: [topic], windows: [window(topic: nil)], config: config, selection: selection, location: page)
         XCTAssertEqual(shown.activeTopic, .topic("empty"))
         XCTAssertEqual(shown.emptyTopic?.title, "Plan")
-        let waiting = TopicsModel(records: [topic], windows: [window(topic: "empty")], config: config,
+        let waiting = BoardModel(records: [topic], windows: [window(topic: "empty")], config: config,
                                   selection: selection, location: page)
         XCTAssertEqual(waiting.activeTopic, .topic("empty"), "the Location keeps the Active Topic when a Window appears")
         XCTAssertNotNil(waiting.emptyTopic, "only a Location change leaves the page")
-        let started = TopicsModel(records: [topic], windows: [window(topic: "empty")], config: config, selection: selection,
+        let started = BoardModel(records: [topic], windows: [window(topic: "empty")], config: config, selection: selection,
                         location: .window(WindowID(rawValue: "@1")!))
         XCTAssertNil(started.emptyTopic, "a Topic with a Window is no longer empty")
         XCTAssertEqual(started.activeTopic, .topic("empty"))
         var settled = topic
         settled.settledAt = "2026-10-01T00:00:00Z"
-        let shownSettled = TopicsModel(records: [settled], windows: [window(topic: nil)], config: config, selection: selection, location: page)
+        let shownSettled = BoardModel(records: [settled], windows: [window(topic: nil)], config: config, selection: selection, location: page)
         XCTAssertEqual(shownSettled.emptyTopic?.title, "Plan", "a Settled Topic the user goes to shows its Reopen choice")
         XCTAssertEqual(shownSettled.activeTopic, .topic("empty"))
-        let gone = TopicsModel(records: [], windows: [window(topic: nil)], config: config, selection: selection,
+        let gone = BoardModel(records: [], windows: [window(topic: nil)], config: config, selection: selection,
                         location: .window(WindowID(rawValue: "@1")!))
         XCTAssertNil(gone.emptyTopic)
         XCTAssertEqual(gone.activeTopic, .noTopic)
+    }
+
+    func testADormantBoardSessionsPageShowsItsCardAsTheActiveTopic() {
+        let dormant = BoardSession(id: "g1", order: 0, isGuest: true, session: .object(["name": .string("notes"), "directory": .string("/work/notes")]))
+        let shown = BoardModel(records: [], boardSessions: [dormant], windows: [], config: Config(), selection: TopicSelection(),
+                                location: .emptyTopic(.session("g1")))
+        XCTAssertEqual(shown.activeTopic, .session("g1"))
+        XCTAssertEqual(shown.emptyTopic?.id, .session("g1"), "the page shows the Dormant Board Session's Reopen choice")
+        XCTAssertEqual(shown.emptyTopic?.state, .dormant)
     }
 }

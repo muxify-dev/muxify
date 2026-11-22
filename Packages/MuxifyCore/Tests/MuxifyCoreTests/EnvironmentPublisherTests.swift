@@ -56,7 +56,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         try await wait("no first item") { !recorder.items.isEmpty }
         let first = try XCTUnwrap(recorder.items.first)
         XCTAssertEqual(Set(first.map(\.key)), ["session \(try sessionID("work"))", "session \(try sessionID("other"))",
-                                               "topic first", "open_places", "server"])
+                                               "topic first", "open_places", "board_sessions", "server"])
         guard case .server(let state)? = first.first(where: { $0.key == "server" }) else { return XCTFail("no server event") }
         XCTAssertTrue(state.isRunning)
         XCTAssertEqual(state.socketPath, socket)
@@ -593,6 +593,55 @@ final class EnvironmentPublisherTests: XCTestCase {
 
     private func probeCommand(_ answer: String) -> String {
         colourProbes.probeCommand(answer)
+    }
+
+    // MARK: - Board Sessions
+
+    func testABoardSessionThatEndsOnTheSameServerLeavesTheBoardAndATmuxRestartKeepsItDormant() async throws {
+        for name in ["work", "notes", "scratch"] { try server.run(["new-session", "-d", "-s", name]) }
+        try server.run(["new-window", "-d", "-t", "=scratch:"])
+        let service = EnvironmentService(paths: paths, server: server)
+        for name in ["notes", "scratch"] {
+            guard case .changed = service.handle(EnvironmentRequest(.makeGuest, target: .sessionName(name))) else { return XCTFail(name) }
+        }
+        let store = TopicStore(paths: paths)
+        let recorder = start()
+        try await wait("no first item") { recorder.server?.isRunning == true }
+        let first = try XCTUnwrap(recorder.server?.serverID)
+
+        try server.run(["kill-session", "-t", "=notes"])
+        try await wait("the row of a Board Session that ended on the same server stayed", seconds: 10) {
+            try store.read().boardSessions.map(\.name) == ["scratch"]
+        }
+
+        try server.run(["kill-server"])
+        try server.run(["new-session", "-d", "-s", "work"])
+        try await wait("the publisher did not read the new server", seconds: 10) {
+            recorder.server?.isRunning == true && recorder.server?.serverID != first
+        }
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        let dormant = try XCTUnwrap(store.read().boardSessions.first, "a tmux restart took the Board Session off the Board")
+        XCTAssertEqual(dormant.name, "scratch")
+        XCTAssertEqual(dormant.session["windows"]?.array?.count, 2, "the Board Session keeps the Windows to Reopen")
+        XCTAssertTrue(recorder.items.joined().contains { if case .boardSessions(let boardSessions) = $0 { boardSessions.map(\.id) == [dormant.id] } else { false } },
+                      "the Board Sessions go out on the subscription")
+    }
+
+    func testACardThatAnOlderMuxifyKeptInTmuxIsImportedOnce() async throws {
+        try server.run(["new-session", "-d", "-s", "work"])
+        try server.run(["new-session", "-d", "-s", "notes"])
+        try server.run(["set-option", "-t", "=notes:", BoardSession.legacyOption, "7"])
+        let store = TopicStore(paths: paths)
+        _ = start()
+        try await wait("the Board Session was not imported", seconds: 10) { try store.read().boardSessions.count == 1 }
+        let boardSession = try XCTUnwrap(store.read().boardSessions.first)
+        XCTAssertEqual(boardSession.order, 7, "the Board Session keeps its order")
+        XCTAssertEqual(boardSession.name, "notes")
+        try await wait("the option stayed", seconds: 5) {
+            try self.server.run(["show-options", "-qv", "-t", "=notes:", BoardSession.legacyOption]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "=notes:", "@muxify_session_id"]).trimmingCharacters(in: .whitespacesAndNewlines),
+                       boardSession.id, "the Session points at its new Board Session")
     }
 
     private final class Recorder: @unchecked Sendable {

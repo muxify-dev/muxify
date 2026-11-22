@@ -209,11 +209,12 @@ final class HintTests: XCTestCase {
         }
     }
 
-    /// Window `@<id>`, alone in Session `$<id>` unless `session` names another.
-    private func window(_ id: String, session: String? = nil, index: Int = 0, topic: String? = nil, lock: Double? = nil) -> TmuxWindow {
+    /// Window `@<id>`, alone in Session `$<id>` unless `session` names another. A `guest` one points at the Board Session whose id
+    /// is the Session's tmux id.
+    private func window(_ id: String, session: String? = nil, index: Int = 0, topic: String? = nil, guest: Bool = false) -> TmuxWindow {
         let session = session ?? id
         return .fixture(id: "@" + id, sessionID: "$" + session, sessionName: "session-" + session, index: index, paneTitle: "shell",
-                        path: "/tmp", isActive: index == 0, topicID: topic, lockOrder: lock)
+                        path: "/tmp", isActive: index == 0, topicID: topic, savedSessionID: guest ? "$" + session : "")
     }
 
     func testTopicsModeCardsArePinnedThenDormantTopicsWithoutNoTopicSessions() {
@@ -222,23 +223,23 @@ final class HintTests: XCTestCase {
         let records = [TopicRecord(id: "dormant"), pinned]
         let windows = [window("1"), window("2")]
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
-        let topics = TopicsModel(records: records, windows: windows, config: Config(), selection: TopicSelection())
+        let topics = BoardModel(records: records, windows: windows, config: Config(), selection: TopicSelection())
         XCTAssertEqual(QuickSwitchTargets(model: topics, sessions: sessions, windows: windows, tabIDs: []).cards,
                        [.topic("pinned"), .topic("dormant")])
         var selection = TopicSelection()
         selection.windowID = "@1"
-        let opened = TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
+        let opened = BoardModel(records: records, windows: windows, config: Config(), selection: selection,
                         location: selection.windowLocation)
         XCTAssertEqual(opened.openedNoTopicSession?.id.session, "$1")
         XCTAssertEqual(QuickSwitchTargets(model: opened, sessions: sessions, windows: windows, tabIDs: []).cards,
                        [.topic("pinned"), .topic("dormant")])
-        let sessionMode = TopicsModel(records: records, windows: windows, config: Config(),
+        let sessionMode = BoardModel(records: records, windows: windows, config: Config(),
                                       selection: TopicSelection(), mode: .sessions)
         XCTAssertEqual(QuickSwitchTargets(model: sessionMode, sessions: sessions.reversed(), windows: [], tabIDs: []).cards,
                        [.session("$2"), .session("$1")])
     }
 
-    func testAGuestSessionsCardIsNumberedAfterTheInPlayPlaces() {
+    func testABoardSessionsCardAmongTheGuestsIsNumberedAfterTheInPlayPlaces() {
         var pinned = TopicRecord(id: "pinned")
         pinned.isPinned = true
         pinned.order = 5
@@ -246,35 +247,36 @@ final class HintTests: XCTestCase {
         first.order = 0
         var last = TopicRecord(id: "last")
         last.order = 2
-        let windows = [window("1", lock: 1), window("2", lock: nil)]
+        let windows = [window("1", guest: true), window("2")]
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
         var selection = TopicSelection()
         selection.windowID = "@1"
-        let topics = TopicsModel(records: [last, first, pinned], windows: windows, config: Config(), selection: selection,
+        let topics = BoardModel(records: [last, first, pinned], boardSessions: [BoardSession(id: "$1", order: 1, isGuest: true)], windows: windows, config: Config(),
+                                 selection: selection,
                         location: selection.windowLocation)
         XCTAssertEqual(QuickSwitchTargets(model: topics, sessions: sessions, windows: windows, tabIDs: []).cards,
-                       [.topic("pinned"), .topic("first"), .topic("last"), .locked("$1")],
-                       "a Lock that an older Muxify kept among the Topics is a Guest too")
-        XCTAssertEqual(topics.activeTopic, .locked("$1"))
-        XCTAssertEqual(topics.rows.first { $0.id == .locked("$1") }?.isExpanded, true, "going into a Locked Session opens its card")
-        XCTAssertEqual(topics.rows.first { $0.id == .locked("$1") }?.sessions.map(\.id.session), ["$1"])
-        XCTAssertNil(topics.openedNoTopicSession, "a Locked Session has its own card, not the No Topic card")
-        XCTAssertEqual(topics.nextTopic(after: .topic("last")), .locked("$1"), "a Guest Session can be the Next Topic")
+                       [.topic("pinned"), .topic("first"), .topic("last"), .boardSession("$1")],
+                       "a Board Session that an older Muxify kept among the Topics is a Guest too")
+        XCTAssertEqual(topics.activeTopic, .session("$1"))
+        XCTAssertEqual(topics.rows.first { $0.id == .session("$1") }?.isExpanded, true, "going into a Board Session opens its card")
+        XCTAssertEqual(topics.rows.first { $0.id == .session("$1") }?.sessions.map(\.id.session), ["$1"])
+        XCTAssertNil(topics.openedNoTopicSession, "a Board Session has its own card, not the No Topic card")
+        XCTAssertEqual(topics.nextTopic(after: .topic("last")), .session("$1"), "a Board Session can be the Next Topic")
     }
 
     func testStepWrapsAndStartsAtAnEndWithoutACurrentTarget() {
         let targets = QuickSwitchTargets(cards: [], windows: [.window("@1"), .window("@2")], topicWindows: [], tabs: [],
                                          sessions: [.session("$1"), .session("$2"), .session("$3")],
-                                         topics: [.topic("a"), .locked("$9")])
+                                         topics: [.topic("a"), .boardSession("$9")])
         XCTAssertEqual(targets.step(.session, .next, from: .session("$1")), .session("$2"))
         XCTAssertEqual(targets.step(.session, .next, from: .session("$3")), .session("$1"))
         XCTAssertEqual(targets.step(.session, .previous, from: .session("$1")), .session("$3"))
         XCTAssertEqual(targets.step(.session, .previous, from: .session("$3")), .session("$2"))
         XCTAssertEqual(targets.step(.window, .next, from: .window("@2")), .window("@1"))
-        XCTAssertEqual(targets.step(.topic, .next, from: .topic("a")), .locked("$9"))
-        XCTAssertEqual(targets.step(.topic, .previous, from: .topic("a")), .locked("$9"))
+        XCTAssertEqual(targets.step(.topic, .next, from: .topic("a")), .boardSession("$9"))
+        XCTAssertEqual(targets.step(.topic, .previous, from: .topic("a")), .boardSession("$9"))
         XCTAssertEqual(targets.step(.topic, .next, from: nil), .topic("a"))
-        XCTAssertEqual(targets.step(.topic, .previous, from: nil), .locked("$9"))
+        XCTAssertEqual(targets.step(.topic, .previous, from: nil), .boardSession("$9"))
         XCTAssertEqual(targets.step(.session, .next, from: .session("$7")), .session("$1"))
         XCTAssertEqual(targets.step(.session, .previous, from: .session("$7")), .session("$3"))
         let lone = QuickSwitchTargets(cards: [], windows: [], topicWindows: [], tabs: [], sessions: [.session("$1")], topics: [])
@@ -290,35 +292,35 @@ final class HintTests: XCTestCase {
         work.order = 0
         var dormant = TopicRecord(id: "dormant")
         dormant.order = 2
-        let windows = [window("1", topic: "work"), window("2"), window("3", topic: "work"), window("4", lock: 3),
+        let windows = [window("1", topic: "work"), window("2"), window("3", topic: "work"), window("4", guest: true),
                        window("5", topic: "pinned"), window("6")]
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
-        func targets(selecting windowID: String?, mode: SidebarMode = .topics) -> QuickSwitchTargets {
+        func targets(selecting windowID: String?, mode: SidebarMode = .board) -> QuickSwitchTargets {
             var selection = TopicSelection()
             selection.windowID = windowID
-            let model = TopicsModel(records: [dormant, work, pinned], windows: windows, config: Config(),
+            let model = BoardModel(records: [dormant, work, pinned], boardSessions: [BoardSession(id: "$4", order: 3, isGuest: true)], windows: windows, config: Config(),
                                     selection: selection,
                                                     location: selection.windowLocation, mode: mode)
             return QuickSwitchTargets(model: model, sessions: sessions, windows: [], tabIDs: [])
         }
-        let rows: [QuickSwitchTarget] = [.topic("pinned"), .topic("work"), .topic("dormant"), .locked("$4")]
+        let rows: [QuickSwitchTarget] = [.topic("pinned"), .topic("work"), .topic("dormant"), .boardSession("$4")]
 
         let inWork = targets(selecting: "@1")
-        XCTAssertEqual(inWork.topics, rows, "Pinned first, the Guest Session after the In Play places, no No Topic")
+        XCTAssertEqual(inWork.topics, rows, "Pinned first, the Board Session after the In Play places, no No Topic")
         XCTAssertEqual(Set(inWork.sessions), [.session("$1"), .session("$3")], "only the Active Topic's Sessions")
-        XCTAssertEqual(inWork.step(.topic, .next, from: .topic("dormant")), .locked("$4"))
-        XCTAssertEqual(inWork.step(.topic, .next, from: .locked("$4")), .topic("pinned"))
+        XCTAssertEqual(inWork.step(.topic, .next, from: .topic("dormant")), .boardSession("$4"))
+        XCTAssertEqual(inWork.step(.topic, .next, from: .boardSession("$4")), .topic("pinned"))
 
         let inNoTopic = targets(selecting: "@2")
-        XCTAssertEqual(inNoTopic.sessions, [.session("$2"), .session("$6")], "No Topic Sessions without the Locked one")
+        XCTAssertEqual(inNoTopic.sessions, [.session("$2"), .session("$6")], "No Topic Sessions without the one on the Board")
         XCTAssertEqual(inNoTopic.topics, rows)
 
-        XCTAssertEqual(targets(selecting: "@4").sessions, [.session("$4")], "a Locked Session steps only to itself")
+        XCTAssertEqual(targets(selecting: "@4").sessions, [.session("$4")], "a Board Session steps only to itself")
         XCTAssertEqual(targets(selecting: nil).sessions, [])
 
         let sessionMode = targets(selecting: "@1", mode: .sessions)
         XCTAssertEqual(sessionMode.sessions, sessions.map { .session($0.id) }, "every Session in Sessions mode")
-        XCTAssertEqual(sessionMode.topics, rows, "the Topics list order in Sessions mode too")
+        XCTAssertEqual(sessionMode.topics, rows, "the Board order in Sessions mode too")
     }
 
     func testTopicWindowStepGoesThroughEveryWindowOfTheActiveTopic() {
@@ -330,10 +332,10 @@ final class HintTests: XCTestCase {
         let sessions = ["$1", "$2", "$3"].map { id in
             SessionGroup(id: id, name: "session-" + id.dropFirst(), windows: windows.filter { $0.sessionID == id })
         }
-        func targets(selecting windowID: String, mode: SidebarMode = .topics) -> QuickSwitchTargets {
+        func targets(selecting windowID: String, mode: SidebarMode = .board) -> QuickSwitchTargets {
             var selection = TopicSelection()
             selection.windowID = windowID
-            let model = TopicsModel(records: [work], windows: windows, config: Config(), selection: selection,
+            let model = BoardModel(records: [work], windows: windows, config: Config(), selection: selection,
                             location: selection.windowLocation, mode: mode)
             let session = windows.first { $0.id == windowID }?.sessionID
             return QuickSwitchTargets(model: model, sessions: sessions, windows: windows.filter { $0.sessionID == session },

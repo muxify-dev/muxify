@@ -2,13 +2,14 @@ import Foundation
 
 public enum TopicGroupID: Hashable, Sendable {
     case topic(String)
-    case locked(String)
+    case session(String)
     case noTopic
 
-    /// The card that a Window's Session is on: its open Topic, else its Lock, else none.
-    public init(_ window: TmuxWindow, open: Set<String>, locked: Set<String>) {
+    /// The card that a Window's Session is on: its open Topic, else its Board Session, else none. `boardSessions` has the
+    /// id of each live Board Session, by the Session's tmux id.
+    public init(_ window: TmuxWindow, open: Set<String>, boardSessions: [String: String]) {
         if let id = window.topicID, open.contains(id) { self = .topic(id) }
-        else if locked.contains(window.sessionID) { self = .locked(window.sessionID) }
+        else if let id = boardSessions[window.sessionID] { self = .session(id) }
         else { self = .noTopic }
     }
 }
@@ -68,8 +69,9 @@ public enum Location: Hashable, Codable, Sendable {
             var page = values.nestedContainer(keyedBy: ValueKeys.self, forKey: .emptyTopic)
             switch group {
             case .topic(let id): try page.encode(id, forKey: .id)
-            case .locked:
-                throw EncodingError.invalidValue(group, .init(codingPath: encoder.codingPath, debugDescription: "A Locked Session has no Empty Topic page."))
+            case .session:
+                throw EncodingError.invalidValue(group, .init(codingPath: encoder.codingPath,
+                                                              debugDescription: "Only the Mac shows a Board Session's page; no request names it."))
             case .noTopic: try page.encode(true, forKey: .noTopic)
             }
         case .openPlace(let id):

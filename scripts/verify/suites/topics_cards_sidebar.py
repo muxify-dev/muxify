@@ -46,19 +46,23 @@ class TopicsCardsSidebar(TopicsSidebar):
     def client_windows(self):
         return self.s.tmux('list-clients', '-F', '#{window_id}').split()
 
-    def test_a_new_topic_is_a_guest_under_a_guest_session_also_with_a_free_place(self):
+    def test_a_new_topic_is_a_guest_under_a_board_session_among_the_guests_also_with_a_free_place(self):
         self.write_topic('insert-pin', 'Pinned', order=0, pinned=True)
         self.write_topic('insert-existing', 'Existing', order=0)
         sid = self.new_session('insert-guest', self.beta)
+        # As an older Muxify kept it on the list; the app imports it as a Board Session, and the Session then points at it.
         self.s.tmux('set-option', '-t', sid, '@muxify_lock', '2')
-        guest = 'locked-' + sid
+        board_session_id = wait(lambda: self.s.tmux('show-options', '-qv', '-t', sid, '@muxify_session_id'),
+                                'the Board Session was not imported')
+        self.addCleanup(self.store.remove_board_session, board_session_id)
+        guest = 'board-session-' + board_session_id
         self.find(guest)
         key = 'topic-' + self.create_topic('Inserted as a Guest')['id']
         expected = ['topic-insert-pin', 'topic-insert-existing', guest, key]
         def shown(rs):
             return [row for row in self.s.ids(rs) if row in expected]
         self.s.wait_rows(lambda rs: shown(rs) == expected and 'Guest' in self.s.row(key, rs).get('accessibilityValue', ''),
-                         lambda: 'the new Topic is not a Guest under the Guest Session: %s' % shown(self.s.rows()))
+                         lambda: 'the new Topic is not a Guest under the Board Session: %s' % shown(self.s.rows()))
 
     def test_window_moved_to_topic_keeps_its_panes_agent_and_browser(self):
         s = self.s
@@ -401,7 +405,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_go_to_session_on_a_session_card_goes_to_the_sessions_active_window(self):
         s = self.s
-        self.addCleanup(self.s.show_sidebar_mode, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'board')
         sid = self.new_session('card-session', self.beta)
         first, second = self.windows(sid, 2)
         s.tmux('select-window', '-t', second)
@@ -417,7 +421,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_a_click_on_another_session_card_goes_to_the_sessions_active_window(self):
         s = self.s
-        self.addCleanup(self.s.show_sidebar_mode, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'board')
         sid = self.new_session('card-session-click', self.beta)
         first, second = self.windows(sid, 2)
         s.tmux('select-window', '-t', second)

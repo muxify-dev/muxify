@@ -23,7 +23,7 @@ public enum HostProtocol {
     /// uses: the Mac `macCapabilities`, the phone all of them.
     public static let capabilities: [String] = HostCapability.allCases.map(\.rawValue)
     /// What the Mac uses of a Host Server's capabilities.
-    public static let macCapabilities: [String] = [HostCapability.statusLine.rawValue]
+    public static let macCapabilities: [String] = [HostCapability.statusLine.rawValue, HostCapability.board.rawValue]
     /// How long the client waits for the server's `hello`.
     public static let helloTimeout: TimeInterval = 10
     /// How long the server waits for any frame before it exits. Longer than the Mac's own master timeout
@@ -47,6 +47,13 @@ public enum HostCapability: String, CaseIterable, Sendable {
     case browserTabs = "browser-tabs"
     /// `status_line`: the Host Server's Listener hides tmux's status line in the Terminal's Sessions (ADR 0099).
     case statusLine = "status-line"
+    /// The Board Sessions, which take an In Play place or are Guests, and which a tmux restart keeps: the
+    /// `board_sessions` event of the `environment` subscription, `dormant_session` cards in `snapshot` items and
+    /// `environment_show` answers, and the `board_session` target and card of an `environment` request, which `reopen`,
+    /// `start_fresh`, `bench_topic`, `fill_open_place` and the card moves take. A client
+    /// that did not declare it gets no `board_sessions` event, and no card for a Dormant Board Session; it still gets a
+    /// live one as a `session` card, and an Open Place card for a Dormant one in an In Play place.
+    case board
 }
 
 /// The `kind` of a frame.

@@ -11,11 +11,11 @@ final class SessionPathAliasTests: XCTestCase {
         .fixture(id: id, sessionID: "$" + session, sessionName: session, path: directory, topicID: topic, sessionPath: directory)
     }
 
-    private func catalog(records: [TopicRecord] = [], windows: [TmuxWindow] = [], mode: SidebarMode = .topics) -> PaletteCatalog {
+    private func catalog(records: [TopicRecord] = [], windows: [TmuxWindow] = [], mode: SidebarMode = .board) -> PaletteCatalog {
         var config = Config()
         config.sessionPaths = [vault, game]
-        let model = TopicsModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: mode, agents: [])
-        return PaletteCatalog(windows: windows, agents: [], sessionPaths: [vault, game], topics: model, records: records)
+        let model = BoardModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: mode, agents: [])
+        return PaletteCatalog(windows: windows, agents: [], sessionPaths: [vault, game], board: model, records: records)
     }
 
     private func discovered(_ config: Config) -> [SessionPath] {
@@ -103,12 +103,12 @@ final class SessionPathAliasTests: XCTestCase {
                        window("@2", session: "game/write", directory: "/work/game/main", topic: "t")]
         // A Topic lists its Sessions oldest first.
         windows[1].sessionCreated = 1
-        let model = catalog(records: [record], windows: windows).topics!
+        let model = catalog(records: [record], windows: windows).board!
         XCTAssertEqual(model.rows.first { $0.id == .topic("t") }?.sessions.map(\.baseName), ["vault", "game"])
         var settled = record
         settled.settledAt = "2026-01-01T00:00:00Z"
         settled.sessions.append(.object(["id": .string("notes"), "name": .string("notes/write"), "base_name": .string("notes"), "directory": .string("/work/vault")]))
-        XCTAssertEqual(TopicsModel.settledRow(settled, labels: TopicLabels([settled]), sessionPaths: [vault, game], tags: nil, expanded: []).sessions.map(\.baseName),
+        XCTAssertEqual(BoardModel.settledRow(settled, labels: TopicLabels([settled]), sessionPaths: [vault, game], tags: nil, expanded: []).sessions.map(\.baseName),
                         ["debug", "notes"])
         XCTAssertEqual(SessionNaming.available(vault.name, topic: "write-notes", taken: []), "vault/write-notes")
     }

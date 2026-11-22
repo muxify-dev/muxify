@@ -107,7 +107,7 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.assertLessEqual(latency, REFRESH_LIMIT, 'file write -> live Topic row took %.3f s' % latency)
 
     def test_sessions_view_lists_every_session_and_no_topics(self):
-        self.addCleanup(self.s.show_sidebar_mode, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'board')
         self.new_session('listed', self.beta)
         self.new_session('alpha/listed-topic', self.alpha, topic='listed-topic')
         self.write_topic('listed-topic', 'Listed proof')
@@ -124,7 +124,7 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.write_topic('view-back', 'View back proof')
         self.s.show_sidebar_mode('sessions')
         self.s.wait_rows(lambda rs: self.s.has('session-' + sid, rs), 'Sessions view has no row for %s' % sid)
-        self.s.show_sidebar_mode('topics')
+        self.s.show_sidebar_mode('board')
         self.find('topic-view-back')
         live = self.s.tmux('list-sessions', '-F', '#{session_id}').split()
         latency, rs = self.rows_until(lambda rs: self.s.has('topic-view-back', rs)

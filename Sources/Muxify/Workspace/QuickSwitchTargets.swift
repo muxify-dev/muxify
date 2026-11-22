@@ -63,14 +63,14 @@ enum StepDirection {
 }
 
 enum QuickSwitchTarget: Hashable {
-    /// `locked` is a Locked Session's card in Topics mode, by Session ID. `openPlace` is an Open Place, by its In Play
+    /// `boardSession` is a Board Session's card on the Board, by its id. `openPlace` is an Open Place, by its In Play
     /// place counted from 1: going there shows its Open Place page.
-    case topic(String), locked(String), openPlace(Int), session(String), window(String), tab(UUID), terminal
+    case topic(String), boardSession(String), openPlace(Int), session(String), window(String), tab(UUID), terminal
 
     var accessibilityID: String {
         switch self {
         case .topic(let id): "hint-topic-" + id
-        case .locked(let id): "hint-locked-" + id
+        case .boardSession(let id): "hint-board-session-" + id
         case .openPlace(let place): "hint-open-place-\(place)"
         case .session(let id): "hint-session-" + id
         case .window(let id): "hint-window-" + id
@@ -85,13 +85,13 @@ struct QuickSwitchTargets {
     /// when a place opens or fills.
     let cards: [QuickSwitchTarget]
     let windows: [QuickSwitchTarget]
-    /// The Windows a Topic Window step goes through: the Active Topic's in Sidebar order in Topics mode, the
+    /// The Windows a Topic Window step goes through: the Active Topic's in Sidebar order in the Board view, the
     /// Session's in Sessions mode.
     let topicWindows: [QuickSwitchTarget]
     let tabs: [QuickSwitchTarget]
-    /// The Sessions a Session step goes through: every Session in Sessions mode, the Active Topic's in Topics mode.
+    /// The Sessions a Session step goes through: every Session in Sessions mode, the Active Topic's in the Board view.
     let sessions: [QuickSwitchTarget]
-    /// The rows of the Topics list, Locked Sessions included, in either Sidebar mode. A Topic step skips an Open Place.
+    /// The rows of the Board, Board Sessions included, in either Sidebar mode. A Topic step skips an Open Place.
     let topics: [QuickSwitchTarget]
 
     func target(for selection: QuickSwitchSelection) -> QuickSwitchTarget? {
@@ -130,9 +130,9 @@ struct QuickSwitchTargets {
 }
 
 extension QuickSwitchTargets {
-    init(model: TopicsModel, sessions: [SessionGroup], windows: [TmuxWindow], tabIDs: [UUID]) {
-        // No Topic Sessions get no number: the Topics list shows at most one of them, and only while it is open.
-        // A Locked Session's card is numbered by its place among the Topics. A hidden Benched card gets no number,
+    init(model: BoardModel, sessions: [SessionGroup], windows: [TmuxWindow], tabIDs: [UUID]) {
+        // No Topic Sessions get no number: the Board shows at most one of them, and only while it is open.
+        // A Board Session's card is numbered by its place among the Topics. A hidden Benched card gets no number,
         // and a Topic step skips it, so repeated steps do not go through the whole Bench.
         let numbered: [QuickSwitchTarget] = model.list.compactMap { item in
             if case .openPlace(_, let place) = item { return .openPlace(place) }
@@ -141,17 +141,17 @@ extension QuickSwitchTargets {
         let cards = numbered.filter { if case .openPlace = $0 { return false } else { return true } }
         let allSessions = sessions.map { QuickSwitchTarget.session($0.id) }
         let sessionWindows = windows.map { QuickSwitchTarget.window($0.id) }
-        let shown = model.mode == .topics ? Self.sessions(of: model) : nil
-        self.init(cards: model.mode == .topics ? numbered : allSessions, windows: sessionWindows,
+        let shown = model.mode == .board ? Self.sessions(of: model) : nil
+        self.init(cards: model.mode == .board ? numbered : allSessions, windows: sessionWindows,
                   topicWindows: shown.map { $0.flatMap(\.windows).map { .window($0.id) } } ?? sessionWindows,
                   tabs: tabIDs.map { .tab($0) }, sessions: shown.map { $0.map { .session($0.id.session) } } ?? allSessions,
                   topics: cards)
     }
 
     /// The Sessions the Active Topic's card shows. No Topic has no card, so it gives its Sessions that have no
-    /// Locked Session card of their own.
-    private static func sessions(of model: TopicsModel) -> [TopicsModel.Session] {
-        let shown: [TopicsModel.Session]
+    /// Board Session card of their own.
+    private static func sessions(of model: BoardModel) -> [BoardModel.Session] {
+        let shown: [BoardModel.Session]
         switch model.activeTopic {
         case nil: shown = []
         case .noTopic:
@@ -169,7 +169,7 @@ extension TopicGroupID {
     var quickSwitchTarget: QuickSwitchTarget? {
         switch self {
         case .topic(let id): .topic(id)
-        case .locked(let id): .locked(id)
+        case .session(let id): .boardSession(id)
         case .noTopic: nil
         }
     }
@@ -182,7 +182,7 @@ extension WorkspaceStore {
     }
 
     var quickSwitchTargets: QuickSwitchTargets {
-        QuickSwitchTargets(model: topics, sessions: sessions, windows: quickSwitchWindows,
+        QuickSwitchTargets(model: board, sessions: sessions, windows: quickSwitchWindows,
                            tabIDs: currentBrowser?.tabs.map(\.id) ?? [])
     }
 
@@ -209,8 +209,8 @@ extension WorkspaceStore {
         case .window, .topicWindow: selectedWindow.map { .window($0.id) }
         case .session: selectedWindow.map { .session($0.sessionID) }
         case .topic:
-            if case .openPlace(let id) = location { topics.place(ofOpenPlace: id).map(QuickSwitchTarget.openPlace) }
-            else { topics.activeTopic?.quickSwitchTarget }
+            if case .openPlace(let id) = location { board.place(ofOpenPlace: id).map(QuickSwitchTarget.openPlace) }
+            else { board.activeTopic?.quickSwitchTarget }
         }
         return quickSwitchTargets.step(level, direction, from: current)
     }
@@ -222,9 +222,9 @@ extension WorkspaceStore {
     private func go(to target: QuickSwitchTarget) {
         switch target {
         case .topic(let id): goToTopic(.topic(id))
-        case .locked(let id): goToTopic(.locked(id))
+        case .boardSession(let id): goToTopic(.session(id))
         case .openPlace(let place):
-            if let id = topics.openPlaceID(at: place) { goToOpenPlace(id) }
+            if let id = board.openPlaceID(at: place) { goToOpenPlace(id) }
         case .session(let id): goToSession(id)
         case .window(let id):
             if let window = windows.first(where: { $0.id == id }) { select(window) }

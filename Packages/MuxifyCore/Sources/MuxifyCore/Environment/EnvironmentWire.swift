@@ -17,6 +17,7 @@ extension EnvironmentChange: Codable {
     private enum CodingKeys: String, CodingKey {
         case session, topic, value
         case openPlaces = "open_places"
+        case boardSessions = "board_sessions"
         case server
     }
 
@@ -28,6 +29,8 @@ extension EnvironmentChange: Codable {
             self = .topic(id, try values.decodeIfPresent(TopicRecord.self, forKey: .value))
         } else if let places = try values.decodeIfPresent([OpenPlace].self, forKey: .openPlaces) {
             self = .openPlaces(places)
+        } else if let boardSessions = try values.decodeIfPresent([BoardSession].self, forKey: .boardSessions) {
+            self = .boardSessions(boardSessions)
         } else if let server = try values.decodeIfPresent(EnvironmentServer.self, forKey: .server) {
             self = .server(server)
         } else {
@@ -45,6 +48,7 @@ extension EnvironmentChange: Codable {
             try values.encode(id, forKey: .topic)
             try values.encode(record, forKey: .value)
         case .openPlaces(let places): try values.encode(places, forKey: .openPlaces)
+        case .boardSessions(let boardSessions): try values.encode(boardSessions, forKey: .boardSessions)
         case .server(let server): try values.encode(server, forKey: .server)
         }
     }
@@ -65,9 +69,28 @@ extension EnvironmentSession: Codable {
 
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(windows, forKey: .windows)
+        if let lockOrder {
+            try values.encode(windows.map { LockedWindow(window: $0, lockOrder: lockOrder) }, forKey: .windows)
+        } else {
+            try values.encode(windows, forKey: .windows)
+        }
         try values.encode(panes, forKey: .panes)
         try values.encode(commandLines, forKey: .commandLines)
+    }
+}
+
+/// A Window of a live Board Session as an older Mac reads it: its keys, and `lock_order`, its card's order. The second
+/// keyed container of one encoder writes into the same object as the first.
+private struct LockedWindow: Encodable {
+    let window: TmuxWindow
+    let lockOrder: Double
+
+    private enum CodingKeys: String, CodingKey { case lockOrder = "lock_order" }
+
+    func encode(to encoder: Encoder) throws {
+        try window.encode(to: encoder)
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(lockOrder, forKey: .lockOrder)
     }
 }
 
@@ -205,7 +228,9 @@ extension TmuxPane: Codable {
 }
 
 /// The fields that tmux and the Topic options give a Window. The Mac's own (`homeDirectory`, `hostName`,
-/// `isRemote`, `sourceID`) stay off the wire: it stamps them from the `server` event.
+/// `isRemote`, `sourceID`) stay off the wire: it stamps them from the `server` event. The Host imports a card that an
+/// older Muxify kept in `@muxify_lock` itself, so the option stays off the wire too. `lock_order` goes only to an older
+/// Mac (`LockedWindow`), and the Mac reads the Board Sessions from the `board_sessions` event, never from `lock_order`.
 extension TmuxWindow: Codable {
     private enum CodingKeys: String, CodingKey {
         case id
@@ -223,7 +248,6 @@ extension TmuxWindow: Codable {
         case openRequests = "open_requests"
         case topicID = "topic_id"
         case savedSessionID = "saved_session_id"
-        case lockOrder = "lock_order"
         case sessionPath = "session_path"
         case activePaneID = "active_pane_id"
         case startCommand = "start_command"
@@ -252,7 +276,6 @@ extension TmuxWindow: Codable {
                   openRequests: try values.decodeIfPresent([String].self, forKey: .openRequests) ?? [],
                   topicID: try values.decodeIfPresent(String.self, forKey: .topicID),
                   savedSessionID: try values.decodeIfPresent(String.self, forKey: .savedSessionID) ?? "",
-                  lockOrder: try values.decodeIfPresent(Double.self, forKey: .lockOrder),
                   sessionPath: try values.decodeIfPresent(String.self, forKey: .sessionPath) ?? "",
                   activePaneID: try values.decodeIfPresent(String.self, forKey: .activePaneID) ?? "",
                   startCommand: try values.decodeIfPresent(String.self, forKey: .startCommand) ?? "",
@@ -281,7 +304,6 @@ extension TmuxWindow: Codable {
         try values.encode(openRequests, forKey: .openRequests)
         try values.encodeIfPresent(topicID, forKey: .topicID)
         try values.encode(savedSessionID, forKey: .savedSessionID)
-        try values.encodeIfPresent(lockOrder, forKey: .lockOrder)
         try values.encode(sessionPath, forKey: .sessionPath)
         try values.encode(activePaneID, forKey: .activePaneID)
         try values.encode(startCommand, forKey: .startCommand)

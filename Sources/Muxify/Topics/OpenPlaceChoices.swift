@@ -1,9 +1,8 @@
 import MuxifyCore
 
-/// The rows of the Open Place page: the Topics that can fill an Open Place, the Guest Topics and then the Benched Topics,
-/// each in the order of the Topics list. A query hides the rows that do not match and never moves the others, so each
-/// Topic stays where the Sidebar has taught the user to find it. A Guest Session has no row: it cannot take a place
-/// until it is a Topic.
+/// The rows of the Open Place page: the cards that can fill an Open Place, the Guests, Topics and Board Sessions, and then
+/// the Benched Topics, each in the order of the Board. A query hides the rows that do not match and never moves the
+/// others, so each card stays where the Sidebar has taught the user to find it.
 struct OpenPlaceChoices {
     enum Section: CaseIterable {
         case guests, bench
@@ -17,9 +16,9 @@ struct OpenPlaceChoices {
     }
 
     struct Choice: Identifiable {
-        let topicID: String
+        let card: BoardCardID
         let section: Section
-        let row: TopicsModel.Row
+        let row: BoardModel.Row
         /// The title, with the marks of the query.
         let title: Highlighted
         /// The Topic Note, with the marks of the query.
@@ -27,26 +26,23 @@ struct OpenPlaceChoices {
         /// The names of the Sessions that the query matched, with its marks. None without a query.
         let matchedSessions: [Highlighted]
 
-        var id: String { topicID }
+        var id: String { row.id.accessibilityID }
     }
 
     /// The rows that the query keeps, Guests first.
     let choices: [Choice]
-    /// How many Topics can fill the place, before the query hides any.
+    /// How many cards can fill the place, before the query hides any.
     let total: Int
 
     /// `title` gives the title that the row's Sidebar card shows.
-    init(_ cut: InPlayCut<TopicsModel.Row>, query: String, title: (TopicsModel.Row) -> String = \.title) {
+    init(_ cut: InPlayCut<BoardModel.Row>, query: String, title: (BoardModel.Row) -> String = \.title) {
         let query = FuzzyQuery(query)
         let candidates = [(Section.guests, cut.guests), (.bench, cut.bench)].flatMap { section, rows in
-            rows.compactMap { row -> (Section, String, TopicsModel.Row)? in
-                guard case .topic(let id) = row.id else { return nil }
-                return (section, id, row)
-            }
+            rows.compactMap { row in row.id.listID.map { (section, $0, row) } }
         }
         total = candidates.count
-        choices = candidates.compactMap { section, id, row in
-            Self.choice(id, section: section, row: row, title: title(row), query: query)
+        choices = candidates.compactMap { section, card, row in
+            Self.choice(card, section: section, row: row, title: title(row), query: query)
         }
     }
 
@@ -66,7 +62,7 @@ struct OpenPlaceChoices {
 
     /// The fields follow the title in a fixed order, so the marks of each are at a known index: the Note, then each
     /// Session's name, then the Tags.
-    private static func choice(_ id: String, section: Section, row: TopicsModel.Row, title: String, query: FuzzyQuery) -> Choice? {
+    private static func choice(_ card: BoardCardID, section: Section, row: BoardModel.Row, title: String, query: FuzzyQuery) -> Choice? {
         let note = row.note.flatMap { $0.isEmpty ? nil : $0 }
         let sessions = row.sessions.map(\.baseName)
         let fields = [SearchField.title(title)] + (note.map { [.hidden($0)] } ?? []) + sessions.map(SearchField.hidden)
@@ -82,7 +78,7 @@ struct OpenPlaceChoices {
             guard let marks = positions[firstSession + offset] else { return nil }
             return Highlighted(text: name, marks: marks)
         }
-        return Choice(topicID: id, section: section, row: row, title: Highlighted(text: title, marks: positions[0] ?? []),
+        return Choice(card: card, section: section, row: row, title: Highlighted(text: title, marks: positions[0] ?? []),
                       note: note.map { Highlighted(text: $0, marks: positions[noteIndex] ?? []) },
                       matchedSessions: matchedSessions)
     }

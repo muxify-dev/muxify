@@ -84,7 +84,7 @@ class TopicsSidebar(unittest.TestCase):
         if self.s.has('palette-search'):
             self.s.driver('action', 'palette-search', 'Close')
             self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Palette did not close')
-        self.s.show_sidebar_mode('topics')
+        self.s.show_sidebar_mode('board')
         # An open group takes up to a third of the Sidebar, and the Topic list then builds fewer rows.
         rs = self.s.rows()
         if self.expanded('settled-topics', rs):
@@ -153,6 +153,22 @@ class TopicsSidebar(unittest.TestCase):
                 rs = self.s.driver('dump', key, reveal=True)['rows']
             return rs if self.s.has(key, rs) else None
         return wait(found, message or 'no row ' + key)
+
+    def move_into_a_place(self, key):
+        """Steps the card up with its Move Up action until it holds an In Play place, as the user does with the key:
+        through the Guests, then into the lowest Open Place, the next free place, or a Trade with the last place.
+        Returns the rows once the card is no Guest."""
+        s = self.s
+        for _ in range(12):
+            rs = self.find(key)
+            row = s.row(key, rs)
+            if 'Guest' not in row.get('accessibilityValue', ''):
+                return rs
+            before = (row.get('frame'), row.get('accessibilityValue'))
+            s.act('action', key, 'Move Up')
+            s.wait_rows(lambda rs: s.has(key, rs) and (s.row(key, rs).get('frame'), s.row(key, rs).get('accessibilityValue')) != before,
+                        'Move Up did not move the card ' + key)
+        self.fail('Move Up did not take the card %s into an In Play place' % key)
 
     def no_topic_cards(self, rs):
         """The Session IDs of the No Topic cards. The Topic list has one only while the selected Window is in No Topic."""

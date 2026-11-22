@@ -109,8 +109,8 @@ struct OpenPlacePageView: View {
     }
 }
 
-/// One Topic that can fill the place, drawn as its closed Sidebar card: the title, the Tags, the Topic Note and the
-/// summary of its Sessions, with the Agent mark on its spine. The selected row is tinted in the accent colour while the
+/// One card that can fill the place, a Topic or a Board Session, drawn as its closed Sidebar card: the title, the Tags,
+/// the Topic Note and the summary of its Sessions, with the Agent mark on its spine. The selected row is tinted in the accent colour while the
 /// search field has Focus, and in grey without it, as a list without Focus shows its selection on macOS.
 private struct OpenPlaceRow: View {
     let store: WorkspaceStore
@@ -119,15 +119,16 @@ private struct OpenPlaceRow: View {
     let listHasFocus: Bool
     @Environment(\.interfaceFontSize) private var fontSize
 
-    private var row: TopicsModel.Row { choice.row }
+    private var row: BoardModel.Row { choice.row }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
-        let formatted = store.sidebarText(.topic, context: store.sidebarFormatContexts.topics[row.id])
+        let formatted = store.cardText(row)
         let tags = store.cardTags(row).map { CardTags(placement: $0.placement, items: $0.items, identifier: "open-place-" + $0.identifier) }
-        Button { store.fillOpenPlaceFromPage(with: choice.topicID) } label: {
+        Button { store.fillOpenPlaceFromPage(with: choice.card) } label: {
             VStack(alignment: .leading, spacing: 0) {
                 CardHeader(title: choice.title.text, isOpen: false, mark: row.mark, isGuest: row.isGuest,
+                           isBoardSession: row.id.isBoardSession,
                            notes: (row.isGuest ? ["Guest"] : []) + (row.idleLabel.map { [$0] } ?? []),
                            summary: formatted.summary, tags: tags, note: choice.note?.text,
                            titleMarks: choice.title.marks, noteMarks: choice.note?.marks ?? []) {
@@ -137,7 +138,7 @@ private struct OpenPlaceRow: View {
                     matchedSessions.padding(.leading, 13).padding(.trailing, 10).padding(.bottom, 7)
                 }
             }
-            .cardTagsOverlay(tags) { store.fillOpenPlaceFromPage(with: choice.topicID) }
+            .cardTagsOverlay(tags) { store.fillOpenPlaceFromPage(with: choice.card) }
             .opacity(row.state == .dormant || row.state == .empty ? 0.55 : 1)
             .background {
                 if isSelected { shape.fill(listHasFocus ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.18)) }
@@ -155,7 +156,7 @@ private struct OpenPlaceRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(choice.title.text)
-        .accessibilityAction { store.fillOpenPlaceFromPage(with: choice.topicID) }
+        .accessibilityAction { store.fillOpenPlaceFromPage(with: choice.card) }
         .accessibilityValue(isSelected ? "selected" : "")
         .accessibilityIdentifier("open-place-row-" + row.id.accessibilityID)
     }

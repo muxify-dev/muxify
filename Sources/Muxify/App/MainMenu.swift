@@ -102,7 +102,7 @@ import MuxifyCore
         let store = self.store
         /// Only an App Window whose Environment serves Topics offers them.
         let topicsAvailable = store.map { $0.link.features.contains(.topics) && !$0.changingTopic } ?? false
-        let topicsEnabled = store?.topics.topicsEnabled == true
+        let topicsEnabled = store?.board.topicsEnabled == true
         let hasWindow = store?.selectedWindow != nil
         let remoteActionEnabled = store.map { $0.link.isOnThisMac || $0.isConnected } ?? false
         return [
@@ -162,8 +162,8 @@ import MuxifyCore
             item("Show Panes", enabled: store != nil && config.sidebar.panes == nil, checked: store?.panesVisible ?? false) {
                 store?.panesVisible.toggle()
             },
-            item(store?.topics.isBenchShown == true ? "Hide Bench" : "Show Bench", keybinds.firstTrigger(for: .toggleBench),
-                 enabled: store?.topics.isBenchShown != nil) { store?.toggleBench() },
+            item(store?.board.isBenchShown == true ? "Hide Bench" : "Show Bench", keybinds.firstTrigger(for: .toggleBench),
+                 enabled: store?.board.isBenchShown != nil) { store?.toggleBench() },
             item(store?.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", keybinds.firstTrigger(for: .toggleGitView),
                  enabled: store.map { $0.selectedWindow != nil && $0.gitViewRefusal == nil } ?? false) { store?.toggleGitView() },
             .separator(),

@@ -246,10 +246,11 @@ topics:
 ```
 
 After a computer restart, tmux comes back with none of your Sessions, so every
-open Topic is Dormant until you go to it. With `true`, Muxify Reopens every
-Dormant Topic by itself when it launches: Pinned, In Play, Guests and the Bench.
-It is the same Reopen as going to the Topic, so the remembered Sessions,
-Windows, Panes, Tabs and Agents are created again, one Topic after another.
+open Topic and every Board Session is Dormant until you go to it. With `true`,
+Muxify Reopens every Dormant Topic by itself when it launches: Pinned, In Play,
+Guests and the Bench, and then every Dormant Board Session. It is the same
+Reopen as going to the card, so the remembered Sessions, Windows, Panes, Tabs
+and Agents are created again, one card after another.
 Settled Topics stay Settled, Empty Topics create nothing, and a Topic that
 already has a live Session is left as it is. A Topic whose Reopen fails stays
 Dormant, shows the failure as a Reopen does, and the others still Reopen.
@@ -271,18 +272,21 @@ topics:
   in_play: 3
 ```
 
-`topics.in_play` is the number of In Play places. The Sidebar shows the Pinned
-Topics, the Topics in these places and the Guests. These cards are In Play.
-The other open Topics are the Bench. They keep their place in the list, their
-Sessions and their Agents, but they hide behind one line under the In Play
-cards. The value is a whole number of 1 or more, and 3 when you do not set it.
-Any other value appears in the Config problems banner, and Muxify uses 3.
+`topics.in_play` is the number of In Play places. The Board shows the Pinned
+Topics, the Topics and Board Sessions in these places, and the Guests. These
+cards are In Play. The other open Topics are the Bench. They keep their place
+on the Board, their Sessions and their Agents, but they hide behind one line
+under the In Play cards. The value is a whole number of 1 or more, and 3 when
+you do not set it. Any other value appears in the Config problems banner, and
+Muxify uses 3. When you make the value smaller, a Board Session past the last
+place shows among the Guests.
 
-In Play is the only way the Sidebar lists the Topics. An older Muxify showed
+In Play is the only way the Board lists its cards. An older Muxify showed
 every card in one list until you set `in_play`. The first time this Muxify
-runs, the first 5 Topics that are not Pinned take the places, each Locked
-Session becomes a Guest Session, and the other Topics go to the Bench. No
-Topic is lost: click the Bench line, or press ⇧⌘S, to show them.
+runs, the first 5 Topics that are not Pinned take the places, each Session
+that the older Muxify kept as a card becomes a Board Session among the Guests,
+and the other Topics go to the Bench. No Topic is lost: click the Bench line, or press
+⇧⌘S, to show them.
 `topics.insert_position` is gone. A Config that sets it shows a Config
 problem, and you can remove the line.
 
@@ -294,26 +298,43 @@ problem, and you can remove the line.
 - A Guest is a card In Play above the limit, with a "Guest" mark. Make a Guest
   (Sidebar menu, Command Palette, `muxify topic make-guest`) puts a Benched
   Topic or a No Topic Session at the end of the Guests, and no other card goes
-  to the Bench. A No Topic Session that you make a Guest is a Guest Session.
-  `muxify topic make-guest --session <name>` makes one too.
-- Bench (Sidebar menu, Command Palette) takes a card out of In Play. An In
-  Play Topic or a Guest Topic goes to the top of the Bench, as `muxify topic
-  bench` does. The Topic keeps its Sessions and Agents, and a Guest Topic loses
-  its mark. A Guest Session stops being a Guest, as `muxify topic bench
-  --session <name>` does: it waits in No Topic, because a Session has no record
-  to keep it on the Bench.
+  to the Bench. A No Topic Session that you make a Guest becomes a Board
+  Session. `muxify topic make-guest --session <name>` makes one too.
+- A Board Session is a No Topic Session that has a card on the Board, live or
+  Dormant. Its card takes an In Play place or is a Guest, by the rules of a
+  Topic's card. Move Topic Up and Move Topic Down, a trade, Fill an Open Place
+  and Choose In Play work on it as on a Topic. `muxify session move
+  up` and `down` move its card, and `--board-session <id>` names it, also a
+  Dormant one. It is never Pinned and never on the Bench. Settle, Pin, Forget,
+  the Topic Note and Tags are for Topics only. On the Board, its card shows a
+  small terminal glyph before its title. A Topic's card has none, and Sessions
+  mode does not show the glyph. A Dormant Board Session keeps its place, In Play
+  or among the Guests, and Reopen and Start Fresh bring it back there.
+- Bench (Sidebar menu, Command Palette) takes a card out of In Play. An In Play
+  Topic or a Guest Topic goes to the top of the Bench, as `muxify topic bench`
+  does. The Topic keeps its Sessions and Agents, and a Guest Topic loses its
+  mark. The Bench holds only Topics, so Bench takes the card of a Board Session,
+  live or Dormant, off the Board, as `muxify topic bench --session <name>` and
+  `--board-session <id>` do. A live Session stays as a No Topic Session, and a
+  Dormant one is gone. Each move that would send a Board Session to the Bench
+  does the same: Move Topic Down from the last Guest, a trade with a Benched
+  Topic, Replace from Bench on it, and Choose In Play when it held a place and
+  gets none.
 - When you Settle, Forget or Bench the card that you are on, Muxify opens the
   next card that shows. After the last card that shows, it opens the first In
   Play card. It never opens a Pinned Topic this way. After Bench, when no
   other card is In Play, you stay on the Benched card.
 - When a card leaves an In Play place, by Settle, Forget, Pin or Bench,
-  its place becomes an Open Place, a dashed card "Open Place". No Benched card
+  its place becomes an Open Place, a dashed card "Open Place". A Board Session
+  in a place whose Session goes into a Topic, or ends, leaves an Open Place
+  too. No Benched card
   moves up, and the other places keep their positions. The Topic records keep
   the Open Place (the `open_places` table of the state database), so it stays
   after a restart of Muxify or tmux, until you fill it. A click on an Open Place lists
-  the Guest Topics, then the Benched Topics. The Topic that you choose takes
-  the place, and a Guest loses its mark. `muxify topic fill-place` does the
-  same. A Guest Session must become a Topic before it can take a place. When
+  the Guests, both Topics and Board Sessions, then the Benched Topics. The card
+  that you choose takes the place, and a Guest loses its mark. `muxify topic
+  fill-place` does the same, and its `--session` and `--board-session` options
+  name a Board Session. When
   a Guest leaves, by Settle, Pin, Bench or the end of its
   Session, it leaves no Open Place, and the Guests get one card shorter.
 - A drag inside one section reorders the cards there, and the Guest mark stays
@@ -321,20 +342,24 @@ problem, and you can remove the line.
   on a card on the other side is a trade. The two cards exchange their places,
   and no other card moves. Each card takes the mark of its new section. A Guest
   that comes into a place loses its mark, and a card that comes into the Guests
-  gets it. A Guest dropped on an Open Place fills it. A Guest Session cannot
-  take a place, and an In Play card cannot trade with a Guest Session. Replace
+  gets it. A Guest dropped on an Open Place fills it. A Board Session trades
+  as a Topic does. When a trade would send it to the Bench, its card leaves
+  the Board, because the Bench holds only Topics. Replace
   from Bench on a Guest gives its mark to the card that comes in.
 - A new Topic is a Guest: New Topic, `muxify topic new` and Move to a new
   Topic put it at the end of the Guests, also when an In Play place is free.
   Move it In Play or to the Bench yourself. A Settled Topic that Reopen or Start
   Fresh brings back goes to the top of the Bench, right after the In Play cards.
-  It does not fill an Open Place. When the list has fewer cards than
+  It does not fill an Open Place. When the Board has fewer cards than
   `in_play`, it goes last. A Pinned Topic that returns goes last among the
   Pinned Topics. A Dormant Topic keeps its place.
-  A Topic made from a Guest Session takes that Guest's place.
+  A Topic made from a Board Session, or from its last Window or Pane, takes the
+  Board Session's place and section: its In Play place, or its place among the
+  Guests.
 - Choose In Play… (`choose_in_play`, ⇧⌥⌘S) sets which cards are In Play, and
   in what order. It opens in the palette with a box on each open Topic that is
-  not Pinned, and the In Play Topics and the Guest Topics start checked. A
+  not Pinned and on each Board Session, and the cards In Play, in the places
+  and among the Guests, start checked. A
   query such as `#work` narrows the rows. Space in an empty field, ⇥ or a
   click checks or unchecks a row, and ⌘A checks every row that shows. ↩ goes
   on with the checked cards, or with the highlighted card when none is
@@ -343,21 +368,26 @@ problem, and you can remove the line.
   Places when you check fewer. Then you choose the card for each
   place in turn, one place for each checked card. The places after the In Play
   places are the top of the Bench, and the note tells when a place is on the
-  Bench. The rows keep the list order, so ↩ on each place keeps it. ⌫ in the
+  Bench. The rows keep the order of the Board, so ↩ on each place keeps it. ⌫ in the
   empty field goes back one place. The last card needs no choice. A Guest that
   you choose for a place loses its mark. A Guest that you do not choose stays
-  a Guest, checked or not, and has no place on the Bench to choose. When you
+  a Guest, checked or not, and has no place on the Bench to choose. A Board
+  Session that held a place and gets none leaves the Board, because the Bench
+  holds only Topics. When you
   check fewer cards than `in_play`, the other places are Open Places. The
   cards that you did not check keep their order under the checked cards.
-  `muxify topic choose-in-play` does the same.
+  `muxify topic choose-in-play` does the same. Its `--session` and
+  `--board-session` options name a Board Session.
 - Replace from Bench… (`replace_from_bench`, ⌥⌘S) works on the card that you
-  are on while it is In Play, a Topic or a Guest Session. Choose a Benched card
-  in the palette; a query such as `#work` narrows the rows. The card that you
+  are on while it is In Play, a Topic or a Board Session. Choose a Benched Topic
+  in the palette; a query such as `#work` narrows the rows. The Topic that you
   choose takes the place, your card goes to the end of the Bench, and you go to
-  the card that you chose. On a Guest, the card that you choose gets the Guest
-  mark. Both Actions show in Topics mode and in Sessions
+  the Topic that you chose. A Board Session leaves the Board instead, because
+  the Bench holds only Topics. On a Guest, the Topic that you choose gets the
+  Guest mark. Both Actions show in the Board view and in Sessions
   mode. `muxify topic replace-from-bench` makes the same change, but it does not
-  change the Location, as `muxify topic move` does not.
+  change the Location, as `muxify topic move` does not. Its `--session` and
+  `--board-session` options name a Board Session to replace.
 - The line reads "Bench" while the Bench is hidden and "Hide Bench" while it
   shows. A click on it, `toggle_bench` (⇧⌘S), View > Show Bench and the Toggle
   Bench Command show or hide the Bench. The line shows only while the Bench has
@@ -367,7 +397,7 @@ problem, and you can remove the line.
 - The card that you are on always shows. When it is on the Bench, after a
   Command Palette jump for example, it shows directly under the line: alone
   while the Bench is hidden, and above the other Benched cards while it shows.
-  So it does not move when the Bench shows or hides, and its place in the list
+  So it does not move when the Bench shows or hides, and its place on the Board
   does not change. The Bench does not show for a jump.
 - The No Topic Session that you are on shows directly under the line, above the
   first Benched card. It does not count toward `in_play`.
@@ -459,7 +489,7 @@ in the Config problems banner.
 
 A drag on a Window row moves the Window, with its Pane rows, within its
 Session, in any card. The Session keeps its current Window, and tmux keeps the
-new order. Topic cards and Guest Session cards move the same way among the
+new order. Topic cards and Board Session cards move the same way among the
 cards with their pin.
 
 ## Header
@@ -721,8 +751,8 @@ These follow the size:
   idle labels of a Topic; Window, Pane and Agent rows with their
   Summaries and custom parts; remembered Windows; Tag chips and Tag Marks; the
   Bench and Guests lines, the "N more" pills over the list's edges and Open
-  Places; the Settled group's header and "Show N more"; the Topics/Sessions
-  switch; the drag labels "⇄ Trade" and "lands here"; the Agents heading and
+  Places; the Settled group's header and "Show N more"; the Board and Sessions
+  buttons; the drag labels "⇄ Trade" and "lands here"; the Agents heading and
   the empty states. The symbols beside that text grow with it: card and row
   icons, chevrons, and the dots of Row marks and Agent marks.
 - The fixed heights and widths in the Sidebar that hold text: the corner of a
@@ -1743,9 +1773,13 @@ See [Hints and shortcut positions](keybindings.md#hints) for key remaps and hold
 
 ## Sidebar
 
-`sidebar.topics` and `sidebar.sessions` enable the two Sidebar modes. Both default to `true`.
+`sidebar.board` and `sidebar.sessions` enable the two Sidebar views, the Board and the Sessions. Both default to `true`.
 `muxify environment show --json` reports both as `"sidebar":{"topics":true,"sessions":true}`, next to `tags`,
-with the defaults when a key is absent. Muxify Mobile reads it to show the same tabs as the Mac.
+with the defaults when a key is absent. There, `topics` is the Board.
+Muxify Mobile reads it to show the same tabs as the Mac.
+`sidebar.topics` is the old name of `sidebar.board`. Muxify still reads it, and the Config problems banner shows
+"sidebar.topics is now sidebar.board: rename the key". A mapping by view, such as `sidebar.agents`, still reads an old
+`topics` key the same way, with the problem "sidebar.agents.topics is now sidebar.agents.board: rename the key".
 `sidebar.panes` shows or hides Pane rows. Leave it out to use **View > Show Panes**.
 `sidebar.agents` shows or hides the Agents section. Leave it out to use **View > Show Agents**.
 A configured value disables the corresponding View menu choice.
@@ -1754,35 +1788,35 @@ A configured value disables the corresponding View menu choice.
 
 | Value | Agents shown |
 | --- | --- |
-| `active` | The Active Topic in Topics mode, or the selected Window's Session in Sessions mode. |
+| `active` | The Active Topic in the Board view, or the selected Window's Session in Sessions mode. |
 | `window` | The selected Window, in either mode. |
 | `all` | Every Agent. |
 
 Without a selected Window, `active` and `window` show every Agent.
 With `all`, the Agents of Benched Topics show their marks too.
-`agents` and `agents_scope` accept one value for both modes, or a mapping with `topics` and `sessions` values.
+`agents` and `agents_scope` accept one value for both modes, or a mapping with `board` and `sessions` values.
 
 ```yaml
 sidebar:
   panes: true
   agents:
-    topics: true
+    board: true
     sessions: false
   agents_scope:
-    topics: window
+    board: window
     sessions: all
 ```
 
-### Switching Topics and Sessions
+### Switching the Board and Sessions
 
-Switch views with the Topics/Sessions buttons or a two-finger horizontal swipe
+Switch views with the Board and Sessions buttons or a two-finger horizontal swipe
 anywhere over the Sidebar, also over Agents. A swipe over the terminal or the
 browser scrolls there and does not switch views. ⌥⌘T
 ([`toggle_sidebar_mode`](keybindings.md#configurable-actions)), the **Switch to
-Sessions** / **Switch to Topics** Command and the View menu item of the same
+Sessions** / **Switch to Board** Command and the View menu item of the same
 name switch views too, as the other button does. While the Sidebar is hidden,
 they show it in the other view. While only one view can show, because
-`sidebar.topics` or `sidebar.sessions` is `false` or the App Window is on a
+`sidebar.board` or `sidebar.sessions` is `false` or the App Window is on a
 Remote Environment, Commands does not offer the switch, the View menu item is
 disabled, and the key shows an Explanation Pill that says why. View > Show
 Sessions still shows or hides the Sessions section.
@@ -1828,7 +1862,7 @@ sidebar:
 ### Window tooltips
 
 `sidebar.window_tooltips` controls the hover label on Window rows in both Sessions
-and Topics mode, including remembered Windows in Settled Topics.
+mode and the Board view, including remembered Windows in Settled Topics.
 
 - `off`: never show the label.
 - `truncated`: show it only when the row's formatted title is cut off.
@@ -1846,7 +1880,7 @@ sidebar:
 
 `sidebar.session_cards` sets which Session cards stay open when the
 Location moves to another Session. It acts on the Session cards of
-Sessions mode and on the No Topic and Guest Session cards of Topics mode, which
+Sessions mode and on the No Topic and Board Session cards of the Board view, which
 share one list of open cards. Topic cards are not affected: a new Active Topic
 always opens alone.
 
@@ -1877,7 +1911,7 @@ does not depend on this setting: Edit Tags… and `#` in New Topic work whenever
 
 The hover label and the accessibility value of the Tags name every Tag. A
 closed card in the Settled group shows no Tags; an opened one shows
-them as an open card does. Guest Sessions and Session cards show no Tags.
+them as an open card does. Board Sessions and Session cards show no Tags.
 
 ```yaml
 sidebar:
@@ -1891,14 +1925,14 @@ sidebar:
 loop is one chip, or one Tag Mark's hover text. A pass with no text leaves its
 Tag out, and `''` hides the Tags. Text outside the `T` loop does not show.
 Muxify draws the `+N` itself, so one Format serves every placement. It can
-differ by Sidebar mode, as other parts can; Topic cards show only in Topics
-mode. `null` keeps the default. To show Tags as plain text instead, set
+differ by Sidebar mode, as other parts can; Topic cards show only in the Board
+view. `null` keeps the default. To show Tags as plain text instead, set
 `tags: ''` and put `#{topic_tags}` in the Summary.
 
 ### Formats
 
 `sidebar.formats` sets the title and Summary of Topic cards, Session cards, Window rows, Pane rows, and Agent rows, and the Tags of Topic cards.
-Each `title` or `summary` accepts a string, or a mapping with `topics` and `sessions` values.
+Each `title` or `summary` accepts a string, or a mapping with `board` and `sessions` values.
 An empty Summary hides its line. An empty title uses the default title.
 Card Summaries appear only when the card is closed.
 Session headings within Topics, Settled Topic rows, and Command Palette rows keep their existing text.
@@ -1916,13 +1950,13 @@ sidebar:
     window:
       title: '#{window_index}:#{window_title}'
       summary:
-        topics: '#{?agent_kind,#{agent_kind} · #{agent_status},#{b:pane_current_path}}'
+        board: '#{?agent_kind,#{agent_kind} · #{agent_status},#{b:pane_current_path}}'
         sessions: ''
     pane:
       summary: '#{pane_current_command}'
     agent:
       title:
-        topics: '#{?topic_title,#{topic_title},#{window_name}}'
+        board: '#{?topic_title,#{topic_title},#{window_name}}'
         sessions: '#{window_name}'
       summary: '#{agent_kind} · #{agent_status}'
 ```
@@ -1933,7 +1967,7 @@ Bad syntax or an unknown variable produces a Config problem with its line number
 `#[` is reserved for future styles and is a Config problem. Use `##[` for literal text.
 
 Window `left` replaces the app icon. Window `right` replaces the Tab and Pane badges.
-Each accepts one Format string or separate `topics` and `sessions` values.
+Each accepts one Format string or separate `board` and `sessions` values.
 An omitted value or `null` keeps the built-in part. An empty string, or an expansion with no output, hides the part.
 A custom right part does not change the bell indicator.
 
@@ -1943,7 +1977,7 @@ sidebar:
     window:
       left: '#{current_app_icon}'
       right:
-        topics: '#{symbol:globe} #{tab_count}  #{symbol:rectangle.split.2x1} #{window_panes}'
+        board: '#{symbol:globe} #{tab_count}  #{symbol:rectangle.split.2x1} #{window_panes}'
         sessions: '🌐 #{tab_count}'
 ```
 
@@ -1957,7 +1991,7 @@ Icons are allowed only in Window `left` and `right` output, including conditiona
 Conditions, comparisons, truncation, and basename operations accept text only. An icon anywhere in those operands is a Config problem.
 Expanded variable values remain text, even when they contain icon syntax.
 Title and Summary Formats reject icon expressions. The Sidebar still sets their font, size and color: the size from the [Interface font size](#interface-font-size), the font from `ui.sidebar.font_family`.
-The built-in right part shows a Tab badge only when Tabs exist. It shows a Pane badge for every Window in Topics mode, and for multiple Panes in Sessions mode. While one Pane of the Window is Zoomed, the Pane badge is accent-colored on an accent capsule.
+The built-in right part shows a Tab badge only when Tabs exist. It shows a Pane badge for every Window in the Board view, and for multiple Panes in Sessions mode. While one Pane of the Window is Zoomed, the Pane badge is accent-colored on an accent capsule.
 
 | Expression | Result |
 | --- | --- |
@@ -1990,7 +2024,7 @@ Its `pane_current_command` and `pane_current_path` describe the active Pane.
 Pane values replace the inherited command, path, branch, Agent kind, and Agent Status.
 Agent counts remain those of the Window.
 Agent Formats use the Agent's own Pane, even when another Pane is selected.
-`agent_group` is the Topic row title, or `No Topic`, in Topics mode. It is the Session name in Sessions mode.
+`agent_group` is the Topic row title, or `No Topic`, in the Board view. It is the Session name in Sessions mode.
 It is empty for a Pane without an Agent, or when the Agents section is scoped to one Topic, Session, or Window.
 A custom Agent Summary appears whenever its expansion is not empty, including in a scoped section.
 Counts include Panes even when Pane rows are hidden. Flags use `1` and `0`.

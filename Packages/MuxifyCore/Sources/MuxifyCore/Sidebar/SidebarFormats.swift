@@ -37,7 +37,7 @@ public struct SidebarFormats: Equatable {
     public var windowParts = WindowParts()
     public var pane = Lines(title: "#{pane_label}")
     public var agent = Lines(title: "#{pane_label}", summary: "#{agent_group}")
-    /// The Tags of a Topic card. Topic cards show only in Topics mode, so the `sessions` value has no card to show on.
+    /// The Tags of a Topic card. Topic cards show only in the Board view, so the `sessions` value has no card to show on.
     public var topicTags = Config.Sidebar.PerMode(try! SidebarTagsFormat("#{T:#{tag}}"))
 
     public init() {}

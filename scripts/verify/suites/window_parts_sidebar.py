@@ -21,17 +21,17 @@ class WindowPartsSidebar(unittest.TestCase):
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics'])
 
     def setUp(self):
-        self.show_mode("topics")
+        self.show_mode("board")
         self.config.write_text(self.default_config)
         self.addCleanup(self.config.write_text, self.default_config)
 
     def show_mode(self, mode):
         self.s.show_sidebar_mode(mode)
-        card = 'topic-parts' if mode == 'topics' else 'session-' + self.session
+        card = 'topic-parts' if mode == 'board' else 'session-' + self.session
         self.s.wait_rows(lambda rs: self.s.has(card, rs), 'the card is missing in ' + mode)
         if 'expanded' not in self.s.row(card).get('accessibilityValue', ''):
             self.s.act('press', card)
-        self.row_key = ('topic-window-' if mode == 'topics' else 'session-window-') + self.window
+        self.row_key = ('topic-window-' if mode == 'board' else 'session-window-') + self.window
         return self.s.wait_rows(lambda rs: self.s.has(self.row_key, rs), 'the Window row is missing in ' + mode)
 
     def window_rows(self, rs):
@@ -45,20 +45,20 @@ class WindowPartsSidebar(unittest.TestCase):
         self.s.tmux('split-window', '-d', '-t', self.window, '/bin/zsh -f')
         self.addCleanup(self.s.tmux, 'kill-pane', '-a', '-t', self.window + '.0')
         self.s.tmux('resize-pane', '-Z', '-t', self.window + '.0')
-        for mode in ['topics', 'sessions']:
+        for mode in ['board', 'sessions']:
             self.show_mode(mode)
             self.s.wait_rows(lambda rs: self.label(rs) == 'Parts Window, 2, Zoomed',
                              'the Pane badge did not show the Zoomed Pane in ' + mode)
         self.s.tmux('resize-pane', '-Z', '-t', self.window + '.0')
-        for mode in ['topics', 'sessions']:
+        for mode in ['board', 'sessions']:
             self.show_mode(mode)
             self.s.wait_rows(lambda rs: self.label(rs) == 'Parts Window, 2',
                              'the Pane badge kept the Zoom mark in ' + mode)
 
     def test_native_defaults_keep_mode_specific_pane_badges(self):
-        for mode in ['topics', 'sessions']:
+        for mode in ['board', 'sessions']:
             self.show_mode(mode)
-            expected = 'Parts Window, 1' if mode == 'topics' else 'Parts Window'
+            expected = 'Parts Window, 1' if mode == 'board' else 'Parts Window'
             rs = self.s.wait_rows(lambda rs: self.label(rs) == expected, 'native badges differ from ' + expected)
             self.assertEqual(self.label(rs), expected)
 
@@ -67,7 +67,7 @@ class WindowPartsSidebar(unittest.TestCase):
         native = self.s.wait_rows(lambda rs: self.label(rs) == 'Parts Window', 'native parts did not return')
         self.assertEqual(sum(row.get('accessibilityRole') == 'AXImage' for row in self.window_rows(native)), 1)
         self.config.write_text("sidebar:\n  formats:\n    window:\n      left: ''\n      right: ''\n      title: 'Hidden parts'\n")
-        for mode in ['topics', 'sessions']:
+        for mode in ['board', 'sessions']:
             self.show_mode(mode)
             rs = self.s.wait_rows(lambda rs: self.label(rs) == 'Hidden parts', 'hidden parts retain text or badges')
             self.assertEqual(self.label(rs), 'Hidden parts')
@@ -80,13 +80,13 @@ class WindowPartsSidebar(unittest.TestCase):
     window:
       title: 'Parts Window'
       left:
-        topics: '#{current_app_icon} 🚀'
+        board: '#{current_app_icon} 🚀'
         sessions: '✨ #{current_app_icon}'
       right:
-        topics: '#{symbol:globe} #{tab_count}'
+        board: '#{symbol:globe} #{tab_count}'
         sessions: '#{symbol:rectangle.split.2x1} #{window_panes}'
 """)
-        for mode, emoji, symbol, count in [('topics', '🚀', 'globe', '0'), ('sessions', '✨', 'rectangle.split.2x1', '1')]:
+        for mode, emoji, symbol, count in [('board', '🚀', 'globe', '0'), ('sessions', '✨', 'rectangle.split.2x1', '1')]:
             self.show_mode(mode)
             rs = self.s.wait_rows(lambda rs: emoji in self.label(rs) and symbol in self.label(rs)
                                   and self.label(rs).endswith(count), 'mixed parts did not apply in ' + mode)

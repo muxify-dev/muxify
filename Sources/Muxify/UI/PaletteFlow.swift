@@ -121,7 +121,7 @@ enum PaletteFlow {
     case removeWorktree(RemoveWorktreeDraft)
     /// Start a Session…: the folder of the first Session, when the server has none of the user's.
     case startSession
-    /// Check cards of the Topics list, then go on with them.
+    /// Check cards of the Board, then go on with them.
     case check(CheckDraft)
     /// Choose In Play: the card for one In Play place.
     case order(OrderDraft)
@@ -134,7 +134,7 @@ enum PaletteFlow {
 
     @MainActor var placeholder: String {
         switch self {
-        case .check: "Topics and Guest Sessions, or #tag"
+        case .check: "Topics and Board Sessions, or #tag"
         case .order(let draft): "What goes at place \(draft.place)?"
         case .replaceFromBench: "What comes In Play?"
         case .clearHistory: "Which visits?"
@@ -177,7 +177,7 @@ enum PaletteChoice: Equatable {
     case muxifyWorktree(String)
     /// Remove Worktree's Force row.
     case force
-    /// A card of the Topics list, in a step that chooses one.
+    /// A card of the Board, in a step that chooses one.
     case card(TopicGroupID)
     case clearHistory(ClearRange)
     case accept
@@ -324,7 +324,7 @@ extension CommandPalette {
     }
 
     func topicTitle(_ topic: TopicRecord) -> String {
-        (store?.topics.labels ?? TopicLabels([topic])).label(of: topic)
+        (store?.board.labels ?? TopicLabels([topic])).label(of: topic)
     }
 
     func topicTitle(id: String) -> String {
@@ -333,8 +333,8 @@ extension CommandPalette {
 
     func nextTopicNote(_ ids: [String]) -> String? {
         guard let store, let active = store.activeTopicID, ids.contains(active) else { return nil }
-        let next = store.topics.nextTopic(after: .topic(active), skipping: Set(ids))
-        let title = store.topics.rows.first { $0.id == next }?.title ?? "No Topic"
+        let next = store.board.nextTopic(after: .topic(active), skipping: Set(ids))
+        let title = store.board.rows.first { $0.id == next }?.title ?? "No Topic"
         return "Then opens: " + title
     }
 

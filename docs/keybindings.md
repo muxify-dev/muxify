@@ -30,12 +30,12 @@ listed below.
 | `mark_read` | ⌘⇧R | Clear Unread for the Active Topic, or the current Session when there is no Active Topic |
 | `mark_unread` | ⌘⇧U | Mark the Active Topic Unread, or eligible Agents in the current Session when there is no Active Topic |
 | `mark_all_read` | Unbound | Clear Unread in the Active Environment |
-| `move_topic_up` | ⌥⌘↑ | Move the card of the Active Topic, or of the current Guest Session, one card up among the cards with its Pin. A step past the Guests line or the Bench line changes the section of the card, one section for each step. It does nothing at the top, for No Topic, for a Settled Topic, and in Sessions mode |
-| `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Guest Session, one card down among the cards with its Pin, or into the next In Play section as for Move Topic Up. It does nothing at the bottom, for No Topic, for a Settled Topic, and in Sessions mode |
+| `move_topic_up` | ⌥⌘↑ | Move the card of the Active Topic, or of the current Board Session, one card up among the cards with its Pin. A step past the Guests line or the Bench line changes the section of the card, one section for each step. It does nothing at the top, for No Topic, for a Settled Topic, and in Sessions mode |
+| `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Board Session, one card down among the cards with its Pin, or into the next In Play section as for Move Topic Up. It does nothing at the bottom, for No Topic, for a Settled Topic, and in Sessions mode |
 | `toggle_pin_topic` | Unbound | Pin the Active Topic, or Unpin it while it is Pinned. It does nothing for a Settled Topic |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
-| `toggle_sidebar_mode` | ⌥⌘T | Switch the Sidebar between Topics and Sessions, as the other Topics/Sessions button does. A hidden Sidebar shows in the other mode. While only one mode can show (`sidebar.topics` or `sidebar.sessions` is off, or a Remote App Window, which shows only Sessions), it changes nothing and an Explanation Pill says why. The Command and the View menu item are "Switch to Sessions" / "Switch to Topics" |
-| `toggle_bench` | ⇧⌘S | Show or hide the Bench, the Topics after the ones [In Play](configuration.md#topics-in-play). It does nothing while the Topics list has no Bench line |
+| `toggle_sidebar_mode` | ⌥⌘T | Switch the Sidebar between the Board and Sessions, as the button of the other view does. A hidden Sidebar shows in the other view. While only one view can show (`sidebar.board` or `sidebar.sessions` is off, or a Remote App Window, which shows only Sessions), it changes nothing and an Explanation Pill says why. The Command and the View menu item are "Switch to Sessions" / "Switch to Board" |
+| `toggle_bench` | ⇧⌘S | Show or hide the Bench, the Topics after the ones [In Play](configuration.md#topics-in-play). It does nothing while the Board has no Bench line |
 | `choose_in_play` | ⇧⌥⌘S | Open Choose In Play: check the cards to put [In Play](configuration.md#topics-in-play), then choose the card for each place |
 | `replace_from_bench` | ⌥⌘S | Open Replace from Bench for the card you are on while it is [In Play](configuration.md#topics-in-play). Choose a Benched card. It takes the place, and your card goes to the end of the Bench |
 | `toggle_terminal` | ⌘J | Show or hide the current Window's Terminal. It does nothing while the Terminal is the only side shown |
@@ -87,7 +87,7 @@ listed below.
 | `select_next_window` | Unbound | Select the next Window, wrapping to the first |
 | `select_prev_window` | Unbound | Select the previous Window, wrapping to the last |
 | `toggle_last_window` | Unbound | Select the current Session's Last Window, the one it showed before, as tmux's `last-window` does; again, go back. Muxify reads the Last Window from tmux, so it works with no tmux config. It does nothing in a Session with one Window, or with an older Host Server. Acts whatever has Focus |
-| `select_next_topic_window` | Unbound | Select the next Window of the Active Topic, wrapping to the first. In Topics mode, every Window of the Active Topic's Sessions takes part, in the order the Sidebar shows them; for No Topic, the Windows of the No Topic Sessions. In Sessions mode, only the current Session's Windows take part |
+| `select_next_topic_window` | Unbound | Select the next Window of the Active Topic, wrapping to the first. In the Board view, every Window of the Active Topic's Sessions takes part, in the order the Sidebar shows them; for No Topic, the Windows of the No Topic Sessions. In Sessions mode, only the current Session's Windows take part |
 | `select_prev_topic_window` | Unbound | Select the previous Window of the Active Topic, wrapping to the last |
 
 While the Browser has Focus, the keys of `select_next_window`,
@@ -96,10 +96,10 @@ select the next or previous Tab, so Windows and Tabs share their step keys.
 
 | Action | Default shortcuts | What it does |
 | --- | --- | --- |
-| `select_next_session` | Unbound | Go to the next Session the Sidebar shows, wrapping to the first. In Topics mode, only the Active Topic's Sessions take part; for No Topic, the No Topic Sessions |
-| `select_prev_session` | Unbound | Go to the previous Session the Sidebar shows, wrapping to the last. In Topics mode, only the Active Topic's Sessions take part |
-| `select_next_topic` | Unbound | Go to the Topic below in the Topics list, wrapping to the first. Guest Sessions take part in their place; No Topic and Benched cards that do not show do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
-| `select_prev_topic` | Unbound | Go to the Topic above in the Topics list, wrapping to the last |
+| `select_next_session` | Unbound | Go to the next Session the Sidebar shows, wrapping to the first. In the Board view, only the Active Topic's Sessions take part; for No Topic, the No Topic Sessions |
+| `select_prev_session` | Unbound | Go to the previous Session the Sidebar shows, wrapping to the last. In the Board view, only the Active Topic's Sessions take part |
+| `select_next_topic` | Unbound | Go to the Topic below on the Board, wrapping to the first. Board Sessions take part in their place; No Topic and Benched cards that do not show do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
+| `select_prev_topic` | Unbound | Go to the Topic above on the Board, wrapping to the last |
 
 The default [Command Palettes](configuration.md#command-palettes) are
 **Commands** on ⌘⇧P and **Go to…** on ⌘P. `open_switcher` is gone.
@@ -121,7 +121,7 @@ step to the Commands search.
 
 Commands also lists Move Topic Up and Move Topic Down, and Pin Topic or Unpin
 Topic. They run at once on the Active Topic, as their keybindings
-do. Move Topic Up and Move Topic Down also move the card of the current Guest
+do. Move Topic Up and Move Topic Down also move the card of the current Board
 Session, and appear only when the card can move that way: among the cards with its Pin, or
 into the next In Play section.
 
@@ -160,12 +160,12 @@ holds the Topic's Tags as chips. Type a Tag, with or without `#`, to add it.
 Commands also lists Show Next Session, Show Previous Session, Show Next Topic
 and Show Previous Topic. They do what `select_next_session`,
 `select_prev_session`, `select_next_topic` and `select_prev_topic` do: Show Next
-Topic goes to the Topic below in the Topics list. Each row shows its configured
+Topic goes to the Topic below on the Board. Each row shows its configured
 shortcut.
 
 Commands also lists the layout and Focus actions: Maximize or Restore, Maximize
 Terminal, Maximize Browser, Focus Terminal, Focus Browser, and Show or Hide for
-the Sidebar, the Terminal and the Browser, and Toggle Bench while the Topics list has a Bench line. Each row shows its configured shortcut.
+the Sidebar, the Terminal and the Browser, and Toggle Bench while the Board has a Bench line. Each row shows its configured shortcut.
 Zoom Pane runs at once on the current Pane, as `toggle_zoom_pane` does. Split
 Pane Right, Split Pane Down, Split Pane Left, Split Pane Up, Split Window Right,
 Split Window Down and Equalize Panes run at once too, as `split_pane_right`,
@@ -177,7 +177,7 @@ Move opens for a Pane with ⌘⇧T (while the Browser does not have Focus), a Wi
 Its Pane, Window and Session buttons select what moves. For a Pane or Window,
 New Topic is the first row. A Pane can also move to a New Window. The ＋ Tab
 button includes the active Browser Tab and keeps its history. A Topic that cannot accept the move shows
-the reason. Move does nothing while `sidebar.topics` is off.
+the reason. Move does nothing while `sidebar.board` is off.
 
 Every Action uses the palette's view, including Actions from Sidebar and menu
 bar items. ⎋ closes without a change, after it hides the actions menu if that
@@ -368,7 +368,7 @@ conflict with the actions above:
 | `settle_topic` | Unbound | Settle the highlighted Topic |
 | `forget_topic` | Unbound | Forget the highlighted Topic |
 | `reopen_topic` | Unbound | Reopen the highlighted Topic |
-| `start_topic_fresh` | Unbound | Start Fresh for the highlighted Topic |
+| `start_topic_fresh` | Unbound | Start Fresh for the highlighted Topic or Dormant Board Session |
 | `pin_topic` | Unbound | Pin the highlighted Topic |
 | `unpin_topic` | Unbound | Unpin the highlighted Topic |
 | `remove_from_topic` | Unbound | Remove the highlighted Session or Window from its Topic |
@@ -378,7 +378,7 @@ conflict with the actions above:
 | `kill_window` | Unbound | Confirm a kill of the highlighted Window |
 | `kill_session` | Unbound | Confirm a kill of the highlighted Session |
 | `make_guest` | Unbound | Make the highlighted Benched Topic or No Topic Session a Guest |
-| `bench` | Unbound | Bench the highlighted In Play Topic, Guest Topic or Guest Session |
+| `bench` | Unbound | Bench the highlighted In Play Topic or Board Session. A Board Session's card leaves the Board, because the Bench holds only Topics |
 | `choose_pane` | ⌥1 | Select the Pane button in Move |
 | `choose_window` | ⌥2 | Select the Window button in Move |
 | `choose_session` | ⌥3 | Select the Session button in Move |

@@ -25,16 +25,16 @@ final class PaletteCatalogTests: XCTestCase {
 
     private func catalog(records: [TopicRecord], windows: [TmuxWindow], selected: String? = nil, visits: VisitLog = VisitLog(),
                          lastWindow: [TopicGroupID: String] = [:], agents: [Agent] = [],
-                         mode: SidebarMode = .topics, sessionPaths: [SessionPath]? = nil) -> PaletteCatalog {
+                         mode: SidebarMode = .board, sessionPaths: [SessionPath]? = nil) -> PaletteCatalog {
         var config = Config()
         config.sessionPaths = sessionPaths ?? [game, notes]
         var selection = TopicSelection()
         selection.windowID = selected
-        let model = TopicsModel(records: records, windows: windows, config: config, selection: selection,
+        let model = BoardModel(records: records, windows: windows, config: config, selection: selection,
                         location: selection.windowLocation, mode: mode,
                                 agents: agents)
         return PaletteCatalog(windows: windows, agents: agents, sessionPaths: config.sessionPaths, selectedWindowID: selected,
-                              homeDirectory: "/home", topics: model, records: records, lastWindowByGroup: lastWindow,
+                              homeDirectory: "/home", board: model, records: records, lastWindowByGroup: lastWindow,
                               visits: visits, now: now, agentMarks: model.agentMarks)
     }
 
@@ -167,7 +167,7 @@ final class PaletteCatalogTests: XCTestCase {
         let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
                        window("@2", session: "notes-2", directory: "/work/notes"),
                        window("@3", session: "scratch", directory: "/tmp/scratch")]
-        for mode in [SidebarMode.topics, .sessions] {
+        for mode in [SidebarMode.board, .sessions] {
             let catalog = catalog(records: records, windows: windows, mode: mode)
             XCTAssertEqual(Set(ids(catalog.list([.sessions], query: "", rules: .standard))), ["session-path:/work/notes", "session:$scratch", "session:$notes-2", "session:$game/alpha",
                 "session-path:/work/game/main", "session-path:/work/game/release"])
@@ -413,7 +413,7 @@ final class PaletteCatalogTests: XCTestCase {
 
     func testARemoteAppWindowHasNoTopicsSource() {
         var catalog = catalog(records: [topic("a", "Alpha")], windows: [])
-        catalog.topics = nil
+        catalog.board = nil
         XCTAssertFalse(catalog.offersTopics)
         XCTAssertEqual(catalog.list(goTo, query: "", rules: .standard).sections.map(\.id), ["sessions"])
     }
@@ -499,11 +499,11 @@ final class PaletteCatalogTests: XCTestCase {
         let windows = [window("@1", session: "game/fix", directory: "/work/game/main", topic: "a", active: false),
                        window("@2", session: "game/fix", directory: "/work/game/main", topic: "a"),
                        window("@3", session: "notes/fix", directory: "/work/notes", topic: "a")]
-        let row = try XCTUnwrap(catalog(records: records, windows: windows).topics?.rows.first)
+        let row = try XCTUnwrap(catalog(records: records, windows: windows).board?.rows.first)
         XCTAssertEqual(EntryWindow.of(row, lastWindowByGroup: [.topic("a"): "@1"], visits: VisitLog())?.id, "@1")
         XCTAssertEqual(EntryWindow.of(row, lastWindowByGroup: [.topic("a"): "@9"], visits: visits([(.session(name: "notes/fix"), 5)]))?.id, "@3")
         XCTAssertEqual(EntryWindow.of(row, lastWindowByGroup: [:], visits: VisitLog())?.id, "@2")
-        let dormant = try XCTUnwrap(catalog(records: records, windows: []).topics?.rows.first)
+        let dormant = try XCTUnwrap(catalog(records: records, windows: []).board?.rows.first)
         XCTAssertNil(EntryWindow.of(dormant, lastWindowByGroup: [:], visits: VisitLog()))
     }
 }

@@ -18,8 +18,8 @@ final class NotificationsTests: XCTestCase {
         topic.isUnread = true
         var config = Config()
         config.notifications.doneEnabled = false
-        func model(_ agents: [Agent] = [], windows: [TmuxWindow] = []) -> TopicsModel {
-            TopicsModel(records: [topic], windows: windows, config: config, selection: TopicSelection(), agents: agents)
+        func model(_ agents: [Agent] = [], windows: [TmuxWindow] = []) -> BoardModel {
+            BoardModel(records: [topic], windows: windows, config: config, selection: TopicSelection(), agents: agents)
         }
         XCTAssertEqual(model().rows.first?.mark, .unread)
         XCTAssertEqual(model([agent(.working)], windows: [window("@1", topic: "a")]).rows.first?.mark, .unread)
@@ -39,8 +39,8 @@ final class NotificationsTests: XCTestCase {
         var selection = TopicSelection()
         selection.select(windowID: "@1", activeTopic: .topic("a"))
         var config = Config()
-        func model(_ location: Location? = .window(WindowID(rawValue: "@1")!)) -> TopicsModel {
-            TopicsModel(records: [topic], windows: windows, config: config, selection: selection,
+        func model(_ location: Location? = .window(WindowID(rawValue: "@1")!)) -> BoardModel {
+            BoardModel(records: [topic], windows: windows, config: config, selection: selection,
                         location: location, agents: agents)
         }
         XCTAssertEqual(model().rows[0].agentSpines, ["@1": .done, "@2": .blocked, "@3": .working])
@@ -57,17 +57,17 @@ final class NotificationsTests: XCTestCase {
         XCTAssertTrue(model().rows[0].usesRowMarks)
     }
 
-    func testAnExpandedActiveLockedSessionMovesItsMarkOntoItsRowsAsATopicDoes() {
-        var locked = window("@1", topic: nil)
-        locked.lockOrder = 1
+    func testAnExpandedActiveBoardSessionMovesItsMarkOntoItsRowsAsATopicDoes() {
+        var onBoard = window("@1", topic: nil)
+        onBoard.savedSessionID = "$1"
         var second = window("@2", topic: nil)
-        second.lockOrder = 1
+        second.savedSessionID = "$1"
         var selection = TopicSelection()
-        selection.select(windowID: "@1", activeTopic: .locked("$1"))
-        let model = TopicsModel(records: [], windows: [locked, second], config: Config(), selection: selection,
+        selection.select(windowID: "@1", activeTopic: .session("$1"))
+        let model = BoardModel(records: [], boardSessions: [BoardSession(id: "$1", order: 1, isGuest: true)], windows: [onBoard, second], config: Config(), selection: selection,
                                 location: .window(WindowID(rawValue: "@1")!),
                                 agents: [agent(.done), agent(.blocked, id: "%2", window: "@2", unread: false)])
-        let row = model.rows.first { $0.id == .locked("$1") }
+        let row = model.rows.first { $0.id == .session("$1") }
         XCTAssertEqual(row?.agentSpines, ["@1": .done, "@2": .blocked])
         XCTAssertEqual(row?.mark, .agent(.blocked), "The header keeps the strongest mark")
         XCTAssertEqual(row?.usesRowMarks, true)
@@ -80,7 +80,7 @@ final class NotificationsTests: XCTestCase {
         }
         var selection = TopicSelection()
         selection.select(windowID: "@1", activeTopic: .topic("a"))
-        let model = TopicsModel(records: [TopicRecord(id: "a")], windows: [window("@1", topic: "a")],
+        let model = BoardModel(records: [TopicRecord(id: "a")], windows: [window("@1", topic: "a")],
                                 config: Config(), selection: selection, location: .window(WindowID(rawValue: "@1")!),
                                 agents: [agent(.done), agent(.failed, id: "%2", unread: false), agent(.working, id: "%3")], panes: panes)
         XCTAssertEqual(model.rows[0].agentSpines, ["%1": .done, "%3": .working])
@@ -109,8 +109,8 @@ final class NotificationsTests: XCTestCase {
         let topic = TopicRecord(id: "a")
         let windows = [window("@1", topic: "a")]
         let agents = [agent(.done), agent(.failed, id: "%2"), agent(.blocked, id: "%3")]
-        func model(_ config: Config, _ agents: [Agent]) -> TopicsModel {
-            TopicsModel(records: [topic], windows: windows, config: config, selection: TopicSelection(), agents: agents)
+        func model(_ config: Config, _ agents: [Agent]) -> BoardModel {
+            BoardModel(records: [topic], windows: windows, config: config, selection: TopicSelection(), agents: agents)
         }
         XCTAssertEqual(model(Config(), agents).rows[0].mark, .agent(.blocked))
         for (key, disabled, expected) in [(\Config.Notifications.blockedEnabled, AgentStatus.blocked, AgentMark.failed),
@@ -136,7 +136,7 @@ final class NotificationsTests: XCTestCase {
         let agents = [agent(.working), agent(.blocked, id: "%2"), agent(.failed, id: "%3"), agent(.done, id: "%4", window: "@2")]
         var config = Config()
         config.notifications.doneEnabled = false
-        let off = TopicsModel(records: [], windows: windows, config: config, selection: TopicSelection(), agents: agents)
+        let off = BoardModel(records: [], windows: windows, config: config, selection: TopicSelection(), agents: agents)
         XCTAssertEqual(off.agentMarks, ["%1": .working, "%2": .blocked, "%3": .failed], "done_enabled: false reaches every row")
     }
 
@@ -186,7 +186,7 @@ final class NotificationsTests: XCTestCase {
         let agents = Agent.list(panes: panes, windows: windows, ordered: false)
         var config = Config()
         config.notifications.doneEnabled = false
-        let model = TopicsModel(records: [], windows: windows, config: config, selection: TopicSelection(), agents: agents)
+        let model = BoardModel(records: [], windows: windows, config: config, selection: TopicSelection(), agents: agents)
         XCTAssertEqual(model.visibleAgents.map(\.paneID), ["%9", "%1"])
         XCTAssertEqual(Agent.list(panes: panes, windows: windows).map(\.paneID), ["%1", "%9"])
     }
@@ -194,7 +194,7 @@ final class NotificationsTests: XCTestCase {
     func testDisabledNotificationsDoNotPromoteAgentsAboveWorkingStatus() {
         var config = Config()
         config.notifications.doneEnabled = false
-        let model = TopicsModel(records: [], windows: [window("@1", topic: nil)], config: config, selection: TopicSelection(),
+        let model = BoardModel(records: [], windows: [window("@1", topic: nil)], config: config, selection: TopicSelection(),
                                 agents: [agent(.done), agent(.working, id: "%2"), agent(.failed, id: "%3")])
         XCTAssertEqual(model.visibleAgents.map(\.paneID), ["%3", "%2", "%1"])
     }

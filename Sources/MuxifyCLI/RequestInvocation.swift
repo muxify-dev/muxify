@@ -17,7 +17,7 @@ struct RequestInvocation: Equatable {
         /// Nil takes the Config's `topics.forget_settled_older_than`.
         case forgetSettled(olderThan: Int?)
         case list
-        /// Every live Session and the Topics list, as `EnvironmentSnapshot` orders them.
+        /// Every live Session and the Board, as `EnvironmentSnapshot` orders them.
         case environmentShow
         /// `conversations` also lists the conversation of each Agent that the Topic has or remembers.
         case show(conversations: Bool)
@@ -32,7 +32,7 @@ struct RequestInvocation: Equatable {
         case diff(sessionPath: String?, stat: Bool)
         case tag(TopicTagChange)
         case rename(title: String)
-        /// A Dormant or Settled Topic has no Pane, so these take only `--topic`.
+        /// A Dormant or Settled Topic has no Pane, so these take only `--topic`, or a Dormant Board Session by its id.
         case reopen
         case startFresh
         /// `topic` is an open Topic's id or label. `session` chooses its destination Session; `newSession` makes one.
@@ -73,7 +73,7 @@ struct RequestInvocation: Equatable {
         case chooseInPlay([CardName])
         /// The Benched card that takes the place of the target's card In Play.
         case replaceFromBench(with: CardName)
-        /// The Session one place up or down among its Topic's Sessions, or a Locked Session's card.
+        /// The Session one place up or down among its Topic's Sessions, or a Board Session's card.
         case moveSession(TopicSessionPlacement)
         /// The whole Session into an open Topic or a new Topic, as Move Session does.
         case moveWholeSession(to: SessionDestination)
@@ -94,12 +94,15 @@ struct RequestInvocation: Equatable {
         var targets: [TargetOption] {
             switch self {
             case .new: return []
-            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .fillPlace, .moveCard, .placeCard, .tradeCard,
+            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .moveCard, .placeCard, .tradeCard,
                  .sortSessions:
                 return [.topic, .window, .pane]
-            case .moveSession, .moveWholeSession: return [.session, .pane]
-            case .replaceFromBench, .makeGuest, .benchTopic: return [.topic, .session, .window, .pane]
-            case .reopen, .startFresh: return [.topic]
+            case .moveSession: return [.session, .boardSession, .pane]
+            case .moveWholeSession: return [.session, .pane]
+            case .makeGuest: return [.topic, .session, .window, .pane]
+            case .replaceFromBench, .fillPlace: return [.topic, .session, .boardSession, .window, .pane]
+            case .benchTopic: return [.topic, .session, .boardSession, .window, .pane]
+            case .reopen, .startFresh: return [.topic, .boardSession]
             case .moveWindow, .moveToNewTopic, .removeWindowFromTopic: return [.window, .pane]
             case .moveToNewWindow: return [.pane]
             case .newWindow: return [.topic, .session, .window, .pane]
@@ -216,25 +219,27 @@ struct RequestInvocation: Equatable {
         case newTopic(title: String)
     }
 
-    /// A card of the Topics list as a command line names it: an open Topic by id or label, a Locked Session by name
-    /// or id, or an Open Place by id.
+    /// A card of the Board as a command line names it: an open Topic by id or label, a Board Session by the name or id
+    /// of its live Session or by its own id, or an Open Place by id.
     enum CardName: Equatable {
         case topic(String)
         case session(String)
+        case boardSession(String)
         case openPlace(String)
 
-        /// A Session name becomes its id here, because a card on the wire names a Locked Session by its id.
-        var ref: TopicListRef {
+        /// A Session name becomes its id here, because a card on the wire names a live Board Session by its tmux id.
+        var ref: BoardCardRef {
             get throws {
                 switch self {
                 case .topic(let name): return .topic(.named(name))
                 case .openPlace(let id): return .openPlace(id)
+                case .boardSession(let id): return .boardSession(id)
                 case .session(let value):
                     guard let window = try TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == value || $0.sessionName == value }),
                           let id = SessionID(rawValue: window.sessionID) else {
                         throw CLIError(TopicRequestError.sessionUnavailable(value).description)
                     }
-                    return .lock(id)
+                    return .liveSession(id)
                 }
             }
         }
@@ -250,6 +255,8 @@ struct RequestInvocation: Equatable {
         case window = "--window"
         case pane = "--pane"
         case session = "--session"
+        /// A Board Session, live or Dormant, by its id, which `environment show` gives.
+        case boardSession = "--board-session"
 
         var usage: String {
             switch self {
@@ -257,6 +264,7 @@ struct RequestInvocation: Equatable {
             case .topic: return "--topic <id|label>"
             case .window: return "--window <id>"
             case .pane: return "--pane <id>"
+            case .boardSession: return "--board-session <id>"
             }
         }
 
@@ -273,6 +281,9 @@ struct RequestInvocation: Equatable {
             case .session:
                 guard !value.isEmpty else { throw CLIError("--session takes the name or id of a tmux Session", exitCode: 2) }
                 return SessionID(rawValue: value).map(EnvironmentTarget.session) ?? .sessionName(value)
+            case .boardSession:
+                guard !value.isEmpty else { throw CLIError("--board-session takes the id of a Board Session, as environment show gives it", exitCode: 2) }
+                return .boardSession(value)
             }
         }
 
@@ -711,8 +722,9 @@ extension RequestReply {
 extension EnvironmentShown {
     /// The `capabilities` of `environment show --json`: the options that this command line takes and an older one
     /// does not. A caller sends `--request` only when the list has `request`, and reads `session-paths` with no Topic
-    /// only when the list has `session-paths`. Both are of this command line, so a `snapshot` item has none.
-    static let cliCapabilities = ["request", "session-paths"]
+    /// only when the list has `session-paths`, and names a Board Session with `--board-session` only when the list has
+    /// `board`. All are of this command line, so a `snapshot` item has none.
+    static let cliCapabilities = ["request", "session-paths", "board"]
 }
 
 /// The `--json` form of `topic show --conversations`.

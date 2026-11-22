@@ -7,17 +7,20 @@ public enum EnvironmentChange: Equatable {
     case session(String, EnvironmentSession?)
     /// One Topic record, or nil when it is gone.
     case topic(String, TopicRecord?)
-    /// The Open Places of the Topics list.
+    /// The Open Places of the Board.
     case openPlaces([OpenPlace])
+    /// The Board Sessions, live or Dormant.
+    case boardSessions([BoardSession])
     /// The server as a whole: its Clients, the last Window, whether it runs, its socket and home.
     case server(EnvironmentServer)
 
-    /// What the event replaces: `session <id>`, `topic <id>`, `open_places` or `server`.
+    /// What the event replaces: `session <id>`, `topic <id>`, `open_places`, `board_sessions` or `server`.
     public var key: String {
         switch self {
         case .session(let id, _): "session \(id)"
         case .topic(let id, _): "topic \(id)"
         case .openPlaces: "open_places"
+        case .boardSessions: "board_sessions"
         case .server: "server"
         }
     }
@@ -28,11 +31,16 @@ public struct EnvironmentSession: Equatable {
     public var windows: [TmuxWindow]
     public var panes: [TmuxPane]
     public var commandLines: PaneCommandLines
+    /// The order of the Board Session whose live Session this is, set only on an event for a client that did not declare
+    /// `board` (`EnvironmentState.olderClientChanges`). Each Window goes out with it as `lock_order`, where
+    /// an older Mac finds its Locks, as it calls the cards. No decoder sets it.
+    public var lockOrder: Double?
 
-    public init(windows: [TmuxWindow], panes: [TmuxPane], commandLines: PaneCommandLines = PaneCommandLines()) {
+    public init(windows: [TmuxWindow], panes: [TmuxPane], commandLines: PaneCommandLines = PaneCommandLines(), lockOrder: Double? = nil) {
         self.windows = windows
         self.panes = panes
         self.commandLines = commandLines
+        self.lockOrder = lockOrder
     }
 }
 
@@ -73,22 +81,27 @@ public struct EnvironmentState: Equatable {
     public private(set) var sessions: [String: EnvironmentSession] = [:]
     public private(set) var topics: [String: TopicRecord] = [:]
     public private(set) var openPlaces: [OpenPlace] = []
+    public private(set) var boardSessions: [BoardSession] = []
     public private(set) var server: EnvironmentServer?
 
     public init() {}
 
-    /// The Topic records in id order, as the state database lists them, and the Open Places.
+    /// The Topic records in id order, as the state database lists them, the Open Places and the Board Sessions.
     public var topicContents: TopicContents {
-        TopicContents(records: topics.values.sorted { $0.id < $1.id }, openPlaces: openPlaces)
+        TopicContents(records: topics.values.sorted { $0.id < $1.id }, openPlaces: openPlaces, boardSessions: boardSessions)
     }
 
-    /// The server as these events show it, in tmux's order: Sessions by name, each with its Windows and Panes in
-    /// the order they came. Nil before a `server` event.
-    public var snapshot: TmuxSnapshot? {
-        guard let server else { return nil }
-        let ordered = sessions.values.sorted {
+    /// The Sessions in tmux's order: by name, each with its Windows and Panes in the order they came.
+    private var orderedSessions: [EnvironmentSession] {
+        sessions.values.sorted {
             ($0.windows.first?.sessionName ?? "", $0.windows.first?.sessionID ?? "") < ($1.windows.first?.sessionName ?? "", $1.windows.first?.sessionID ?? "")
         }
+    }
+
+    /// The server as these events show it, in tmux's order. Nil before a `server` event.
+    public var snapshot: TmuxSnapshot? {
+        guard let server else { return nil }
+        let ordered = orderedSessions
         var snapshot = TmuxSnapshot(windows: ordered.flatMap(\.windows), clients: server.clients, panes: ordered.flatMap(\.panes),
                                     lastWindowID: server.lastWindowID, serverRunning: server.isRunning, serverID: server.serverID,
                                     ownClientTTY: server.ownClient?.tty, homeDirectory: server.home)
@@ -102,7 +115,7 @@ public struct EnvironmentState: Equatable {
     public var all: [EnvironmentChange] {
         sessions.sorted { $0.key < $1.key }.map { .session($0.key, $0.value) }
             + topics.values.sorted { $0.id < $1.id }.map { .topic($0.id, $0) }
-            + [.openPlaces(openPlaces)]
+            + [.openPlaces(openPlaces), .boardSessions(boardSessions)]
             + (server.map { [.server($0)] } ?? [])
     }
 
@@ -112,6 +125,7 @@ public struct EnvironmentState: Equatable {
             case .session(let id, let session): sessions[id] = session
             case .topic(let id, let record): topics[id] = record
             case .openPlaces(let places): openPlaces = places
+            case .boardSessions(let boardSessions): self.boardSessions = boardSessions
             case .server(let server): self.server = server
             }
         }
@@ -138,7 +152,7 @@ public struct EnvironmentState: Equatable {
     }
 
     /// The events that bring this state to `contents`: a record that differs, one that is gone, and the Open Places
-    /// when they differ. With `all`, every record and the Open Places.
+    /// and the Board Sessions when they differ. With `all`, every record, the Open Places and the Board Sessions.
     public func changes(to contents: TopicContents, all: Bool = false) -> [EnvironmentChange] {
         var changes: [EnvironmentChange] = []
         let ids = Set(contents.records.map(\.id))
@@ -149,7 +163,39 @@ public struct EnvironmentState: Equatable {
             changes.append(.topic(id, nil))
         }
         if all || openPlaces != contents.openPlaces { changes.append(.openPlaces(contents.openPlaces)) }
+        if all || boardSessions != contents.boardSessions { changes.append(.boardSessions(contents.boardSessions)) }
         return changes
+    }
+
+    /// The order of each live Board Session, by its Session's tmux id.
+    public var lockOrders: [String: Double] {
+        boardSessions.bySession(in: orderedSessions.flatMap(\.windows), open: Array(topics.values).openTopicIDs).mapValues(\.order)
+    }
+
+    /// `changes`, which this state applied last, as a client that did not declare `board` reads them, so an
+    /// older Mac still shows each live Board Session (ADR 0086: no key leaves a protocol). It gets no `board_sessions`
+    /// event, and each Window of a live Board Session has its card's order as `lock_order`, as an older Host sent the
+    /// Session's `@muxify_lock`. A Session whose order differs from `before`, the `lockOrders` before `changes`,
+    /// goes out again, so a move, a new card and an ended one reach that client too.
+    public func olderClientChanges(_ changes: [EnvironmentChange], lockOrdersBefore before: [String: Double]) -> [EnvironmentChange] {
+        let orders = lockOrders
+        var sent: Set<String> = []
+        var older = changes.compactMap { change -> EnvironmentChange? in
+            switch change {
+            case .boardSessions: return nil
+            case .session(let id, var session):
+                sent.insert(id)
+                session?.lockOrder = orders[id]
+                return .session(id, session)
+            case .topic, .openPlaces, .server: return change
+            }
+        }
+        for id in Set(before.keys).union(orders.keys).sorted() where !sent.contains(id) && before[id] != orders[id] {
+            guard var session = sessions[id] else { continue }
+            session.lockOrder = orders[id]
+            older.append(.session(id, session))
+        }
+        return older
     }
 
     /// The snapshot's Sessions by id. A Pane belongs to the Session of the first Window line that names its Window.

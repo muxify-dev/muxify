@@ -1,5 +1,7 @@
 # A new Topic is a Guest
 
+> **Partly superseded by [ADR-0102](0102-a-board-session-can-take-an-in-play-place.md):** a new Topic from a Board Session takes its place and its section, an In Play place or a place among the Guests, not always the Guest mark.
+
 A new Topic went to the top of the Bench, or to the first free In Play place ([ADR-0081](0081-in-play-is-the-only-topics-mode.md)). On the Bench, the Sidebar hides it, so the user had to find it. Agents ran `muxify topic new` and then `muxify topic make-guest` to show it. In a free place, it took that place without the user's choice.
 
 We decide that **every new Topic is a Guest**. It goes to the end of the Guests, directly above the Bench line, as Make a Guest puts a Benched Topic there.

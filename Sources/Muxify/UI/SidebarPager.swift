@@ -53,24 +53,24 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
 
     private var selector: some View {
         HStack(spacing: SidebarSelectorHighlightView.spacing) {
-            viewButton(.topics)
+            viewButton(.board)
             viewButton(.sessions)
         }
         .background { SidebarSelectorHighlight(slide: slide) }
         .padding(6)
-        .help("Swipe left or right with two fingers to switch Topics and Sessions")
+        .help("Swipe left or right with two fingers to switch the Board and the Sessions")
     }
 
     private func viewButton(_ target: SidebarMode) -> some View {
         Button { slide.stopTracking(); select(target) } label: {
-            Text(target.rawValue)
+            Text(target.title)
                 .font(fontSize.font(11, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
                 .contentShape(RoundedRectangle(cornerRadius: 5))
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("sidebar-view-" + target.rawValue.lowercased())
+        .accessibilityIdentifier("sidebar-view-" + target.title.lowercased())
         .accessibilityValue(mode == target ? "selected" : "")
     }
 
