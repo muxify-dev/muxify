@@ -52,7 +52,7 @@ struct PaletteCatalog {
     var folders: FolderResolver = .local
     var selectedWindowID: String?
     var homeDirectory = NSHomeDirectory()
-    var topics: BoardModel? = nil
+    var board: BoardModel? = nil
     /// Every Topic record, for the Settled rows.
     var records: [TopicRecord] = []
     var lastWindowByGroup: [TopicGroupID: String] = [:]
@@ -65,7 +65,7 @@ struct PaletteCatalog {
     var agentMarks: [String: AgentMark] = [:]
 
     /// Whether the topics Source has rows: Topics are on, in a Local App Window.
-    var offersTopics: Bool { topics?.topicsEnabled == true }
+    var offersTopics: Bool { board?.topicsEnabled == true }
 
     /// With `tagFilter`, only the Topics that have the Tag: open and Settled.
     func list(_ sources: [PaletteSource], query: String, tagFilter: Tag? = nil, rules: PickRules,
@@ -120,14 +120,14 @@ struct PaletteCatalog {
     }
 
     private func openTopicSection(only tag: Tag?) -> PickSectionInput<PaletteItem>? {
-        guard offersTopics, let topics else { return nil }
+        guard offersTopics, let board else { return nil }
         return PickSectionInput(id: "topics", title: "Topics", rule: .ranked(showsWhenEmpty: true),
-                                candidates: topics.rows.filter { $0.has(tag) }.compactMap(topicCandidate), currentLast: true)
+                                candidates: board.rows.filter { $0.has(tag) }.compactMap(topicCandidate), currentLast: true)
     }
 
     /// Each Tag of `topics.tags` that a Topic record has, in Config order. A plain word matches its name too.
     private var tagSection: PickSectionInput<PaletteItem>? {
-        guard offersTopics, let definitions = topics?.tags?.definitions else { return nil }
+        guard offersTopics, let definitions = board?.tags?.definitions else { return nil }
         return .tags(definitions.compactMap { definition in
             let count = records.filter { $0.tags.contains(definition.tag) }.count
             guard count > 0 else { return nil }
@@ -156,7 +156,7 @@ struct PaletteCatalog {
     private func topicCandidate(_ row: BoardModel.Row) -> PickCandidate<PaletteItem>? {
         if case .session(let id) = row.id { return dormantSessionCandidate(row, id: id) }
         guard case .topic(let id) = row.id else { return nil }
-        let isCurrent = topics?.activeTopic == row.id
+        let isCurrent = board?.activeTopic == row.id
         let window = EntryWindow.of(row, lastWindowByGroup: lastWindowByGroup, visits: visits)
         let age = age(.topic(row.id))
         let trailing = window == nil ? [row.state == .dormant ? "Reopen" : "Empty", age].compactMap { $0 }.joined(separator: " · ") : isCurrent ? "Active" : age ?? ""
@@ -181,8 +181,8 @@ struct PaletteCatalog {
     }
 
     private func settledCandidate(_ record: TopicRecord) -> PickCandidate<PaletteItem> {
-        let row = BoardModel.settledRow(record, labels: topics?.labels ?? TopicLabels(records), sessionPaths: sessionPaths,
-                                          tags: topics?.tags, expanded: [])
+        let row = BoardModel.settledRow(record, labels: board?.labels ?? TopicLabels(records), sessionPaths: sessionPaths,
+                                          tags: board?.tags, expanded: [])
         var settledOn: String?
         if case .settled(let settledDate) = row.kind {
             settledOn = settledDate?.formatted(date: .abbreviated, time: .omitted) ?? record.settledAt
@@ -293,7 +293,7 @@ struct PaletteCatalog {
                 fields: [.typeWord("session"), .detail("\(count) window\(count == 1 ? "" : "s")"),
                          .detail(Paths.tildify(folder, home: homeDirectory))],
                 trailing: isCurrent ? "Current" : age(.session(name: session.name)) ?? "",
-                mark: topics?.sessionMarks[session.id].map(CardMark.agent),
+                mark: board?.sessionMarks[session.id].map(CardMark.agent),
                 lastVisit: visits.last(.session(name: session.name)), isCurrent: isCurrent, activity: active.sessionActivity,
                 pick: .available(PaletteItem(ref: .session(session), path: folder, target: session.name)),
                 paste: folder)
@@ -344,8 +344,8 @@ struct PaletteCatalog {
     /// The open Topics minus the source's own, ranked for `query`, then the New Topic row titled
     /// by it. A Topic with a Session in the source's folder is offered too: Topics group Sessions, not folders.
     func moveList(_ source: TmuxWindow, query: String, scope: MoveDraft.Scope = .session, rules: PickRules) -> PickList<PaletteItem> {
-        guard let topics else { return .empty }
-        let candidates = topics.rows.compactMap { row -> PickCandidate<PaletteItem>? in
+        guard let board else { return .empty }
+        let candidates = board.rows.compactMap { row -> PickCandidate<PaletteItem>? in
             guard case .topic(let id) = row.id, scope != .session || id != source.topicID,
                   records.contains(where: { $0.id == id }) else { return nil }
             return PickCandidate(

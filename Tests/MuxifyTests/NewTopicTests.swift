@@ -80,9 +80,9 @@ final class NewTopicTests: XCTestCase {
         XCTAssertEqual(gone.activeTopic, .noTopic)
     }
 
-    func testADormantGuestSessionsPageShowsItsCardAsTheActiveTopic() {
-        let lock = BoardSession(id: "g1", order: 0, isGuest: true, session: .object(["name": .string("notes"), "directory": .string("/work/notes")]))
-        let shown = BoardModel(records: [], boardSessions: [lock], windows: [], config: Config(), selection: TopicSelection(),
+    func testADormantBoardSessionsPageShowsItsCardAsTheActiveTopic() {
+        let dormant = BoardSession(id: "g1", order: 0, isGuest: true, session: .object(["name": .string("notes"), "directory": .string("/work/notes")]))
+        let shown = BoardModel(records: [], boardSessions: [dormant], windows: [], config: Config(), selection: TopicSelection(),
                                 location: .emptyTopic(.session("g1")))
         XCTAssertEqual(shown.activeTopic, .session("g1"))
         XCTAssertEqual(shown.emptyTopic?.id, .session("g1"), "the page shows the Dormant Board Session's Reopen choice")

@@ -30,13 +30,13 @@ final class SidebarFormatContextTests: XCTestCase {
         XCTAssertEqual(try SidebarFormat("#{pane_count}/#{agent_count}/#{agents_working}/#{agents_unread}").expand(in: topic), "1/1/1/1")
     }
 
-    func testADormantGuestSessionShowsTheSessionThatItsLockRemembers() throws {
+    func testADormantBoardSessionShowsTheSessionThatItRemembers() throws {
         let windows: [JSONValue] = [.object(["name": .string("shell")]), .object(["name": .string("logs")])]
-        let lock = BoardSession(id: "g1", order: 0, isGuest: true, session: .object(["name": .string("notes"), "base_name": .string("notes"),
+        let dormant = BoardSession(id: "g1", order: 0, isGuest: true, session: .object(["name": .string("notes"), "base_name": .string("notes"),
                                                                      "windows": .array(windows)]))
-        let model = BoardModel(records: [], boardSessions: [lock], windows: [], config: Config(), selection: TopicSelection())
+        let model = BoardModel(records: [], boardSessions: [dormant], windows: [], config: Config(), selection: TopicSelection())
         let contexts = SidebarFormatContexts(model: model, windows: [], panes: [], agents: [], branches: TopicBranches(), records: [],
-                                             boardSessions: [lock], sessionPaths: [], tabCounts: [:])
+                                             boardSessions: [dormant], sessionPaths: [], tabCounts: [:])
         let text = SidebarFormats.defaults.text(for: .session, in: try XCTUnwrap(contexts.dormantBoardSessions["g1"]), mode: .board)
         XCTAssertEqual(text.title, "notes")
         XCTAssertEqual(text.summary, "2 Windows")

@@ -60,8 +60,8 @@ struct SidebarView: View {
             }
         }
         .onChange(of: store.selectedWindowID, initial: true) { _, _ in store.updateTopicSelection() }
-        .onChange(of: store.topics.activeTopic) { _, _ in store.updateTopicSelection() }
-        .onChange(of: store.topics.activeTopicGroup) { _, _ in store.updateTopicSelection() }
+        .onChange(of: store.board.activeTopic) { _, _ in store.updateTopicSelection() }
+        .onChange(of: store.board.activeTopicGroup) { _, _ in store.updateTopicSelection() }
         // Moving to another Session (click, tmux navigation, new Window) opens its card; `session_cards: one`
         // closes the others. The first call, as the Sidebar appears, is no move: it only opens the Location's card.
         .onChange(of: store.selectedWindow?.sessionName, initial: true) { previous, name in
@@ -78,17 +78,17 @@ private struct WorkSection: View {
     let store: WorkspaceStore
 
     var body: some View {
-        let model = store.topics
+        let model = store.board
         if model.showsToggle {
             SidebarPager(mode: Binding(get: { model.mode }, set: { store.sidebarMode = $0 }),
                          animateSwitching: store.config.sidebar.animateSwitching,
                          acceptsGestures: !store.palette.isOpen && store.currentGitView?.isOpen != true) {
-                TopicsSection(store: store, model: model).animatesSessionCards(store)
+                BoardSection(store: store, model: model).animatesSessionCards(store)
             } sessions: {
                 SessionsSection(store: store).animatesSessionCards(store)
             }
         } else if model.mode == .board {
-            TopicsSection(store: store, model: model)
+            BoardSection(store: store, model: model)
         } else if model.sessionsEnabled {
             SessionsSection(store: store)
         } else {
@@ -116,7 +116,7 @@ extension View {
     }
 }
 
-private struct TopicsSection: View {
+private struct BoardSection: View {
     @Environment(\.sidebarTypography) private var typography
     @Environment(\.interfaceFontSize) private var fontSize
     let store: WorkspaceStore
@@ -147,10 +147,10 @@ private struct TopicsSection: View {
     }
 
     var body: some View {
-        let _ = BodyCount.tick("TopicsSection")
+        let _ = BodyCount.tick("BoardSection")
         GeometryReader { proxy in
             VStack(spacing: 0) {
-                topicsList
+                boardList
                 if !model.groups.isEmpty {
                     VStack(spacing: 4) {
                         ForEach(model.groups) { group in
@@ -164,7 +164,7 @@ private struct TopicsSection: View {
         }
     }
 
-    private var topicsList: some View {
+    private var boardList: some View {
         BodyCount.tick("Board")
         let parts = model.listParts
         let hasBench = parts.bench != nil
@@ -453,7 +453,7 @@ private struct BoardPart: ViewModifier {
             .background {
                 if isTop {
                     Color.clear.chrome(theme: theme, material: .sidebar)
-                        .padding(.top, isFirst ? -TopicsSection.contentInset : 0).padding(.bottom, -TopicsSection.contentSpacing)
+                        .padding(.top, isFirst ? -BoardSection.contentInset : 0).padding(.bottom, -BoardSection.contentSpacing)
                         .padding(.horizontal, -6)
                         .contentShape(Rectangle())
                         // With its card as the cards slide aside, so it does not cover a card that slides into its place.
@@ -462,7 +462,7 @@ private struct BoardPart: ViewModifier {
             }
             .offset(y: isTop ? stick : 0)
             // Outside the offset, so the block's height does not grow as it sticks.
-            .onGeometryChange(for: CGFloat?.self) { isLastOfTop ? $0.frame(in: .named(TopicsSection.contentSpace)).maxY : nil } action: {
+            .onGeometryChange(for: CGFloat?.self) { isLastOfTop ? $0.frame(in: .named(BoardSection.contentSpace)).maxY : nil } action: {
                 if let bottom = $0 { blockBottom = bottom }
             }
             // The stack sees this zIndex, not the drag's inside the item, so it keeps the drag's raise.
@@ -489,7 +489,7 @@ private struct EdgeTracker: ViewModifier {
             .onEdgePlace(of: TopicCard.viewport, visibleTop: scrollTopInset, indicatorHeight: EdgePill.height(fontSize)) {
                 if scroll.places[id] != $0 { scroll.places[id] = $0 }
             }
-            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TopicsSection.contentSpace)).minY } action: {
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(BoardSection.contentSpace)).minY } action: {
                 scroll.tops[id] = $0
             }
             .onDisappear {
@@ -1575,7 +1575,7 @@ private struct AgentsSection: View {
     @Environment(\.sidebarTypography) private var typography
 
     private var scopeName: String? {
-        let scope = store.topics.agentsScope
+        let scope = store.board.agentsScope
         if case .window(let id, _) = scope, let window = store.windows.first(where: { $0.id == id }) {
             return store.sidebarWindowRow(window).text.title
         }
@@ -1583,7 +1583,7 @@ private struct AgentsSection: View {
     }
 
     var body: some View {
-        let model = store.topics
+        let model = store.board
         VStack(alignment: .leading, spacing: 0) {
             Text(["Agents", scopeName].compactMap { $0 }.joined(separator: " · "))
                 .font(typography.font(for: .section))

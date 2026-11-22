@@ -38,12 +38,12 @@ final class ReopenAtLaunchTests: XCTestCase {
         XCTAssertEqual(reopen.cards(in: "Local", enabled: false, contents: contents, windows: windows), [])
     }
 
-    func testTheKeyOnReopensEveryDormantOpenTopicAndGuestSessionAndNoSettledEmptyOrLiveOne() {
+    func testTheKeyOnReopensEveryDormantOpenTopicAndBoardSessionAndNoSettledEmptyOrLiveOne() {
         var reopen = ReopenAtLaunch()
         XCTAssertEqual(reopen.cards(in: "Local", enabled: true, contents: contents, windows: windows), dormantTopics + [.session("notes")])
     }
 
-    func testAfterARestartEveryOpenTopicThatRemembersASessionAndEveryGuestSessionIsChosen() {
+    func testAfterARestartEveryOpenTopicThatRemembersASessionAndEveryBoardSessionIsChosen() {
         XCTAssertEqual(ReopenAtLaunch.dormant(contents: contents, windows: []),
                        dormantTopics + [.topic("live"), .session("notes"), .session("scratch")])
     }

@@ -205,7 +205,7 @@ enum PaletteCommand: String, CaseIterable {
 extension CommandPalette {
     var commands: [PaletteCommand] {
         guard let store else { return [] }
-        let canChangeTopics = store.link.features.contains(.topics) && !store.changingTopic && store.topics.topicsEnabled
+        let canChangeTopics = store.link.features.contains(.topics) && !store.changingTopic && store.board.topicsEnabled
         let hasOpenTopic = store.records.contains { $0.id == store.activeTopicID && $0.settledAt == nil }
         return PaletteCommand.allCases.filter { command in
             switch command {
@@ -217,13 +217,13 @@ extension CommandPalette {
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
             case .addSession, .settleTopic: return canChangeTopics && hasOpenTopic
             case .editTags: return canChangeTopics && hasOpenTopic && store.topicConfig.tags != nil
-            case .forgetTopic, .renameTopic, .setTopicNote: return canChangeTopics && hasOpenTopic && store.topics.mode == .board
+            case .forgetTopic, .renameTopic, .setTopicNote: return canChangeTopics && hasOpenTopic && store.board.mode == .board
             case .forgetSettledOlderThan: return canChangeTopics && store.records.contains { $0.settledAt != nil }
             case .clearTopicNote:
-                return canChangeTopics && hasOpenTopic && store.topics.mode == .board
+                return canChangeTopics && hasOpenTopic && store.board.mode == .board
                     && store.records.contains { $0.id == store.activeTopicID && $0.note != nil }
             case .removeSessionFromTopic:
-                return canChangeTopics && hasOpenTopic && store.topics.mode == .board
+                return canChangeTopics && hasOpenTopic && store.board.mode == .board
                     && store.selectedWindow?.topicID == store.activeTopicID
             case .moveTopicUp: return canChangeTopics && store.canMoveActiveCard(.previous)
             case .moveTopicDown: return canChangeTopics && store.canMoveActiveCard(.next)
@@ -256,7 +256,7 @@ extension CommandPalette {
             case .hideSidebar: return store.sidebarShown
             case .switchToSessions, .switchToBoard:
                 return store.sidebarModeSwitchRefusal == nil && store.sidebarModeSwitchTitle == command.rawValue
-            case .toggleBench: return store.topics.isBenchShown != nil
+            case .toggleBench: return store.board.isBenchShown != nil
             case .chooseInPlay: return store.canChooseInPlay
             case .replaceFromBench: return store.canReplaceFromBench
             case .showTerminal: return !store.panelLayout.shows(.terminal) && store.canToggle(.terminal)

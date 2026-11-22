@@ -51,7 +51,7 @@ final class AppWindows {
     /// marks of its Environment's Agents, the Sidebar mode shown and the Topic cards and Session rows it lists.
     private func movingState() -> MovingState {
         guard let id = focusedID ?? stores.keys.first, let store = stores[id] else { return MovingState() }
-        let model = store.topics
+        let model = store.board
         let window = nativeWindows[id].map { window in
             AppWindowState(visible: window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized,
                            active: NSApp.isActive && (window.isKeyWindow || window.isMainWindow))

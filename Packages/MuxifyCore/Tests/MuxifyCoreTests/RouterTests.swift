@@ -176,7 +176,7 @@ final class RouterTests: XCTestCase {
         XCTAssertEqual(router.location, .window(id("@2")))
     }
 
-    func testNextTopicWithoutAWindowShowsItsPageAndAMissingLockedSessionShowsNoTopic() {
+    func testNextTopicWithoutAWindowShowsItsPageAndAMissingBoardSessionShowsNoTopic() {
         for (next, expected) in [(TopicGroupID.topic("work"), TopicGroupID.topic("work")), (.noTopic, .noTopic), (.session("$1"), .noTopic)] {
             var router = Router()
             _ = router.handle(.settled(next: next), .init())
@@ -186,7 +186,7 @@ final class RouterTests: XCTestCase {
         }
     }
 
-    func testADormantGuestSessionShowsItsPageEntersItsWindowWhenItAppearsAndLeavesWhenItsLockEnds() {
+    func testADormantBoardSessionShowsItsPageEntersItsWindowWhenItAppearsAndLeavesWhenItLeavesTheBoard() {
         let page = Location.emptyTopic(.session("g1"))
         var router = Router()
         let dormant = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"), boardSessions: ["g1"])

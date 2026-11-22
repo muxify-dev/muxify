@@ -75,9 +75,9 @@ final class GuestTests: XCTestCase {
 
         var b = transaction("payments auth-bug docs + infra(G) | release")
         b.addToBoard(BoardSession(id: "scratch", order: 0, isGuest: true, session: .object(["name": .string("scratch")])))
-        let locked = b.entries
+        let before = b.entries
         b.addToBoard(BoardSession(id: "scratch", order: 0, isGuest: true))
-        XCTAssertEqual(b.entries, locked, "a Board Session keeps its place and its Remembered Session")
+        XCTAssertEqual(b.entries, before, "a Board Session keeps its place and its Remembered Session")
         XCTAssertEqual(sidebar(b), "payments auth-bug docs + infra(G) ~scratch(G) | release", "a new Board Session is the last Guest")
         assertWrittenInOrder(b)
 
@@ -400,7 +400,7 @@ final class GuestTests: XCTestCase {
         XCTAssertEqual(sidebar(late), "payments docs release + |", "chosen past the places, it does not lead the Bench")
     }
 
-    func testTheGatherPutsEachLockThatWasAmongTheTopicsInTheGuests() throws {
+    func testTheGatherPutsEachBoardSessionThatWasAmongTheTopicsInTheGuests() throws {
         var s1 = transaction("payments 🔒scratch auth-bug docs infra 🔒tmp")
         XCTAssertFalse(TopicOrder.isInSections(s1.entries, inPlay: limit))
         s1.gatherGuests(inPlay: limit)

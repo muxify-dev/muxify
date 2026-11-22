@@ -389,7 +389,7 @@ private struct TerminalArea: View {
         ZStack {
             TerminalHostRepresentable(host: store.terminalHost)
             if store.surface == nil { placeholder }
-            if let topic = store.topics.emptyTopic { emptyTopic(topic) }
+            if let topic = store.board.emptyTopic { emptyTopic(topic) }
             if store.showsOpenPlacePage { OpenPlacePageView(store: store, page: store.openPlacePage) }
             if store.location == .emptyTopic(.noTopic) {
                 VStack(spacing: 12) {

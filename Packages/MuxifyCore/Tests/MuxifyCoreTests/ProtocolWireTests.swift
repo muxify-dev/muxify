@@ -357,11 +357,11 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertEqual(session.windows.first?.storedBrowser, window.storedBrowser)
         XCTAssertEqual(session.windows.first?.openRequests, ["https://b"])
         XCTAssertEqual(decoded.changes[2], .topic("t1", record))
-        XCTAssertEqual(decoded.changes[5], changes[5], "the Locks come whole, with their Remembered Sessions")
+        XCTAssertEqual(decoded.changes[5], changes[5], "the Board Sessions come whole, with their Remembered Sessions")
         XCTAssertEqual(decoded.changes[6], changes[6])
     }
 
-    func testAnOlderMacGetsTheLockOrderOnEachWindowOfALiveGuestSessionAndTheMacReadsTheSameSession() throws {
+    func testAnOlderMacGetsTheLockOrderOnEachWindowOfALiveBoardSessionAndTheMacReadsTheSameSession() throws {
         let windows = [TmuxWindow.fixture(id: "@2", sessionID: "$1"), .fixture(id: "@3", sessionID: "$1", index: 1)]
         let plain = try JSONEncoder().encode(EnvironmentChange.session("$1", EnvironmentSession(windows: windows, panes: [])))
         let older = try JSONEncoder().encode(EnvironmentChange.session("$1", EnvironmentSession(windows: windows, panes: [], lockOrder: 2.5)))
@@ -370,7 +370,7 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertEqual(sent?.map { $0["lock_order"] as? Double }, [2.5, 2.5])
         XCTAssertEqual(sent?.map { $0["id"] as? String }, ["@2", "@3"], "each Window keeps its own keys beside lock_order")
         XCTAssertEqual(try JSONDecoder().decode(EnvironmentChange.self, from: older), try JSONDecoder().decode(EnvironmentChange.self, from: plain),
-                       "a Mac that reads the Locks decodes the same Session")
+                       "a Mac that reads the Board Sessions decodes the same Session")
     }
 
     func testAWindowFromAnOlderHostWithALockOrderStillDecodes() throws {

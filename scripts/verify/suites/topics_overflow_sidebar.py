@@ -33,7 +33,7 @@ class TopicsOverflowSidebar(TopicsSidebar):
         order."""
         edge, _ = frame(self.s.row('topics-list', rs))
         cards = [key for key in self.s.ids(rs)
-                 if key in self.topic_rows(rs) or (key.startswith(('locked-', 'no-topic-session-')) and not key.endswith('-more'))]
+                 if key in self.topic_rows(rs) or (key.startswith(('board-session-', 'no-topic-session-')) and not key.endswith('-more'))]
         return [key for key in cards if frame(self.s.row(key, rs))[0] < edge + PILL - 1]
 
     def test_more_below_pill_counts_hidden_cards_scrolls_to_them_and_goes_away_at_the_end(self):

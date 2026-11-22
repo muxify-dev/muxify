@@ -324,7 +324,7 @@ extension CommandPalette {
     }
 
     func topicTitle(_ topic: TopicRecord) -> String {
-        (store?.topics.labels ?? TopicLabels([topic])).label(of: topic)
+        (store?.board.labels ?? TopicLabels([topic])).label(of: topic)
     }
 
     func topicTitle(id: String) -> String {
@@ -333,8 +333,8 @@ extension CommandPalette {
 
     func nextTopicNote(_ ids: [String]) -> String? {
         guard let store, let active = store.activeTopicID, ids.contains(active) else { return nil }
-        let next = store.topics.nextTopic(after: .topic(active), skipping: Set(ids))
-        let title = store.topics.rows.first { $0.id == next }?.title ?? "No Topic"
+        let next = store.board.nextTopic(after: .topic(active), skipping: Set(ids))
+        let title = store.board.rows.first { $0.id == next }?.title ?? "No Topic"
         return "Then opens: " + title
     }
 

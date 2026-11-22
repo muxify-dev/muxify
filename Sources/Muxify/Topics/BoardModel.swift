@@ -5,7 +5,7 @@ extension TopicGroupID {
     var accessibilityID: String {
         switch self {
         case .topic(let id): return "topic-\(id)"
-        case .session(let id): return "locked-\(id)"
+        case .session(let id): return "board-session-\(id)"
         case .noTopic: return "no-topic"
         }
     }

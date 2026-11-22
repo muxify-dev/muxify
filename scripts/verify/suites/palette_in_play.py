@@ -21,14 +21,14 @@ class PaletteInPlay(PaletteFixture):
     def config_text(cls, tags=None):
         return super().config_text(tags) + '  in_play: 2\n'
 
-    def base_lock(self):
-        """The Lock of the fixture's base Session in the state database, or None."""
-        return next((lock for lock in self.store.board_sessions() if lock['session'].get('name') == 'base'), None)
+    def base_board_session(self):
+        """The Board Session of the fixture's base Session in the state database, or None."""
+        return next((row for row in self.store.board_sessions() if row['session'].get('name') == 'base'), None)
 
-    def unlock_base(self):
-        for lock in self.store.board_sessions():
-            if lock['session'].get('name') == 'base':
-                self.store.remove_board_session(lock['id'])
+    def take_base_off_board(self):
+        for row in self.store.board_sessions():
+            if row['session'].get('name') == 'base':
+                self.store.remove_board_session(row['id'])
 
     def order(self, prefix):
         """The ids of the check's Topics in the order of the Board."""
@@ -174,12 +174,12 @@ class PaletteInPlay(PaletteFixture):
         self.topic('mns-a', order=0)
         s.wait_rows(lambda rs: s.has('topic-mns-a', rs), 'the Topics did not appear')
         self.select(self.base)
-        self.addCleanup(self.unlock_base)
-        self.assertIsNone(self.base_lock(), 'the No Topic Session starts Locked')
+        self.addCleanup(self.take_base_off_board)
+        self.assertIsNone(self.base_board_session(), 'the No Topic Session starts on the Board')
         self.assertTrue(self.absent('Move Topic Down'), 'Move Topic Down shows on the No Topic Session')
 
         self.s.run_command('Move Topic Up')
-        wait(self.base_lock, 'Move Topic Up did not Lock the No Topic Session, which makes it a Guest')
+        wait(self.base_board_session, 'Move Topic Up did not make the No Topic Session a Board Session among the Guests')
         s.wait_shown(self.base)
 
     def test_fast_presses_of_move_topic_up_on_the_no_topic_session_make_it_a_guest_and_then_the_top_guest(self):
@@ -189,15 +189,15 @@ class PaletteInPlay(PaletteFixture):
         self.topic('fns-g', order=2, guest=True)
         s.wait_rows(lambda rs: s.has('topic-fns-g', rs), 'the Topics did not appear')
         self.select(self.base)
-        self.addCleanup(self.unlock_base)
-        self.assertIsNone(self.base_lock(), 'the No Topic Session starts Locked')
+        self.addCleanup(self.take_base_off_board)
+        self.assertIsNone(self.base_board_session(), 'the No Topic Session starts on the Board')
 
         self.press_key('⌥⌘↑')
         self.press_key('⌥⌘↑')
-        wait(self.base_lock, 'the first press did not Lock the No Topic Session, which makes it a Guest')
-        wait(lambda: self.base_lock()['order'] < self.record('fns-g')['order'],
-             lambda: 'the second press, made while the Lock ran, did not move the Board Session above the Guest fns-g: '
-             'Lock %s, Guest order %s' % (self.base_lock(), self.record('fns-g')['order']))
+        wait(self.base_board_session, 'the first press did not make the No Topic Session a Board Session among the Guests')
+        wait(lambda: self.base_board_session()['order'] < self.record('fns-g')['order'],
+             lambda: 'the second press, made while Make a Guest ran, did not move the Board Session above the Guest fns-g: '
+             'Board Session %s, Guest order %s' % (self.base_board_session(), self.record('fns-g')['order']))
         self.assertEqual(self.order('fns-'), ['fns-a', 'fns-b', 'fns-g'], 'a press moved a card that is not the Session')
 
 

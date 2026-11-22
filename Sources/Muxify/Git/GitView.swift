@@ -1623,7 +1623,7 @@ final class GitView {
 
     /// An Agent as the guard names it: its kind, then its Topic, else its Session.
     func guardName(of agent: Agent) -> String {
-        let topic = store?.topics.topicTitle(ofSession: agent.sessionID)
+        let topic = store?.board.topicTitle(ofSession: agent.sessionID)
         return "\(agent.kind.displayName) in \(topic ?? agent.sessionName)"
     }
 
@@ -2061,7 +2061,7 @@ final class GitView {
         let repository = ([snapshot.repositoryFolder, snapshot.root] + snapshot.branches.compactMap(\.worktreePath))
             .filter { !$0.isEmpty }.map(resolver.folder)
         return TopicBranchHolders.records(remembering: branch.name, in: repository, among: topicRecords).map {
-            (store?.topics.labels ?? TopicLabels(topicRecords)).label(of: $0)
+            (store?.board.labels ?? TopicLabels(topicRecords)).label(of: $0)
         }
     }
 

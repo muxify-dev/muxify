@@ -29,7 +29,7 @@ GUEST = 'guest-notes'
 
 def launch(test_case):
     """A sandbox whose records hold a Dormant Pinned Topic, a Dormant one In Play, a Settled one that remembers a
-    Session and an Empty one, and the Lock of a Board Session `notes` with two Windows, launched with reopen_at_launch on
+    Session and an Empty one, and a Dormant Board Session `notes` with two Windows, launched with reopen_at_launch on
     and no tmux server running."""
     s = Sandbox(test_case.__module__.rsplit('.', 1)[-1])
     test_case.addClassCleanup(s.teardown)
@@ -74,12 +74,12 @@ class ReopenAtLaunchOn(unittest.TestCase):
         self.assertEqual(found.get('work/pinned'), 2, found)
         self.assertEqual(found.get('work/alpha'), 2, found)
 
-    def test_a_launch_reopens_a_dormant_guest_session_with_its_windows_and_its_lock(self):
+    def test_a_launch_reopens_a_dormant_board_session_with_its_windows_and_points_it_at_its_row(self):
         found = sessions(self.s)
         self.assertEqual(found.get('notes'), 2, found)
         self.assertEqual(self.s.tmux('show-options', '-qv', '-t', '=notes:', '@muxify_session_id'), GUEST,
-                         'the Reopened Session does not point at its Lock')
-        card = 'locked-' + GUEST
+                         'the Reopened Session does not point at its Board Session')
+        card = 'board-session-' + GUEST
         self.s.wait_rows(lambda rs: self.s.has(card, rs) and 'Dormant' not in self.s.row(card, rs).get('accessibilityValue', ''),
                          lambda: 'the Board Session has no live card: %s' % next(
                              (r for r in self.s.rows() if r.get('accessibilityIdentifier') == card), 'no card'))

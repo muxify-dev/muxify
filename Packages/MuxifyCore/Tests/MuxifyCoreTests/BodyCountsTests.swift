@@ -27,8 +27,8 @@ final class BodyCountsTests: XCTestCase {
     }
 
     func testTheValueRoundTripsAndNoneIsEmpty() {
-        let bodies = BodyCounts(["TopicsSection": 2, "SidebarCard": 300, "SessionsSection": 0])
-        XCTAssertEqual(bodies.value, "SidebarCard:300,TopicsSection:2")
+        let bodies = BodyCounts(["BoardSection": 2, "SidebarCard": 300, "SessionsSection": 0])
+        XCTAssertEqual(bodies.value, "BoardSection:2,SidebarCard:300")
         XCTAssertEqual(BodyCounts(value: bodies.value), bodies)
         XCTAssertEqual(BodyCounts().value, "none")
         XCTAssertEqual(BodyCounts(value: "none"), BodyCounts())

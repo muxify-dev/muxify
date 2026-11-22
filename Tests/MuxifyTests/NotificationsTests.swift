@@ -57,14 +57,14 @@ final class NotificationsTests: XCTestCase {
         XCTAssertTrue(model().rows[0].usesRowMarks)
     }
 
-    func testAnExpandedActiveLockedSessionMovesItsMarkOntoItsRowsAsATopicDoes() {
-        var locked = window("@1", topic: nil)
-        locked.savedSessionID = "$1"
+    func testAnExpandedActiveBoardSessionMovesItsMarkOntoItsRowsAsATopicDoes() {
+        var onBoard = window("@1", topic: nil)
+        onBoard.savedSessionID = "$1"
         var second = window("@2", topic: nil)
         second.savedSessionID = "$1"
         var selection = TopicSelection()
         selection.select(windowID: "@1", activeTopic: .session("$1"))
-        let model = BoardModel(records: [], boardSessions: [BoardSession(id: "$1", order: 1, isGuest: true)], windows: [locked, second], config: Config(), selection: selection,
+        let model = BoardModel(records: [], boardSessions: [BoardSession(id: "$1", order: 1, isGuest: true)], windows: [onBoard, second], config: Config(), selection: selection,
                                 location: .window(WindowID(rawValue: "@1")!),
                                 agents: [agent(.done), agent(.blocked, id: "%2", window: "@2", unread: false)])
         let row = model.rows.first { $0.id == .session("$1") }

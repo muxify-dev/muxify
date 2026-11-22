@@ -15,7 +15,7 @@ final class SessionPathAliasTests: XCTestCase {
         var config = Config()
         config.sessionPaths = [vault, game]
         let model = BoardModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: mode, agents: [])
-        return PaletteCatalog(windows: windows, agents: [], sessionPaths: [vault, game], topics: model, records: records)
+        return PaletteCatalog(windows: windows, agents: [], sessionPaths: [vault, game], board: model, records: records)
     }
 
     private func discovered(_ config: Config) -> [SessionPath] {
@@ -103,7 +103,7 @@ final class SessionPathAliasTests: XCTestCase {
                        window("@2", session: "game/write", directory: "/work/game/main", topic: "t")]
         // A Topic lists its Sessions oldest first.
         windows[1].sessionCreated = 1
-        let model = catalog(records: [record], windows: windows).topics!
+        let model = catalog(records: [record], windows: windows).board!
         XCTAssertEqual(model.rows.first { $0.id == .topic("t") }?.sessions.map(\.baseName), ["vault", "game"])
         var settled = record
         settled.settledAt = "2026-01-01T00:00:00Z"

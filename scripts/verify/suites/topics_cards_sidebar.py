@@ -46,15 +46,16 @@ class TopicsCardsSidebar(TopicsSidebar):
     def client_windows(self):
         return self.s.tmux('list-clients', '-F', '#{window_id}').split()
 
-    def test_a_new_topic_is_a_guest_under_a_guest_session_also_with_a_free_place(self):
+    def test_a_new_topic_is_a_guest_under_a_board_session_among_the_guests_also_with_a_free_place(self):
         self.write_topic('insert-pin', 'Pinned', order=0, pinned=True)
         self.write_topic('insert-existing', 'Existing', order=0)
         sid = self.new_session('insert-guest', self.beta)
-        # As an older Muxify Locked it; the app imports the Lock, and the Session then points at it.
+        # As an older Muxify kept it on the list; the app imports it as a Board Session, and the Session then points at it.
         self.s.tmux('set-option', '-t', sid, '@muxify_lock', '2')
-        lock_id = wait(lambda: self.s.tmux('show-options', '-qv', '-t', sid, '@muxify_session_id'), 'the Lock was not imported')
-        self.addCleanup(self.store.remove_board_session, lock_id)
-        guest = 'locked-' + lock_id
+        board_session_id = wait(lambda: self.s.tmux('show-options', '-qv', '-t', sid, '@muxify_session_id'),
+                                'the Board Session was not imported')
+        self.addCleanup(self.store.remove_board_session, board_session_id)
+        guest = 'board-session-' + board_session_id
         self.find(guest)
         key = 'topic-' + self.create_topic('Inserted as a Guest')['id']
         expected = ['topic-insert-pin', 'topic-insert-existing', guest, key]

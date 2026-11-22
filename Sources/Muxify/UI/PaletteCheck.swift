@@ -37,7 +37,7 @@ enum CheckAction: Equatable {
     @MainActor func goOn(with ids: [TopicGroupID], in palette: CommandPalette) {
         switch self {
         case .chooseInPlay(let places):
-            let guests = Set(ids.filter { id in palette.store?.topics.split.guests.contains { $0.id == id } == true })
+            let guests = Set(ids.filter { id in palette.store?.board.split.guests.contains { $0.id == id } == true })
             let boardSessions = Set(ids.filter(\.isBoardSession))
             palette.order(OrderDraft(cards: ids, places: places, benchless: guests.union(boardSessions)))
         }
@@ -61,16 +61,16 @@ struct CheckDraft: Equatable {
 extension CommandPalette {
     /// `ids` in list order, without the cards that the step no longer lists.
     func listOrder(_ ids: Set<TopicGroupID>, _ action: CheckAction) -> [TopicGroupID] {
-        guard let topics = store?.topics else { return [] }
-        return action.listed(topics).map(\.id).filter(ids.contains)
+        guard let board = store?.board else { return [] }
+        return action.listed(board).map(\.id).filter(ids.contains)
     }
 
     func checkedIDs(_ draft: CheckDraft) -> [TopicGroupID] { listOrder(draft.checked, draft.action) }
 
     /// One row for each card that the step lists. A row stays in its place when it is checked.
     func checkRows(_ draft: CheckDraft) -> PickList<PaletteItem> {
-        guard let topics = store?.topics else { return .empty }
-        let candidates = draft.action.listed(topics).map { cardCandidate($0, choice: .check($0.id)) }
+        guard let board = store?.board else { return .empty }
+        let candidates = draft.action.listed(board).map { cardCandidate($0, choice: .check($0.id)) }
         return FuzzyRanker.list([PickSectionInput(id: "topics", title: "Board", rule: .ranked(showsWhenEmpty: true),
                                                   candidates: candidates)], query: FuzzyQuery(query), rules: PickRules())
     }

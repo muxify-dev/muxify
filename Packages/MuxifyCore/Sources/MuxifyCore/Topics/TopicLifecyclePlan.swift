@@ -367,15 +367,15 @@ extension TopicReopening.Session {
 struct BoardSessionReopenPlan {
     let edit: TopicEdit
 
-    init(lock: BoardSession, records: [TopicRecord], windows: [TmuxWindow], choice: TopicReopening.Choice = .reopen) throws {
-        if let live = lock.windows(in: windows, open: records.openTopicIDs).first {
-            guard choice == .reopen else { throw TopicRequestError.boardSessionLive(lock.id) }
+    init(boardSession: BoardSession, records: [TopicRecord], windows: [TmuxWindow], choice: TopicReopening.Choice = .reopen) throws {
+        if let live = boardSession.windows(in: windows, open: records.openTopicIDs).first {
+            guard choice == .reopen else { throw TopicRequestError.boardSessionLive(boardSession.id) }
             edit = TopicEdit(record: nil, commands: [], selection: .sessionID(live.sessionID))
             return
         }
-        let session = try TopicReopening.Session(boardSession: lock, windows: windows, choice: choice)
+        let session = try TopicReopening.Session(boardSession: boardSession, windows: windows, choice: choice)
         edit = TopicEdit(record: nil, commands: TopicReopenPlan.creating(session.name, in: session.directory, windows: session.windows,
-                                                                         options: [("@muxify_session_id", lock.id)]),
+                                                                         options: [("@muxify_session_id", boardSession.id)]),
                          selection: .sessionName(session.name))
     }
 }

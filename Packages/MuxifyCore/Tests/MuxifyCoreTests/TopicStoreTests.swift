@@ -321,7 +321,7 @@ final class TopicStoreTests: XCTestCase {
             let shown = TopicOrder.sorted(transaction.entries)
             XCTAssertEqual(shown.records.map(\.id), ["p", "a", "new"])
             XCTAssertTrue(shown.allSatisfy { $0.order?.isFinite == true })
-            XCTAssertTrue(transaction.boardSessions.allSatisfy { $0.order.isFinite }, "a renumber gives the Lock a finite order too")
+            XCTAssertTrue(transaction.boardSessions.allSatisfy { $0.order.isFinite }, "a renumber gives the Board Session a finite order too")
         }
     }
 

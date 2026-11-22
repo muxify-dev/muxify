@@ -56,7 +56,7 @@ extension CommandPalette {
 
     func orderRows(_ draft: OrderDraft) -> PickList<PaletteItem> {
         guard let store else { return .empty }
-        let candidates = draft.remaining.compactMap { id in store.topics.rows.first { $0.id == id } }.map { cardCandidate($0, choice: .card($0.id), prefix: "place-") }
+        let candidates = draft.remaining.compactMap { id in store.board.rows.first { $0.id == id } }.map { cardCandidate($0, choice: .card($0.id), prefix: "place-") }
         return FuzzyRanker.list([PickSectionInput(id: "place", title: "Place \(draft.place)", rule: .ranked(showsWhenEmpty: true),
                                                   candidates: candidates)], query: FuzzyQuery(query), rules: PickRules())
     }
@@ -69,20 +69,20 @@ extension CommandPalette {
         return PickCandidate(id: prefix + row.id.accessibilityID, kind: kind, title: row.title,
                              fields: (row.idleLabel.map { [.detail($0)] } ?? []) + row.sessions.map { .label($0.baseName) }
                                 + SearchField.tags(row.tags),
-                             trailing: store?.topics.activeTopic == row.id ? "Active" : "", mark: row.mark,
+                             trailing: store?.board.activeTopic == row.id ? "Active" : "", mark: row.mark,
                              pick: .available(PaletteItem(ref: .choice(choice))))
     }
 
     /// The title of a card of the Board.
     func cardTitle(_ id: TopicGroupID) -> String {
         if case .topic(let topic) = id { return topicTitle(id: topic) }
-        return store?.topics.rows.first { $0.id == id }?.title ?? ""
+        return store?.board.rows.first { $0.id == id }?.title ?? ""
     }
 
     /// Replace from Bench: one row for each Benched card.
     func benchRows() -> PickList<PaletteItem> {
         guard let store else { return .empty }
-        let cut = store.topics.split
+        let cut = store.board.split
         let candidates = cut.bench.map { cardCandidate($0, choice: .card($0.id)) }
         return FuzzyRanker.list([PickSectionInput(id: "bench", title: "Bench", rule: .ranked(showsWhenEmpty: true), candidates: candidates)],
                                 query: FuzzyQuery(query), rules: PickRules())

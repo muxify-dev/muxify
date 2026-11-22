@@ -394,7 +394,7 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(recorder.items.last?.snapshot.cards, recorder.items.first?.snapshot.cards, "only the sidebar changed")
     }
 
-    func testOnlyAClientThatDeclaredGuestSessionsGetsTheLocksAndTheDormantCards() async throws {
+    func testOnlyAClientThatDeclaredBoardGetsTheBoardSessionsAndTheDormantCards() async throws {
         let dormant = BoardSession(id: "gone", order: 0, isGuest: true, session: .object(["name": .string("notes"), "directory": .string("/tmp")]))
         try TopicStore(paths: paths).write { $0.addToBoard(dormant) }
 
@@ -416,7 +416,7 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(snapshot.cards, [])
     }
 
-    func testAnOlderMacGetsTheLockOrderOnTheWindowsOfALiveGuestSessionAndAgainWhenTheLockChanges() async throws {
+    func testAnOlderMacGetsTheLockOrderOnTheWindowsOfALiveBoardSessionAndAgainWhenItsCardMoves() async throws {
         try tmux.run(["set-option", "-t", "=work:", "@muxify_session_id", "g1"])
         try TopicStore(paths: paths).write { $0.addToBoard(BoardSession(id: "g1", order: 0, isGuest: true)) }
         let order = try XCTUnwrap(TopicStore(paths: paths).read().boardSessions.first).order
@@ -427,16 +427,16 @@ final class HostServerTests: XCTestCase {
         try await wait("the newer Mac got no first item") { newer.events(of: work) > 0 }
 
         try TopicStore(paths: paths).write { $0.boardSessions[0].order = order + 5 }
-        try await wait("a move of the Lock sent the older Mac no new lock_order", seconds: 5) { older.lastOrder(of: work) == order + 5 }
+        try await wait("a move of the Board Session sent the older Mac no new lock_order", seconds: 5) { older.lastOrder(of: work) == order + 5 }
         let moved = older.events(of: work)
         try TopicStore(paths: paths).write { $0.takeOffBoard("g1") }
-        try await wait("an ended Lock left the older Mac its lock_order", seconds: 5) {
+        try await wait("a Board Session that left the Board left the older Mac its lock_order", seconds: 5) {
             older.events(of: work) > moved && older.lastOrder(of: work) == nil
         }
-        XCTAssertEqual(newer.orders(of: work), [], "a Mac that declared board reads the Locks, never lock_order")
+        XCTAssertEqual(newer.orders(of: work), [], "a Mac that declared board reads the Board Sessions, never lock_order")
     }
 
-    func testAnOlderPhoneGetsNoSnapshotItemForAChangeOfOnlyTheDormantGuestSessions() async throws {
+    func testAnOlderPhoneGetsNoSnapshotItemForAChangeOfOnlyTheDormantBoardSessions() async throws {
         let older = subscribeSnapshot(try await connect(capabilities: ["snapshot"]))
         let newer = subscribeSnapshot(try await connect(capabilities: ["snapshot", "board"]))
         try await wait("no first items") { !older.items.isEmpty && !newer.items.isEmpty }

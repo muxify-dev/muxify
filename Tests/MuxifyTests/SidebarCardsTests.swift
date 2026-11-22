@@ -4,7 +4,7 @@ import MuxifyTestSupport
 
 /// The Sidebar's sections, in order, with each card's label, state and mark, from the cards that `Board` builds.
 final class SidebarCardsTests: XCTestCase {
-    /// A Window of `session`; a `guest` one points at the Lock whose id is the Session's tmux id.
+    /// A Window of `session`; a `guest` one points at the Board Session whose id is the Session's tmux id.
     private func window(_ session: String, topic: String? = nil, guest: Bool = false) -> TmuxWindow {
         .fixture(id: "@" + session.dropFirst(), sessionID: session, sessionName: "s" + session.dropFirst(), topicID: topic,
                  savedSessionID: guest ? session : "")

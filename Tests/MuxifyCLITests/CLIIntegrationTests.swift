@@ -791,7 +791,7 @@ final class CLIWindowAndSessionIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(try sandbox.topicOption(of: session), record.id)
         XCTAssertEqual(try sandbox.tmux(["list-windows", "-t", "=" + session + ":", "-F", "#{window_id}"]).split(separator: "\n").count, 2,
                        "both Windows move with the Session")
-        XCTAssertEqual(try sandbox.boardSessions(), [], "the Lock ends")
+        XCTAssertEqual(try sandbox.boardSessions(), [], "the Board Session leaves the Board")
 
         let id = try await newTopic("Ship", in: sandbox.tools, sandbox: sandbox)
         let moved = try await run(cli, arguments: ["session", "move", "--topic", id], environment: sandbox.cliEnvironment(pane: pane))
@@ -2027,7 +2027,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(try sandbox.sessions(), ["api/ship", "game/ship", "main"])
     }
 
-    func testADormantGuestSessionIsListedReopenedStartedFreshAndBenchedByItsLockID() async throws {
+    func testADormantBoardSessionIsListedReopenedStartedFreshAndBenchedByItsID() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
         let environment = sandbox.cliEnvironment(pane: nil)
@@ -2035,39 +2035,39 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         try sandbox.tmux(["new-window", "-d", "-t", "=notes:", "-c", sandbox.game.path])
         let guest = try await run(cli, arguments: ["topic", "make-guest", "--session", "notes"], environment: environment)
         XCTAssertEqual(guest.status, 0, guest.output)
-        let lock = try XCTUnwrap(try sandbox.boardSessions().only)
+        let boardSession = try XCTUnwrap(try sandbox.boardSessions().only)
         // tmux ends the Session with no Muxify to see it, as a tmux restart does.
         try sandbox.tmux(["kill-session", "-t", "=notes"])
 
         let shown = try await run(cli, arguments: ["environment", "show"], environment: environment)
         XCTAssertEqual(shown.status, 0, shown.output)
-        XCTAssertTrue(shown.stdout.contains("Guests\ndormant session\t\(lock.id)\tnotes\n"), shown.stdout)
+        XCTAssertTrue(shown.stdout.contains("Guests\ndormant session\t\(boardSession.id)\tnotes\n"), shown.stdout)
 
-        let reopened = try await run(cli, arguments: ["topic", "reopen", "--board-session", lock.id], environment: environment)
+        let reopened = try await run(cli, arguments: ["topic", "reopen", "--board-session", boardSession.id], environment: environment)
         XCTAssertEqual(reopened.status, 0, reopened.output)
         let windows = try sandbox.tmux(["list-windows", "-t", "=notes:", "-F", "#{window_id}"]).split(separator: "\n")
         XCTAssertEqual(windows.count, 2, "Reopen creates both Windows")
         XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "=notes:", "@muxify_session_id"]).trimmingCharacters(in: .whitespacesAndNewlines),
-                       lock.id)
+                       boardSession.id)
 
         try sandbox.tmux(["kill-session", "-t", "=notes"])
-        let fresh = try await run(cli, arguments: ["topic", "start-fresh", "--board-session", lock.id], environment: environment)
+        let fresh = try await run(cli, arguments: ["topic", "start-fresh", "--board-session", boardSession.id], environment: environment)
         XCTAssertEqual(fresh.status, 0, fresh.output)
         XCTAssertEqual(try sandbox.tmux(["list-windows", "-t", "=notes:", "-F", "#{window_id}"]).split(separator: "\n").count, 1,
                        "Start Fresh creates one shell Window")
         XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "=notes:", "@muxify_session_id"]).trimmingCharacters(in: .whitespacesAndNewlines),
-                       lock.id)
-        let live = try await run(cli, arguments: ["topic", "start-fresh", "--board-session", lock.id], environment: environment)
+                       boardSession.id)
+        let live = try await run(cli, arguments: ["topic", "start-fresh", "--board-session", boardSession.id], environment: environment)
         XCTAssertEqual(live.status, 1, live.output)
-        XCTAssertEqual(live.stderr, "muxify: The Board Session \(lock.id) has a live Session. Start Fresh makes only a Dormant Board Session again. "
+        XCTAssertEqual(live.stderr, "muxify: The Board Session \(boardSession.id) has a live Session. Start Fresh makes only a Dormant Board Session again. "
                        + "No changes were made.\n")
 
-        let benched = try await run(cli, arguments: ["topic", "bench", "--board-session", lock.id], environment: environment)
+        let benched = try await run(cli, arguments: ["topic", "bench", "--board-session", boardSession.id], environment: environment)
         XCTAssertEqual(benched.status, 0, benched.output)
         XCTAssertEqual(try sandbox.boardSessions(), [])
-        let gone = try await run(cli, arguments: ["topic", "reopen", "--board-session", lock.id], environment: environment)
+        let gone = try await run(cli, arguments: ["topic", "reopen", "--board-session", boardSession.id], environment: environment)
         XCTAssertEqual(gone.status, 1, gone.output)
-        XCTAssertEqual(gone.stderr, "muxify: No Board Session has the id \(lock.id). No changes were made.\n")
+        XCTAssertEqual(gone.stderr, "muxify: No Board Session has the id \(boardSession.id). No changes were made.\n")
     }
 
     func testEnvironmentShowJSONListsTheCapabilitiesAndAReadRefusesARequest() async throws {
@@ -2510,7 +2510,7 @@ private final class TopicSandbox {
         try TopicStore(paths: paths).read().records
     }
 
-    /// The Locks of the Board Sessions in the state database, in id order.
+    /// The rows of the Board Sessions in the state database, in id order.
     func boardSessions() throws -> [BoardSession] {
         try TopicStore(paths: paths).read().boardSessions
     }

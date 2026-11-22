@@ -65,12 +65,12 @@ changes the Status or Unread Pane options.
 
 ### Sidebar cards on a switch
 
-A switch between the Board and the Sessions rebuilds `topics` and the Sidebar
+A switch between the Board and the Sessions rebuilds `board` and the Sidebar
 Formats and moves `selectedWindowID`. Both lists stay mounted, and neither is
 lazy, so anything a switch makes every card do, it does for every card of both
 lists.
 
-- A card or row does not read `topics`, `sidebarFormatContexts`,
+- A card or row does not read `board`, `sidebarFormatContexts`,
   `selectedWindowID` or `openSessionCards` in its body. Its list reads them
   once, into a `SessionCardState`, `TopicCardState` or `SidebarRowState` in
   `UI/SidebarCardState.swift`, and the card is `Equatable` on those values, so
@@ -234,12 +234,12 @@ The app then writes to `~/Library/Logs/Muxify/`:
     switches and Command Palette opens they made. Counts only, never which
     key, text, a title or a URL.
   - `bodies`: how many times each counted SwiftUI view's body ran over the
-    minute, as `SidebarCard:300,TopicsSection:2`, by name; a name with zero
+    minute, as `BoardSection:2,SidebarCard:300`, by name; a name with zero
     is left out, and `none` when every count is zero. The counter
     (`BodyCount` in `App/BodyCount.swift`) is in every build and counts only
     while Diagnostics is on. The counted views are `SidebarCard`,
     `TopicCard`, `Board` and `BoardPart`, the Sidebar page roots
-    `TopicsSection` and `SessionsSection`, and the Working-mark views
+    `BoardSection` and `SessionsSection`, and the Working-mark views
     `AgentMarkView` and `AgentMarkSpine`. Diagnostics never resets the
     counter; a count that fell, after the TestDriver's `counts reset=True`,
     counts again from zero, so a figure is never negative.

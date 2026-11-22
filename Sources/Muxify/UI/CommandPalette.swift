@@ -113,13 +113,13 @@ final class CommandPalette {
         guard let store else { return nil }
         return PaletteCatalog(windows: store.windows, agents: store.agents, sessionPaths: store.sessionPaths, folders: store.folders,
                               selectedWindowID: store.selectedWindowID, homeDirectory: store.homeDirectory,
-                              topics: store.link.features.contains(.topics) ? store.topics : nil, records: store.records,
+                              board: store.link.features.contains(.topics) ? store.board : nil, records: store.records,
                               lastWindowByGroup: store.topicSelection.lastWindowByGroup, visits: store.visits, commands: commands,
                               commandShortcuts: Dictionary(uniqueKeysWithValues: commands.compactMap { command in
                                   shortcut(for: command).map { (command, $0) }
                               }), commandSummaries: Dictionary(uniqueKeysWithValues: [PaletteCommand.markRead, .markUnread].compactMap { command in
                                   store.currentReadSummary.map { (command, $0) }
-                              }), agentMarks: store.topics.agentMarks)
+                              }), agentMarks: store.board.agentMarks)
     }
 
     @ObservationIgnored private lazy var resultsCache = ObservedCache(expiry: { $0.expiresAt }) { [unowned self] in

@@ -209,7 +209,7 @@ final class HintTests: XCTestCase {
         }
     }
 
-    /// Window `@<id>`, alone in Session `$<id>` unless `session` names another. A `guest` one points at the Lock whose id
+    /// Window `@<id>`, alone in Session `$<id>` unless `session` names another. A `guest` one points at the Board Session whose id
     /// is the Session's tmux id.
     private func window(_ id: String, session: String? = nil, index: Int = 0, topic: String? = nil, guest: Bool = false) -> TmuxWindow {
         let session = session ?? id
@@ -239,7 +239,7 @@ final class HintTests: XCTestCase {
                        [.session("$2"), .session("$1")])
     }
 
-    func testAGuestSessionsCardIsNumberedAfterTheInPlayPlaces() {
+    func testABoardSessionsCardAmongTheGuestsIsNumberedAfterTheInPlayPlaces() {
         var pinned = TopicRecord(id: "pinned")
         pinned.isPinned = true
         pinned.order = 5
@@ -256,7 +256,7 @@ final class HintTests: XCTestCase {
                         location: selection.windowLocation)
         XCTAssertEqual(QuickSwitchTargets(model: topics, sessions: sessions, windows: windows, tabIDs: []).cards,
                        [.topic("pinned"), .topic("first"), .topic("last"), .boardSession("$1")],
-                       "a Lock that an older Muxify kept among the Topics is a Guest too")
+                       "a Board Session that an older Muxify kept among the Topics is a Guest too")
         XCTAssertEqual(topics.activeTopic, .session("$1"))
         XCTAssertEqual(topics.rows.first { $0.id == .session("$1") }?.isExpanded, true, "going into a Board Session opens its card")
         XCTAssertEqual(topics.rows.first { $0.id == .session("$1") }?.sessions.map(\.id.session), ["$1"])
@@ -312,7 +312,7 @@ final class HintTests: XCTestCase {
         XCTAssertEqual(inWork.step(.topic, .next, from: .boardSession("$4")), .topic("pinned"))
 
         let inNoTopic = targets(selecting: "@2")
-        XCTAssertEqual(inNoTopic.sessions, [.session("$2"), .session("$6")], "No Topic Sessions without the Locked one")
+        XCTAssertEqual(inNoTopic.sessions, [.session("$2"), .session("$6")], "No Topic Sessions without the one on the Board")
         XCTAssertEqual(inNoTopic.topics, rows)
 
         XCTAssertEqual(targets(selecting: "@4").sessions, [.session("$4")], "a Board Session steps only to itself")

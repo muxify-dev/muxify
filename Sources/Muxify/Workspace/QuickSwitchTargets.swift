@@ -70,7 +70,7 @@ enum QuickSwitchTarget: Hashable {
     var accessibilityID: String {
         switch self {
         case .topic(let id): "hint-topic-" + id
-        case .boardSession(let id): "hint-locked-" + id
+        case .boardSession(let id): "hint-board-session-" + id
         case .openPlace(let place): "hint-open-place-\(place)"
         case .session(let id): "hint-session-" + id
         case .window(let id): "hint-window-" + id
@@ -182,7 +182,7 @@ extension WorkspaceStore {
     }
 
     var quickSwitchTargets: QuickSwitchTargets {
-        QuickSwitchTargets(model: topics, sessions: sessions, windows: quickSwitchWindows,
+        QuickSwitchTargets(model: board, sessions: sessions, windows: quickSwitchWindows,
                            tabIDs: currentBrowser?.tabs.map(\.id) ?? [])
     }
 
@@ -209,8 +209,8 @@ extension WorkspaceStore {
         case .window, .topicWindow: selectedWindow.map { .window($0.id) }
         case .session: selectedWindow.map { .session($0.sessionID) }
         case .topic:
-            if case .openPlace(let id) = location { topics.place(ofOpenPlace: id).map(QuickSwitchTarget.openPlace) }
-            else { topics.activeTopic?.quickSwitchTarget }
+            if case .openPlace(let id) = location { board.place(ofOpenPlace: id).map(QuickSwitchTarget.openPlace) }
+            else { board.activeTopic?.quickSwitchTarget }
         }
         return quickSwitchTargets.step(level, direction, from: current)
     }
@@ -224,7 +224,7 @@ extension WorkspaceStore {
         case .topic(let id): goToTopic(.topic(id))
         case .boardSession(let id): goToTopic(.session(id))
         case .openPlace(let place):
-            if let id = topics.openPlaceID(at: place) { goToOpenPlace(id) }
+            if let id = board.openPlaceID(at: place) { goToOpenPlace(id) }
         case .session(let id): goToSession(id)
         case .window(let id):
             if let window = windows.first(where: { $0.id == id }) { select(window) }

@@ -16,7 +16,7 @@ final class EnvironmentSnapshotTextTests: XCTestCase {
                                 "topic":{"id":"a","label":"Fix\tit","note":"why","tags":["backend","release"],"state":"live"}},
                                {"kind":"open_place","id":"gap","sessions":[]}],
                      "guests":[{"kind":"session","mark":"working","sessions":["$3"]},
-                               {"kind":"dormant_session","id":"lock-1","name":"chores","sessions":[]}],
+                               {"kind":"dormant_session","id":"board-1","name":"chores","sessions":[]}],
                      "bench":[{"kind":"topic","mark":"unread","sessions":[],
                                "topic":{"id":"b","label":"Untitled 1","note":null,"tags":[],"state":"empty"}}]},
          "no_topic":["$2"]}
@@ -34,7 +34,7 @@ final class EnvironmentSnapshotTextTests: XCTestCase {
             2\topen place\tgap
             Guests
             session\t$3\ttools\tworking
-            dormant session\tlock-1\tchores
+            dormant session\tboard-1\tchores
             Bench
             topic\tb\tUntitled 1\tempty\tunread\t\t
             No Topic

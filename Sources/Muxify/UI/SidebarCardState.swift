@@ -70,7 +70,7 @@ extension WorkspaceStore {
         case .pane(let row):
             return .pane(SidebarRowState.Pane(
                 formatted: sidebarText(.pane, context: sidebarFormatContexts.panes[row.pane.id]),
-                mark: topics.agentMarks[row.pane.id],
+                mark: board.agentMarks[row.pane.id],
                 isSelected: !row.isUnderWindowRow && row.pane.isActive && row.window.id == selectedWindowID))
         }
     }
@@ -81,7 +81,7 @@ extension WorkspaceStore {
     }
 
     func sessionCardState(_ session: SessionGroup, showsAllRows: Bool) -> SessionCardState {
-        let model = topics
+        let model = board
         let items = model.sessionChildren[session.id]?.items ?? []
         let selected = selectedWindowID.flatMap { id in session.windows.contains { $0.id == id } ? id : nil }
         return SessionCardState(

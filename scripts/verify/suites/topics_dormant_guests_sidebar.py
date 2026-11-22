@@ -35,10 +35,11 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
         card = 'no-topic-session-' + sid
         self.find(card, 'the selected No Topic Session %s has no card' % name)
         s.act('action', card, 'Make a Guest')
-        lock_id = wait(lambda: s.tmux('show-options', '-qv', '-t', sid, '@muxify_session_id'), 'Make a Guest gave %s no Lock' % name)
-        self.addCleanup(self.store.remove_board_session, lock_id)
-        self.find('locked-' + lock_id, 'Make a Guest gave %s no card' % name)
-        return lock_id
+        board_session_id = wait(lambda: s.tmux('show-options', '-qv', '-t', sid, '@muxify_session_id'),
+                                'Make a Guest gave %s no Board Session' % name)
+        self.addCleanup(self.store.remove_board_session, board_session_id)
+        self.find('board-session-' + board_session_id, 'Make a Guest gave %s no card' % name)
+        return board_session_id
 
     def restart_tmux(self):
         """Kills the sandbox's tmux server and starts it again, as a computer restart does, with the fixture's base
@@ -64,12 +65,12 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
                 return False
         wait(reconnected, 'the App Window did not reconnect to the new tmux server', seconds=30)
 
-    def test_a_guest_session_comes_back_dormant_at_its_place_and_a_press_reopens_it_with_its_windows(self):
+    def test_a_board_session_among_the_guests_comes_back_dormant_at_its_place_and_a_press_reopens_it_with_its_windows(self):
         s = self.s
         self.write_topic('dormant-upper', 'Dormant upper', order=0)
         notes = self.make_guest('dormant-notes', windows=2)
         later = self.make_guest('dormant-later', windows=1)
-        key, later_key = 'locked-' + notes, 'locked-' + later
+        key, later_key = 'board-session-' + notes, 'board-session-' + later
         s.wait_rows(lambda rs: self.above('topics-guests-line', key, rs) and self.above(key, later_key, rs),
                     'the two Board Sessions are not in the Guests in the order they were made')
 
@@ -90,14 +91,14 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
             return found.returncode == 0 and len(found.stdout.split()) == 2
         wait(reopened, 'a press on the Dormant card did not create its Session with its 2 Windows', seconds=15)
         self.assertEqual(s.tmux('show-options', '-qv', '-t', '=dormant-notes:', '@muxify_session_id'), notes,
-                         'the new Session does not point at the same Lock')
+                         'the new Session does not point at the same Board Session')
         s.wait_rows(lambda rs: s.has(key, rs) and 'Dormant' not in s.row(key, rs).get('accessibilityValue', '')
                     and self.above(key, later_key, rs), 'the card is not live again at its place', seconds=15)
 
     def test_a_board_session_in_a_place_comes_back_dormant_at_its_place_and_a_press_reopens_it_there(self):
         s = self.s
         notes = self.make_guest('place-notes', windows=2)
-        key = 'locked-' + notes
+        key = 'board-session-' + notes
         self.move_into_a_place(key)
         wait(lambda: next((b for b in self.store.board_sessions() if b['id'] == notes), {}).get('guest') is False,
              'the row of the Board Session keeps the Guest mark after the move')
@@ -121,12 +122,12 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
                     and 'Guest' not in s.row(key, rs).get('accessibilityValue', ''),
                     'the card is not live again in its In Play place', seconds=15)
 
-    def test_the_page_of_a_dormant_guest_session_offers_start_fresh_which_makes_one_window_at_its_place(self):
+    def test_the_page_of_a_dormant_board_session_offers_start_fresh_which_makes_one_window_at_its_place(self):
         s = self.s
         self.write_topic('fresh-upper', 'Fresh upper', order=0)
         notes = self.make_guest('fresh-notes', windows=2)
         later = self.make_guest('fresh-later', windows=1)
-        key, later_key = 'locked-' + notes, 'locked-' + later
+        key, later_key = 'board-session-' + notes, 'board-session-' + later
 
         self.restart_tmux()
         self.addCleanup(s.tmux_ok, 'kill-session', '-t', '=fresh-notes')
@@ -163,7 +164,7 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
             return found.returncode == 0 and len(found.stdout.split()) == 1
         wait(made_with_one_window, 'Start Fresh did not create the Session with one Window', seconds=15)
         self.assertEqual(s.tmux('show-options', '-qv', '-t', '=fresh-notes:', '@muxify_session_id'), notes,
-                         'the new Session does not point at the same Lock')
+                         'the new Session does not point at the same Board Session')
         s.wait_rows(lambda rs: not s.has('reopen-choice-start-fresh', rs) and s.has(key, rs)
                     and 'Dormant' not in s.row(key, rs).get('accessibilityValue', '') and self.above(key, later_key, rs),
                     'the page stays, or the card is not live again at its place', seconds=15)
