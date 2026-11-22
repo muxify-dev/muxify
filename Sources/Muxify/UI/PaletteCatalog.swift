@@ -7,7 +7,7 @@ struct PaletteItem: Equatable {
         /// Nil `window`: Dormant or Settled, so ↩ shows the Topic's Reopen choice.
         case topic(id: String, window: TmuxWindow?)
         /// A Dormant Board Session, by its id: ↩ creates its Session again.
-        case boardSession(lock: String)
+        case boardSession(id: String)
         case session(SessionGroup)
         case sessionPath(OpenDirectory)
         case window(TmuxWindow)
@@ -154,7 +154,7 @@ struct PaletteCatalog {
     }
 
     private func topicCandidate(_ row: BoardModel.Row) -> PickCandidate<PaletteItem>? {
-        if case .session(let lock) = row.id { return dormantSessionCandidate(row, lock: lock) }
+        if case .session(let id) = row.id { return dormantSessionCandidate(row, id: id) }
         guard case .topic(let id) = row.id else { return nil }
         let isCurrent = topics?.activeTopic == row.id
         let window = EntryWindow.of(row, lastWindowByGroup: lastWindowByGroup, visits: visits)
@@ -171,13 +171,13 @@ struct PaletteCatalog {
 
     /// A Dormant Board Session: its card is among the Topics, and it has no Session for the Sessions section to list.
     /// A live one is a row of that section.
-    private func dormantSessionCandidate(_ row: BoardModel.Row, lock: String) -> PickCandidate<PaletteItem>? {
+    private func dormantSessionCandidate(_ row: BoardModel.Row, id: String) -> PickCandidate<PaletteItem>? {
         guard row.state == .dormant else { return nil }
         return PickCandidate(
             id: row.id.accessibilityID, kind: .session, symbol: "□", title: row.title,
             fields: [.typeWord("dormant"), .typeWord("session")], trailing: "Reopen", mark: row.mark,
             lastVisit: visits.last(.session(name: row.title)), unopened: true,
-            pick: .available(PaletteItem(ref: .boardSession(lock: lock))))
+            pick: .available(PaletteItem(ref: .boardSession(id: id))))
     }
 
     private func settledCandidate(_ record: TopicRecord) -> PickCandidate<PaletteItem> {

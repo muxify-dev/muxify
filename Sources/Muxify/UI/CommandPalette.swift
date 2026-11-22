@@ -175,9 +175,9 @@ final class CommandPalette {
         case .agent:
             if store?.link.features.contains(.topics) == true { actions += [.move] }
         case .sessionPath: actions += [.newSession]
-        case .boardSession(let lock):
+        case .boardSession(let id):
             actions += [.startTopicFresh]
-            if store?.canBench(.boardSession(lock)) == true { actions += [.bench] }
+            if store?.canBench(.boardSession(id)) == true { actions += [.bench] }
         case .choice, .command, .tag: break
         }
         if !item.path.isEmpty { actions += [.copyFolder]; if store?.link.isOnThisMac == true { actions += [.revealFolder] } }
@@ -381,7 +381,7 @@ final class CommandPalette {
             case .session(let session):
                 if let window = EntryWindow.ofSession(session.windows) { store.select(window) }
             case .sessionPath(let target): store.openDirectory(target)
-            case .boardSession(let lock): store.reopenBoardSession(lock, .reopen)
+            case .boardSession(let id): store.reopenBoardSession(id, .reopen)
             case .tag: break
             case .choice: break
             case .command: break

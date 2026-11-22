@@ -34,10 +34,10 @@ extension CommandPalette {
             store.changeRead(action == .markRead ? .read : .unread, in: item.readTarget)
             return
         }
-        if case .boardSession(let lock) = item.ref {
+        if case .boardSession(let id) = item.ref {
             switch action {
-            case .startTopicFresh: close(); store.reopenBoardSession(lock, .startFresh)
-            case .bench: close(); store.bench(.boardSession(lock))
+            case .startTopicFresh: close(); store.reopenBoardSession(id, .startFresh)
+            case .bench: close(); store.bench(.boardSession(id))
             default: break
             }
             return

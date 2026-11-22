@@ -79,7 +79,7 @@ public enum EnvironmentTarget: Codable, Hashable, Sendable {
         else if let session = try values.decodeIfPresent(SessionID.self, forKey: .session) { self = .session(session) }
         else if let name = try values.decodeIfPresent(String.self, forKey: .sessionName) { self = .sessionName(name) }
         else if let window = try values.decodeIfPresent(WindowID.self, forKey: .window) { self = .window(window) }
-        else if let lock = try values.decodeIfPresent(String.self, forKey: .boardSession) { self = .boardSession(lock) }
+        else if let id = try values.decodeIfPresent(String.self, forKey: .boardSession) { self = .boardSession(id) }
         else { self = .pane(try values.decode(PaneID.self, forKey: .pane)) }
     }
 
@@ -91,7 +91,7 @@ public enum EnvironmentTarget: Codable, Hashable, Sendable {
         case .sessionName(let name): try values.encode(name, forKey: .sessionName)
         case .window(let window): try values.encode(window, forKey: .window)
         case .pane(let pane): try values.encode(pane, forKey: .pane)
-        case .boardSession(let lock): try values.encode(lock, forKey: .boardSession)
+        case .boardSession(let id): try values.encode(id, forKey: .boardSession)
         }
     }
 }

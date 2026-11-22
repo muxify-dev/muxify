@@ -211,7 +211,7 @@ public struct Router: Equatable {
         guard intent == nil else { return nil }
         switch location {
         case .emptyTopic(.topic(let topic))? where !facts.records.contains(where: { $0.id == topic }): break
-        case .emptyTopic(.session(let lock))? where !facts.boardSessions.contains(lock): break
+        case .emptyTopic(.session(let id))? where !facts.boardSessions.contains(id): break
         case .openPlace(let place)? where !facts.openPlaces.contains(place): break
         default: return nil
         }
@@ -293,7 +293,7 @@ private extension TopicGroupID {
     /// The page of a card with no Window: its own, as a Dormant Board Session's offers Reopen and Start Fresh, or No
     /// Topic's for a Board Session whose card is gone.
     func page(_ facts: Router.Facts) -> TopicGroupID {
-        if case .session(let lock) = self, !facts.boardSessions.contains(lock) { return .noTopic }
+        if case .session(let id) = self, !facts.boardSessions.contains(id) { return .noTopic }
         return self
     }
 }

@@ -322,8 +322,8 @@ extension EnvironmentService {
         case .reopen, .startFresh:
             let choice: TopicReopening.Choice = request.command == .startFresh ? .startFresh : .reopen
             if case .boardSession(let id)? = request.target {
-                let lock = try boardSessionRow(id, in: contents)
-                return Planned(edit: try BoardSessionReopenPlan(lock: lock, records: records, windows: snapshot.windows, choice: choice).edit)
+                let boardSession = try boardSessionRow(id, in: contents)
+                return Planned(edit: try BoardSessionReopenPlan(lock: boardSession, records: records, windows: snapshot.windows, choice: choice).edit)
             }
             guard case .topic(let ref) = request.target else { throw TopicRequestError.noTarget }
             let topic = try ref.resolve(in: records, open: false)

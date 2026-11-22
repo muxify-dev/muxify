@@ -449,7 +449,9 @@ public final class EnvironmentPublisher: @unchecked Sendable {
                 contents.records.compactMap { $0.remembering(snapshot, order: order, previously: previously) }
             } ?? []
             let open = contents.records.openTopicIDs
-            let memories = contents.boardSessions.compactMap { lock in lock.remembering(snapshot, open: open, previously: previously).map { (lock.id, $0) } }
+            let memories = contents.boardSessions.compactMap { boardSession in
+                boardSession.remembering(snapshot, open: open, previously: previously).map { (boardSession.id, $0) }
+            }
             guard !updates.isEmpty || !memories.isEmpty else { return false }
             try topics.write { transaction in
                 for record in updates { _ = try transaction.remember(record.sessions, of: record.id) }

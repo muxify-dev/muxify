@@ -218,7 +218,7 @@ final class WorkspaceStore {
         if entryWindow(of: id) == nil, !changingTopic {
             switch id {
             case .topic(let topicID) where reopensOnArrival(topicID): return reopenTopic(topicID, .reopen)
-            case .session(let lock) where boardSessions.contains(where: { $0.id == lock }): return reopenBoardSession(lock, .reopen)
+            case .session(let boardSessionID) where boardSession(boardSessionID) != nil: return reopenBoardSession(boardSessionID, .reopen)
             case .topic, .session, .noTopic: break
             }
         }
@@ -231,8 +231,8 @@ final class WorkspaceStore {
         if let window = entryWindow(of: id) { select(window) }
         else if case .topic(let topicID) = id { showEmptyTopic(topicID) }
         else {
-            let dormantGuest = boardSessions.contains { TopicGroupID.session($0.id) == id }
-            route(.go(.emptyTopic(dormantGuest ? id : .noTopic)))
+            let page: TopicGroupID = if case .session(let boardSessionID) = id, boardSession(boardSessionID) != nil { id } else { .noTopic }
+            route(.go(.emptyTopic(page)))
             sidebarMode = .board
             if !palette.isOpen { terminalHost.window?.makeFirstResponder(nil) }
         }
@@ -288,8 +288,8 @@ final class WorkspaceStore {
     private func entryWindow(of id: TopicGroupID) -> TmuxWindow? {
         if id == .noTopic {
             let open = Set(records.filter { $0.settledAt == nil }.map(\.id))
-            let locked = topics.sessionIDsOnBoard
-            let members = windows.filter { ($0.topicID.map { !open.contains($0) } ?? true) && !locked.contains($0.sessionID) }
+            let onBoard = topics.sessionIDsOnBoard
+            let members = windows.filter { ($0.topicID.map { !open.contains($0) } ?? true) && !onBoard.contains($0.sessionID) }
             if let last = members.first(where: { $0.id == topicSelection.lastWindowByGroup[.noTopic] }) { return last }
             return EntryWindow.ofSession(members)
         }
@@ -378,7 +378,7 @@ final class WorkspaceStore {
     private static func target(of card: BoardCardID) -> EnvironmentTarget? {
         switch card {
         case .topic(let id): return .topic(.id(id))
-        case .session(let lock): return .boardSession(lock)
+        case .session(let id): return .boardSession(id)
         case .openPlace: return nil
         }
     }
@@ -386,7 +386,7 @@ final class WorkspaceStore {
     private static func ref(of card: BoardCardID) -> BoardCardRef? {
         switch card {
         case .topic(let id): return .topic(.id(id))
-        case .session(let lock): return .boardSession(lock)
+        case .session(let id): return .boardSession(id)
         case .openPlace(let id): return .openPlace(id)
         }
     }
@@ -431,7 +431,7 @@ final class WorkspaceStore {
             guard let window = windows.first(where: { $0.sessionID == id }) else { return nil }
             if let topic = window.topicID, records.contains(where: { $0.id == topic && $0.settledAt == nil }) { return nil }
             return topics.sessionIDsOnBoard.contains(id)
-        case .boardSession(let id): return boardSessions.contains { $0.id == id } ? true : nil
+        case .boardSession(let id): return boardSession(id) == nil ? nil : true
         case .topic(let id): return topics.split.bench.contains { $0.id == .topic(id) } ? false : nil
         }
     }
@@ -725,6 +725,11 @@ final class WorkspaceStore {
         reopen(.topic(.id(id)), choice)
     }
 
+    /// The Board Session with this id, live or Dormant; nil once its card has left the Board.
+    private func boardSession(_ id: String) -> BoardSession? {
+        boardSessions.first { $0.id == id }
+    }
+
     /// Creates the Session of a Dormant Board Session again and shows it: with its Windows, Panes, Tabs and Agents for
     /// Reopen, with one shell Window for Start Fresh.
     func reopenBoardSession(_ id: String, _ choice: TopicReopening.Choice) {
@@ -749,9 +754,8 @@ final class WorkspaceStore {
     }
 
     /// What `reopenBoardSession` would create now, for the page to show before the user chooses.
-    func guestReopening(_ id: String, _ choice: TopicReopening.Choice) -> Result<TopicReopening.Session, Error>? {
-        guard let lock = boardSessions.first(where: { $0.id == id }) else { return nil }
-        return Result { try TopicReopening.Session(guest: lock, windows: windows, choice: choice) }
+    func boardSessionReopening(_ id: String, _ choice: TopicReopening.Choice) -> Result<TopicReopening.Session, Error>? {
+        boardSession(id).map { boardSession in Result { try TopicReopening.Session(boardSession: boardSession, windows: windows, choice: choice) } }
     }
 
     /// What `reopenTopic` would create now, for the panel to show before the user chooses.

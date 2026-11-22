@@ -352,16 +352,16 @@ extension TopicReopening.Session {
     /// The Session that Reopen or Start Fresh creates for a Dormant Board Session, which the app shows before the user
     /// chooses: its remembered name, +2 when a live Session has it, in its folder, with the Windows that `choice` gives. A
     /// Board Session has no Topic, so it makes no Worktree again.
-    public init(guest lock: BoardSession, windows: [TmuxWindow], choice: TopicReopening.Choice) throws {
-        guard let directory = lock.session["directory"]?.string, !directory.isEmpty else { throw TopicEditFailure.invalidSessionPath }
-        try SessionNaming.validate(lock.name)
-        let name = SessionNaming.available(lock.name, taken: Set(windows.map(\.sessionName)))
-        self.init(id: lock.id, repositoryPath: nil, baseName: name, name: name, directory: directory, branch: nil, createsWorktree: false,
-                  base: nil, windows: TopicReopening.windows(of: lock.session, directory: directory, choice: choice))
+    public init(boardSession: BoardSession, windows: [TmuxWindow], choice: TopicReopening.Choice) throws {
+        guard let directory = boardSession.session["directory"]?.string, !directory.isEmpty else { throw TopicEditFailure.invalidSessionPath }
+        try SessionNaming.validate(boardSession.name)
+        let name = SessionNaming.available(boardSession.name, taken: Set(windows.map(\.sessionName)))
+        self.init(id: boardSession.id, repositoryPath: nil, baseName: name, name: name, directory: directory, branch: nil, createsWorktree: false,
+                  base: nil, windows: TopicReopening.windows(of: boardSession.session, directory: directory, choice: choice))
     }
 }
 
-/// What Reopen or Start Fresh creates for a Dormant Board Session: the Session of `TopicReopening.Session(guest:)`,
+/// What Reopen or Start Fresh creates for a Dormant Board Session: the Session of `TopicReopening.Session(boardSession:)`,
 /// pointing at its row with `@muxify_session_id`. Reopen of a live Board Session only shows it. Start Fresh of a live
 /// one fails, as it does for a live Topic.
 struct BoardSessionReopenPlan {
@@ -373,7 +373,7 @@ struct BoardSessionReopenPlan {
             edit = TopicEdit(record: nil, commands: [], selection: .sessionID(live.sessionID))
             return
         }
-        let session = try TopicReopening.Session(guest: lock, windows: windows, choice: choice)
+        let session = try TopicReopening.Session(boardSession: lock, windows: windows, choice: choice)
         edit = TopicEdit(record: nil, commands: TopicReopenPlan.creating(session.name, in: session.directory, windows: session.windows,
                                                                          options: [("@muxify_session_id", lock.id)]),
                          selection: .sessionName(session.name))

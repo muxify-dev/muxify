@@ -145,8 +145,8 @@ public struct EnvironmentService: Sendable {
         if case .session(let id)? = target { sessionID = id.rawValue }
         else if case .boardSession(let id)? = target {
             let contents = try store.read()
-            let lock = try boardSessionRow(id, in: contents)
-            guard let live = lock.windows(in: snapshot.windows, open: contents.records.openTopicIDs).first else {
+            let boardSession = try boardSessionRow(id, in: contents)
+            guard let live = boardSession.windows(in: snapshot.windows, open: contents.records.openTopicIDs).first else {
                 throw TopicRequestError.boardSessionDormant(id)
             }
             sessionID = live.sessionID
@@ -164,8 +164,8 @@ public struct EnvironmentService: Sendable {
 
     /// The Board Session that a `board_session` target names. With none, the Board Session was Benched or ended.
     func boardSessionRow(_ id: String, in contents: TopicContents) throws -> BoardSession {
-        guard let lock = contents.boardSessions.first(where: { $0.id == id }) else { throw TopicRequestError.boardSessionUnavailable(id) }
-        return lock
+        guard let boardSession = contents.boardSessions.first(where: { $0.id == id }) else { throw TopicRequestError.boardSessionUnavailable(id) }
+        return boardSession
     }
 
     var executor: TopicExecutor { TopicExecutor(server: server, paths: paths) }

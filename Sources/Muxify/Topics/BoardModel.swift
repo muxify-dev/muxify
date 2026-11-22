@@ -5,7 +5,7 @@ extension TopicGroupID {
     var accessibilityID: String {
         switch self {
         case .topic(let id): return "topic-\(id)"
-        case .session(let lock): return "locked-\(lock)"
+        case .session(let id): return "locked-\(id)"
         case .noTopic: return "no-topic"
         }
     }
@@ -19,7 +19,7 @@ extension TopicGroupID {
     var listID: BoardCardID? {
         switch self {
         case .topic(let id): return .topic(id)
-        case .session(let lock): return .session(lock)
+        case .session(let id): return .session(id)
         case .noTopic: return nil
         }
     }
@@ -27,7 +27,7 @@ extension TopicGroupID {
     init?(_ listID: BoardCardID) {
         switch listID {
         case .topic(let id): self = .topic(id)
-        case .session(let lock): self = .session(lock)
+        case .session(let id): self = .session(id)
         case .openPlace: return nil
         }
     }
@@ -443,7 +443,7 @@ struct BoardModel {
 
     /// The cards of `rows` and the Open Places, as MuxifyCore orders them for the CLI too (`TopicCards`).
     private let cards: [BoardCard]
-    private let inPlayInTopicsMode: Int?
+    private let inPlayInBoardView: Int?
 
     /// The cards that are not Pinned, cut at the Guests line and the Bench line, as `Board` cuts them. It does not
     /// follow the Sidebar mode, so the In Play Actions work in Sessions mode too.
@@ -479,7 +479,7 @@ struct BoardModel {
 
     /// What Move Up and Move Down do to a card of the Board, with the Bench as the Sidebar shows it now.
     func steps(of id: BoardCardID) -> CardSteps {
-        guard let inPlay = inPlayInTopicsMode else { return CardSteps(up: .hidden, down: .hidden) }
+        guard let inPlay = inPlayInBoardView else { return CardSteps(up: .hidden, down: .hidden) }
         let benchShown = isBenchShown == true
         return CardSteps(up: TopicCards.step(id, .up, in: cards, inPlay: inPlay, benchShown: benchShown),
                          down: TopicCards.step(id, .down, in: cards, inPlay: inPlay, benchShown: benchShown))
@@ -488,7 +488,7 @@ struct BoardModel {
     /// The opened No Topic Session has no card until it is a Board Session, but Move Up makes it a Guest (`TopicCards.stepSessionWithoutCard`).
     func steps(of id: TopicGroupID) -> CardSteps {
         if let listID = id.listID { return steps(of: listID) }
-        guard id == .noTopic, openedNoTopicSession != nil, inPlayInTopicsMode != nil else { return CardSteps(up: .hidden, down: .hidden) }
+        guard id == .noTopic, openedNoTopicSession != nil, inPlayInBoardView != nil else { return CardSteps(up: .hidden, down: .hidden) }
         return CardSteps(up: TopicCards.stepSessionWithoutCard(.up), down: TopicCards.stepSessionWithoutCard(.down))
     }
 
@@ -552,12 +552,12 @@ struct BoardModel {
         tags = config.topics.tags
         self.mode = config.sidebar.shownMode(chosen: mode)
         let marks = AgentMarks(agents, notifications: config.notifications)
-        let topicsList = Board(records: records, openPlaces: openPlaces, boardSessions: boardSessions, windows: windows, marks: marks, topics: config.topics)
-        sessionIDsOnBoard = topicsList.sessionIDsOnBoard
-        boardSessionsBySession = topicsList.boardSessionsBySession
-        cards = topicsList.order
-        inPlayInTopicsMode = self.mode == .board ? config.topics.inPlay : nil
-        let groupID = topicsList.group(of:)
+        let board = Board(records: records, openPlaces: openPlaces, boardSessions: boardSessions, windows: windows, marks: marks, topics: config.topics)
+        sessionIDsOnBoard = board.sessionIDsOnBoard
+        boardSessionsBySession = board.boardSessionsBySession
+        cards = board.order
+        inPlayInBoardView = self.mode == .board ? config.topics.inPlay : nil
+        let groupID = board.group(of:)
         let windowsByID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let agentMarks = marks.panes
         self.agentMarks = agentMarks
@@ -617,16 +617,16 @@ struct BoardModel {
                        isPinned: card.isPinned, sessions: sessions, isExpanded: openTopics.contains(id), state: card.state, tags: card.tags,
                        note: card.record?.note)
         }
-        let labels = topicsList.labels
+        let labels = board.labels
         self.labels = labels
-        let listCards = topicsList.entries.map { entry -> ListCard in
+        let listCards = board.entries.map { entry -> ListCard in
             switch entry {
             case .card(let card): return .row(row(card))
             case .openPlace(let id): return .openPlace(id)
             }
         }
-        let listCardsByID = Dictionary(zip(topicsList.entries.map(\.id), listCards), uniquingKeysWith: { first, _ in first })
-        let cut = topicsList.inPlay.cut.compactMap { listCardsByID[$0.id] }
+        let listCardsByID = Dictionary(zip(board.entries.map(\.id), listCards), uniquingKeysWith: { first, _ in first })
+        let cut = board.inPlay.cut.compactMap { listCardsByID[$0.id] }
         self.cut = cut
         let rows = listCards.compactMap(\.row)
         let outsideTopics = windows.filter { window in

@@ -310,9 +310,9 @@ public struct TopicTransaction {
             if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
             else { records.append(record) }
         }
-        for lock in change.entries.boardSessions {
-            if let index = boardSessions.firstIndex(where: { $0.id == lock.id }) { boardSessions[index] = lock }
-            else { boardSessions.append(lock) }
+        for boardSession in change.entries.boardSessions {
+            if let index = boardSessions.firstIndex(where: { $0.id == boardSession.id }) { boardSessions[index] = boardSession }
+            else { boardSessions.append(boardSession) }
         }
         for place in change.entries.openPlaces {
             if let index = openPlaces.firstIndex(where: { $0.id == place.id }) { openPlaces[index] = place }

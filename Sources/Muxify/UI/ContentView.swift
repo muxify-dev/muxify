@@ -456,10 +456,10 @@ private struct TerminalArea: View {
                             .accessibilityIdentifier("empty-topic-add-session")
                     }
                 }
-            } else if case .session(let lock) = topic.id {
-                switch (store.guestReopening(lock, .reopen), store.guestReopening(lock, .startFresh)) {
+            } else if case .session(let id) = topic.id {
+                switch (store.boardSessionReopening(id, .reopen), store.boardSessionReopening(id, .startFresh)) {
                 case (.success(let reopen)?, .success(let startFresh)?):
-                    ReopenChoiceView(store: store, reopen: [reopen], startFresh: [startFresh]) { store.reopenBoardSession(lock, $0) }
+                    ReopenChoiceView(store: store, reopen: [reopen], startFresh: [startFresh]) { store.reopenBoardSession(id, $0) }
                 case (.failure(let error)?, _):
                     Text("This Board Session cannot be reopened. \(String(describing: error))")
                         .foregroundStyle(.secondary)

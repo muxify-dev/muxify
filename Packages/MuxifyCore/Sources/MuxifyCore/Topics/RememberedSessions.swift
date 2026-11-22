@@ -108,10 +108,10 @@ extension BoardSession {
         case ended
     }
 
-    /// What `snapshot` changes in the Board Session, by the rule of `TopicRecord.remembering`: a live Session's layout replaces
-    /// the remembered one, and only a confirmed end, a Session live in `previously`, an earlier read of the same server,
-    /// and gone now, ends the Board Session. Startup, server loss and a reconnect end nothing, so after a tmux restart the Guest
-    /// Session is Dormant. `open` are the open Topics. Nil when nothing changes.
+    /// What `snapshot` changes in the Board Session, by the rule of `TopicRecord.remembering`: a live Session's layout
+    /// replaces the remembered one, and only a confirmed end, a Session live in `previously`, an earlier read of the same
+    /// server, and gone now, ends the Board Session. Startup, server loss and a reconnect end nothing, so after a tmux
+    /// restart the Board Session is Dormant. `open` are the open Topics. Nil when nothing changes.
     public func remembering(_ snapshot: TmuxSnapshot, open: Set<String>, previously: [TmuxWindow] = []) -> Memory? {
         guard snapshot.serverRunning else { return nil }
         let members = windows(in: snapshot.windows, open: open)

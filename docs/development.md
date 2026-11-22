@@ -65,9 +65,10 @@ changes the Status or Unread Pane options.
 
 ### Sidebar cards on a switch
 
-A switch between Sessions or Topics rebuilds `topics` and the Sidebar Formats
-and moves `selectedWindowID`. Both lists stay mounted, and neither is lazy, so
-anything a switch makes every card do, it does for every card of both lists.
+A switch between the Board and the Sessions rebuilds `topics` and the Sidebar
+Formats and moves `selectedWindowID`. Both lists stay mounted, and neither is
+lazy, so anything a switch makes every card do, it does for every card of both
+lists.
 
 - A card or row does not read `topics`, `sidebarFormatContexts`,
   `selectedWindowID` or `openSessionCards` in its body. Its list reads them
