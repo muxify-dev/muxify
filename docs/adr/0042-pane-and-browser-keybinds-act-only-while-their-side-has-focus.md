@@ -1,6 +1,6 @@
 # Pane and Browser keybinds act only while their side has Focus
 
-> **Update 2026-11-21:** `split_pane_right` (`cmd+d`) and `split_pane_down` (`cmd+shift+d`) are Pane Actions too, and act only while the Terminal has Focus. They run tmux's `split-window` themselves, as Ghostty's `new_split` already did in Muxify, so a split needs no tmux key binding and no Ghostty keybind that types one.
+> **Update 2026-11-21:** `split_pane_right` (`cmd+d`) and `split_pane_down` (`cmd+shift+d`) are Pane Actions too, and act only while the Terminal has Focus. They run tmux's `split-window` themselves, as Ghostty's `new_split` already did in Muxify, so a split needs no tmux key binding and no Ghostty keybind that types one. So are `select_pane_left`, `select_pane_right`, `select_pane_up`, `select_pane_down`, `select_pane_previous` and `select_pane_next`, which have no default key. They run tmux's `select-pane` themselves, as Ghostty's `goto_split` already did in Muxify.
 
 > **Update 2026-10-26:** Close Tab follows this rule too. It was the last key built into the code: Muxify took `cmd+w` with any Focus, so from the Terminal the key never reached Ghostty, and a Ghostty `cmd+w` binding to tmux did nothing. `close_tab` is now a Browser Action with the default `cmd+w`. From the Terminal, `cmd+w` goes on to Ghostty. With other Focus, such as the Git View, `cmd+w` still does nothing, so it never closes the App Window.
 

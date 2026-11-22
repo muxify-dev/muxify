@@ -3183,6 +3183,12 @@ final class WorkspaceStore {
         case .resizePaneRight: resizeCurrentPane(.right)
         case .resizePaneUp: resizeCurrentPane(.up)
         case .resizePaneDown: resizeCurrentPane(.down)
+        case .selectPaneLeft: selectPane(.left)
+        case .selectPaneRight: selectPane(.right)
+        case .selectPaneUp: selectPane(.up)
+        case .selectPaneDown: selectPane(.down)
+        case .selectPanePrevious: selectPane(.previous)
+        case .selectPaneNext: selectPane(.next)
         case .findInPane: showFindInPane()
         case .findInPage: browserCommand { $0.activeTab?.showFind() }
         case .selectNextTab: browserCommand { $0.selectTab(offset: 1) }
@@ -3272,6 +3278,15 @@ final class WorkspaceStore {
     /// `side` and starts in the current Pane's folder.
     func splitCurrentPane(_ side: PaneDirection) {
         runOnCurrentPane { pane, _ in .splitPane(target: pane, side: side) }
+    }
+
+    /// Makes another Pane of the current Window active with tmux's select-pane, whatever the tmux config binds:
+    /// the previous and next Panes in tmux's order of the Window, the directions from the current Pane.
+    private func selectPane(_ move: PaneMove) {
+        switch move {
+        case .previous, .next: runOnCurrentPane { _, window in .selectPane(target: window, move: move) }
+        case .up, .down, .left, .right: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: move) }
+        }
     }
 
     /// Moves the current Pane's border by 10 cells, as Ghostty's resize_split does.
@@ -3584,12 +3599,12 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
 
     func ghosttyGotoSplit(_ direction: ghostty_action_goto_split_e) {
         switch direction {
-        case GHOSTTY_GOTO_SPLIT_PREVIOUS: runOnCurrentPane { _, window in .selectPane(target: window, move: .previous) }
-        case GHOSTTY_GOTO_SPLIT_NEXT: runOnCurrentPane { _, window in .selectPane(target: window, move: .next) }
-        case GHOSTTY_GOTO_SPLIT_UP: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .up) }
-        case GHOSTTY_GOTO_SPLIT_DOWN: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .down) }
-        case GHOSTTY_GOTO_SPLIT_LEFT: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .left) }
-        default: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .right) }
+        case GHOSTTY_GOTO_SPLIT_PREVIOUS: selectPane(.previous)
+        case GHOSTTY_GOTO_SPLIT_NEXT: selectPane(.next)
+        case GHOSTTY_GOTO_SPLIT_UP: selectPane(.up)
+        case GHOSTTY_GOTO_SPLIT_DOWN: selectPane(.down)
+        case GHOSTTY_GOTO_SPLIT_LEFT: selectPane(.left)
+        default: selectPane(.right)
         }
     }
 

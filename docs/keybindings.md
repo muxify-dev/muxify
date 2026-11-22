@@ -54,6 +54,12 @@ listed below.
 | `resize_pane_right` | Unbound | Move the current Pane's border 10 cells right. Terminal Focus only |
 | `resize_pane_up` | Unbound | Move the current Pane's border 10 cells up. Terminal Focus only |
 | `resize_pane_down` | Unbound | Move the current Pane's border 10 cells down. Terminal Focus only |
+| `select_pane_left` | Unbound | Make the Pane on the left of the current Pane the Window's active Pane. Muxify runs tmux's `select-pane` itself, so it works with no tmux config and on a Remote Environment. Terminal Focus only |
+| `select_pane_right` | Unbound | Make the Pane on the right of the current Pane active, as `select_pane_left` does. Terminal Focus only |
+| `select_pane_up` | Unbound | Make the Pane above the current Pane active, as `select_pane_left` does. Terminal Focus only |
+| `select_pane_down` | Unbound | Make the Pane below the current Pane active, as `select_pane_left` does. Terminal Focus only |
+| `select_pane_previous` | Unbound | Make the Pane before the current one, in tmux's order, active. Terminal Focus only |
+| `select_pane_next` | Unbound | Make the Pane after the current one, in tmux's order, active. Terminal Focus only |
 | `find_in_pane` | ⌘F | Open [Find in Pane](#find-in-pane) over the Terminal, or select its query while it is open. Terminal Focus only. From the Browser, ⌘F is `find_in_page` |
 | `find_in_page` | ⌘F | Open Find in Page above the page, and select the text in its field. Browser Focus only. From the Terminal, ⌘F is `find_in_pane` |
 | `select_next_tab` | ⌘⇧], ⌃Tab | Select the next Browser Tab. Browser Focus only |

@@ -110,6 +110,46 @@ class Panels(unittest.TestCase):
         wait(lambda: len(panes()) == 2, 'split_pane_right did not split the current Pane')
         self.assertEqual(len({pane.split()[0] for pane in panes()}), 2, 'the new Pane is not beside the current one: %s' % panes())
 
+    def surround_the_current_pane(self):
+        """Splits the Window's Pane so that a Pane is left, right, above and below it, and keeps it active. Returns its
+        id, the id of the Pane on each side, and the Window's Pane ids in tmux's order."""
+        current = self.active_pane()
+        sides = {side: self.s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', *flags, '-t', current, SHELL)
+                 for side, flags in [('right', ['-h']), ('left', ['-h', '-b']), ('down', ['-v']), ('up', ['-v', '-b'])]}
+        order = self.s.tmux('list-panes', '-t', self.window, '-F', '#{pane_id}').splitlines()
+        self.assertEqual(len(order), 5, 'the Window does not have five Panes: %s' % order)
+        return current, sides, order
+
+    def active_pane(self):
+        return self.s.tmux('display-message', '-p', '-t', self.window, '#{pane_id}')
+
+    def test_the_select_pane_keybinds_select_the_pane_in_each_direction_with_no_tmux_binding(self):
+        # The sandbox's tmux server runs with no config, so no key of tmux's selects a Pane; Muxify runs select-pane.
+        current, sides, order = self.surround_the_current_pane()
+        index = order.index(current)
+        expected = {'select_pane_' + side: pane for side, pane in sides.items()}
+        expected['select_pane_previous'] = order[(index - 1) % len(order)]
+        expected['select_pane_next'] = order[(index + 1) % len(order)]
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+        for action, pane in expected.items():
+            self.s.tmux('select-pane', '-t', current)
+            self.assertEqual(self.active_pane(), current)
+            self.assertTrue(self.s.keybind(action), '%s did not act while the Terminal has Focus' % action)
+            wait(lambda: self.active_pane() == pane,
+                 '%s made %s active, not %s' % (action, self.active_pane(), pane))
+
+    def test_a_select_pane_keybind_leaves_the_active_pane_while_the_browser_has_focus(self):
+        current, _, _ = self.surround_the_current_pane()
+        self.s.act('press', 'Focus Browser')
+        self.wait_focus('browser', 'Focus Browser did not give the Browser Focus')
+        for action in ('select_pane_left', 'select_pane_next'):
+            self.assertFalse(self.s.keybind(action), '%s acted while the Browser has Focus' % action)
+        time.sleep(SETTLE)
+        self.assertEqual(self.active_pane(), current, 'a select_pane action changed the active Pane while the Browser has Focus')
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+
     def wait_toggles(self, expected, message):
         values = lambda rs: {key: self.s.row(key, rs).get('accessibilityValue') for key in expected}
         return self.s.wait_rows(lambda rs: values(rs) == expected, '%s: %s' % (message, values(self.s.rows())))

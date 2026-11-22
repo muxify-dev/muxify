@@ -599,8 +599,12 @@ public struct Config: Equatable {
         #   # select_tab_1 through select_tab_9 select Tabs and show the Browser.
         #   # split_pane_right (Cmd+D) and split_pane_down (Cmd+Shift+D) run
         #   # tmux's split-window themselves, so they need no tmux key binding.
-        #   # toggle_zoom_pane, split_pane_*, resize_pane_* and find_in_pane act only while
-        #   # the Terminal has Focus. find_in_page, select_next_tab, select_prev_tab,
+        #   # select_pane_left, select_pane_right, select_pane_up and select_pane_down
+        #   # make the Pane in that direction active; select_pane_previous and
+        #   # select_pane_next the Pane before or after it in tmux's order. They run
+        #   # tmux's select-pane themselves and are unbound.
+        #   # toggle_zoom_pane, split_pane_*, resize_pane_*, select_pane_* and find_in_pane
+        #   # act only while the Terminal has Focus. find_in_page, select_next_tab, select_prev_tab,
         #   # browser_back and browser_forward act only while the Browser has Focus. With Focus
         #   # elsewhere, their keys go on to Ghostty, the page or the menu.
         #   # resize_pane_* move the Pane's border 10 cells and are unbound.
