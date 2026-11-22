@@ -45,7 +45,7 @@ struct SessionCardState: Equatable {
     /// A Locked Session is a Guest Session.
     let isGuest: Bool
     let formatted: SidebarFormats.Text
-    let items: [TopicsModel.SessionChildren.Item]
+    let items: [BoardModel.SessionChildren.Item]
     let rows: [String: SidebarRowState]
     /// The selected Window when it is one of the card's, so a selection that moves between other cards leaves this
     /// card as it was.
@@ -58,14 +58,14 @@ struct SessionCardState: Equatable {
 }
 
 extension WorkspaceStore {
-    func sidebarRowState(_ item: TopicsModel.SessionChildren.Item) -> SidebarRowState {
+    func sidebarRowState(_ item: BoardModel.SessionChildren.Item) -> SidebarRowState {
         switch item {
         case .window(let window):
             return .window(SidebarRowState.Window(
                 content: sidebarWindowRow(window), isSelected: window.id == selectedWindowID,
                 tooltips: config.sidebar.windowTooltips, tabCount: tabCount(for: window),
                 isGitViewOpen: isGitViewOpen(in: window.id),
-                usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
+                usesMainWorkingCopy: BoardModel.usesMainWorkingCopy(
                     window, record: records.first { $0.id == window.topicID }, sessionPaths: sessionPaths)))
         case .pane(let row):
             return .pane(SidebarRowState.Pane(
@@ -76,7 +76,7 @@ extension WorkspaceStore {
     }
 
     /// The values of each row in `items`, by row ID.
-    func sidebarRowStates(_ items: [TopicsModel.SessionChildren.Item]) -> [String: SidebarRowState] {
+    func sidebarRowStates(_ items: [BoardModel.SessionChildren.Item]) -> [String: SidebarRowState] {
         Dictionary(items.map { ($0.id, sidebarRowState($0)) }, uniquingKeysWith: { first, _ in first })
     }
 
@@ -87,7 +87,7 @@ extension WorkspaceStore {
         return SessionCardState(
             session: session, isOpen: openSessionCards.contains(session.name),
             mark: model.sessionMarks[session.id].map(CardMark.agent),
-            isGuest: model.lockedSessionIDs.contains(session.id),
+            isGuest: model.sessionIDsOnBoard.contains(session.id),
             formatted: sidebarText(.session, context: sidebarFormatContexts.sessions[session.id]),
             items: items, rows: sidebarRowStates(items), selectedWindowID: selected,
             guestState: guestState(of: .session(session.id)),
@@ -97,7 +97,7 @@ extension WorkspaceStore {
 
 /// What a Topic card or a Locked card shows.
 struct TopicCardState: Equatable {
-    let topic: TopicsModel.Row
+    let topic: BoardModel.Row
     let titles: [String: String]
     let formatted: SidebarFormats.Text
     let tags: CardTags?
@@ -114,9 +114,9 @@ struct TopicCardState: Equatable {
 
 extension WorkspaceStore {
     /// `showsTags` is false for a closed card in a group, which shows no Tags.
-    func topicCardState(_ topic: TopicsModel.Row, titles: [String: String], holdsSelection: Bool, showsAllRows: Bool,
+    func topicCardState(_ topic: BoardModel.Row, titles: [String: String], holdsSelection: Bool, showsAllRows: Bool,
                         showsTags: Bool) -> TopicCardState {
-        let items = topic.sessions.flatMap { session -> [TopicsModel.SessionChildren.Item] in
+        let items = topic.sessions.flatMap { session -> [BoardModel.SessionChildren.Item] in
             if case .live(let children) = session.contents { return children.items }
             return []
         }
@@ -125,10 +125,10 @@ extension WorkspaceStore {
         var guest: Bool?
         var canBench = false
         switch topic.id {
-        case .locked(let lock):
+        case .session(let lock):
             // A Dormant Guest Session has no live Session to read: its card shows the Session that its Lock remembers.
             let live = topic.sessions.first.flatMap { sidebarFormatContexts.sessions[$0.id.session] }
-            formatted = sidebarText(.session, context: live ?? sidebarFormatContexts.dormantGuestSessions[lock])
+            formatted = sidebarText(.session, context: live ?? sidebarFormatContexts.dormantBoardSessions[lock])
         default:
             formatted = sidebarText(.topic, context: sidebarFormatContexts.topics[topic.id])
             if case .topic(let id) = topic.id {

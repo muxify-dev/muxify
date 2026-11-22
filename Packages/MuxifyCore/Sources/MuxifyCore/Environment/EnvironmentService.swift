@@ -67,13 +67,13 @@ public struct EnvironmentService: Sendable {
     }
 
     /// The tmux server as a request reads it. A Lock that an older Muxify kept in tmux moves into the state database
-    /// first (`SessionLock.importLegacy`), so a Guest Session from before keeps its card; a request that also reads
+    /// first (`BoardSession.importLegacy`), so a Guest Session from before keeps its card; a request that also reads
     /// the records reads them after this, so it finds the new Lock. The import writes through a store without the
     /// Request, so the Request's ledger row still marks only its own write. A failed import leaves the snapshot as
     /// tmux gave it.
     func serverSnapshot() throws -> TmuxSnapshot {
         var snapshot = try server.snapshot()
-        _ = try? SessionLock.importLegacy(from: &snapshot, into: TopicStore(paths: paths, inPlay: topics.inPlay)) { try server.run($0) }
+        _ = try? BoardSession.importLegacy(from: &snapshot, into: TopicStore(paths: paths, inPlay: topics.inPlay)) { try server.run($0) }
         return snapshot
     }
 
@@ -143,11 +143,11 @@ public struct EnvironmentService: Sendable {
     func sessionWindow(_ target: EnvironmentTarget?, caller: TopicCaller?, snapshot: TmuxSnapshot, client: String?) throws -> TmuxWindow {
         let sessionID: String
         if case .session(let id)? = target { sessionID = id.rawValue }
-        else if case .guestSession(let id)? = target {
+        else if case .boardSession(let id)? = target {
             let contents = try store.read()
-            let lock = try guestSessionLock(id, in: contents)
+            let lock = try boardSessionRow(id, in: contents)
             guard let live = lock.windows(in: snapshot.windows, open: contents.records.openTopicIDs).first else {
-                throw TopicRequestError.guestSessionDormant(id)
+                throw TopicRequestError.boardSessionDormant(id)
             }
             sessionID = live.sessionID
         }
@@ -163,8 +163,8 @@ public struct EnvironmentService: Sendable {
     }
 
     /// The Lock that a `guest_session` target names. With none, the Guest Session was Benched or ended.
-    func guestSessionLock(_ id: String, in contents: TopicContents) throws -> SessionLock {
-        guard let lock = contents.locks.first(where: { $0.id == id }) else { throw TopicRequestError.guestSessionUnavailable(id) }
+    func boardSessionRow(_ id: String, in contents: TopicContents) throws -> BoardSession {
+        guard let lock = contents.boardSessions.first(where: { $0.id == id }) else { throw TopicRequestError.boardSessionUnavailable(id) }
         return lock
     }
 
@@ -175,7 +175,7 @@ public struct EnvironmentService: Sendable {
             // The order of the Topics list: Pinned first, then the order the user gave.
             let records = try store.read().records
             let labels = TopicLabels(records)
-            return .topics(TopicOrder.sorted(records.filter { $0.settledAt == nil }.map(TopicListEntry.topic)).compactMap { entry in
+            return .topics(TopicOrder.sorted(records.filter { $0.settledAt == nil }.map(BoardCard.topic)).compactMap { entry in
                 guard case .topic(let record) = entry else { return nil }
                 return TopicSummary(record: record, labels: labels)
             })
@@ -218,7 +218,7 @@ public struct EnvironmentService: Sendable {
         switch target {
         case .pane(let id)?: return .pane(id.rawValue)
         case .window(let id)?: return .window(id.rawValue)
-        case .topic?, .session?, .sessionName?, .guestSession?: return nil
+        case .topic?, .session?, .sessionName?, .boardSession?: return nil
         case nil: break
         }
         switch caller {
@@ -283,9 +283,9 @@ public struct EnvironmentService: Sendable {
             case .sessionAtEnd: return .sessionAtEnd
             case .cardHidden: return .cardHidden
             case .windowNotInSession: return .windowNotInSession
-            case .guestSessionUnavailable, .guestSessionDormant: return .sourceUnavailable
+            case .boardSessionUnavailable, .boardSessionDormant: return .sourceUnavailable
             // As Start Fresh of a live Topic fails.
-            case .guestSessionLive: return .topicUnavailable
+            case .boardSessionLive: return .topicUnavailable
             }
         case let error as TopicEditFailure:
             switch error {
@@ -307,7 +307,7 @@ public struct EnvironmentService: Sendable {
             case .notBenched: return .cardNotBenched
             case .pinned: return .cardPinned
             case .chosenTwice: return .unsupported
-            case .guestSession: return .cardGuest
+            case .boardSession: return .cardGuest
             case .notOpenPlace: return .placeNotOpen
             case .cannotFill: return .cardCannotFill
             case .notInPlayTopic: return .cardNotInPlay
@@ -520,11 +520,11 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case cardHidden(String)
     case windowNotInSession(window: String, anchor: String)
     /// No Lock has this id: the Guest Session was Benched or ended.
-    case guestSessionUnavailable(String)
+    case boardSessionUnavailable(String)
     /// The Guest Session with this Lock id has no live Session, so a command that needs one cannot run.
-    case guestSessionDormant(String)
+    case boardSessionDormant(String)
     /// The Guest Session with this Lock id has a live Session, so Start Fresh, which needs a Dormant one, cannot run.
-    case guestSessionLive(String)
+    case boardSessionLive(String)
     /// An old form of a request that now fails, with the message that names the new form.
     case removedForm(String)
 
@@ -558,10 +558,10 @@ public enum TopicRequestError: Error, CustomStringConvertible {
             return "The Session \(session) is the \(up ? "first" : "last") Session of the Topic \(topic)."
         case .cardHidden(let message): return message
         case .windowNotInSession(let window, let anchor): return "The Window \(anchor) is not in the Session of the Window \(window)."
-        case .guestSessionUnavailable(let id): return "No Guest Session has the id \(id)."
-        case .guestSessionDormant(let id):
+        case .boardSessionUnavailable(let id): return "No Guest Session has the id \(id)."
+        case .boardSessionDormant(let id):
             return "The Guest Session \(id) is Dormant: it has no live Session. Reopen it first: muxify topic reopen --guest-session \(id)."
-        case .guestSessionLive(let id):
+        case .boardSessionLive(let id):
             return "The Guest Session \(id) has a live Session. Start Fresh makes only a Dormant Guest Session again."
         case .sessionNameInvalid(let name): return "\(name) cannot name a tmux Session: it is empty, or it has a period, a colon or a control character."
         case .sessionNameTaken(let name): return "A tmux Session that is not in the Topic has the name \(name)."

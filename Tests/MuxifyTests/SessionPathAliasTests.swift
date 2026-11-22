@@ -14,7 +14,7 @@ final class SessionPathAliasTests: XCTestCase {
     private func catalog(records: [TopicRecord] = [], windows: [TmuxWindow] = [], mode: SidebarMode = .topics) -> PaletteCatalog {
         var config = Config()
         config.sessionPaths = [vault, game]
-        let model = TopicsModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: mode, agents: [])
+        let model = BoardModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: mode, agents: [])
         return PaletteCatalog(windows: windows, agents: [], sessionPaths: [vault, game], topics: model, records: records)
     }
 
@@ -108,7 +108,7 @@ final class SessionPathAliasTests: XCTestCase {
         var settled = record
         settled.settledAt = "2026-01-01T00:00:00Z"
         settled.sessions.append(.object(["id": .string("notes"), "name": .string("notes/write"), "base_name": .string("notes"), "directory": .string("/work/vault")]))
-        XCTAssertEqual(TopicsModel.settledRow(settled, labels: TopicLabels([settled]), sessionPaths: [vault, game], tags: nil, expanded: []).sessions.map(\.baseName),
+        XCTAssertEqual(BoardModel.settledRow(settled, labels: TopicLabels([settled]), sessionPaths: [vault, game], tags: nil, expanded: []).sessions.map(\.baseName),
                         ["debug", "notes"])
         XCTAssertEqual(SessionNaming.available(vault.name, topic: "write-notes", taken: []), "vault/write-notes")
     }

@@ -16,7 +16,7 @@ import Foundation
 /// The Host Server's publisher also reads its Mac's Client marker, so its `server` event names that Mac's own Client,
 /// and writes the Sessions that each read gives the Topics onto their records, so the Mac writes no record itself.
 /// Every publisher writes the live Guest Sessions onto their Locks, ends the Lock of a Guest Session that ended on its
-/// server, and imports a Lock that an older Muxify kept in tmux (`SessionLock.importLegacy`).
+/// server, and imports a Lock that an older Muxify kept in tmux (`BoardSession.importLegacy`).
 ///
 /// It also writes the Colour Reports of ADR 0098 through its Listener, while its App Window gives it colours, in the
 /// app or, on a Host, through the Host Server's `colours` request: to every Pane of the target's Session right before
@@ -427,7 +427,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     private func importLegacyLocks(_ snapshot: TmuxSnapshot) -> Bool {
         var snapshot = snapshot
         do {
-            return try SessionLock.importLegacy(from: &snapshot, into: topics) { _ = try run($0) }
+            return try BoardSession.importLegacy(from: &snapshot, into: topics) { _ = try run($0) }
         } catch {
             report("importing Locks: \(error)")
             return false
@@ -449,14 +449,14 @@ public final class EnvironmentPublisher: @unchecked Sendable {
                 contents.records.compactMap { $0.remembering(snapshot, order: order, previously: previously) }
             } ?? []
             let open = contents.records.openTopicIDs
-            let memories = contents.locks.compactMap { lock in lock.remembering(snapshot, open: open, previously: previously).map { (lock.id, $0) } }
+            let memories = contents.boardSessions.compactMap { lock in lock.remembering(snapshot, open: open, previously: previously).map { (lock.id, $0) } }
             guard !updates.isEmpty || !memories.isEmpty else { return false }
             try topics.write { transaction in
                 for record in updates { _ = try transaction.remember(record.sessions, of: record.id) }
                 for (id, memory) in memories {
                     switch memory {
-                    case .remembered(let session): _ = transaction.remember(session, ofLock: id)
-                    case .ended: transaction.unlock(id)
+                    case .remembered(let session): _ = transaction.remember(session, ofBoardSession: id)
+                    case .ended: transaction.takeOffBoard(id)
                     }
                 }
             }

@@ -371,7 +371,7 @@ struct GuestMark: View {
 struct CardBlock: Identifiable {
     /// The Session ID.
     let id: String
-    let items: [TopicsModel.SessionChildren.Item]
+    let items: [BoardModel.SessionChildren.Item]
 }
 
 /// The room between the rows of an open card, and between its Session blocks, where their divider is.
@@ -393,9 +393,9 @@ struct WindowRowDrag {
 private struct WindowUnit: Identifiable {
     let id: String
     let window: TmuxWindow?
-    var items: [TopicsModel.SessionChildren.Item]
+    var items: [BoardModel.SessionChildren.Item]
 
-    static func units(_ items: [TopicsModel.SessionChildren.Item]) -> [WindowUnit] {
+    static func units(_ items: [BoardModel.SessionChildren.Item]) -> [WindowUnit] {
         var units: [WindowUnit] = []
         for item in items {
             switch item {
@@ -429,7 +429,7 @@ struct CardList<Heading: View, Row: View>: View {
     var blockDrag: ListDrag<String>? = nil
     let windows: WindowRowDrag
     @ViewBuilder var heading: (CardBlock) -> Heading
-    @ViewBuilder var row: (TopicsModel.SessionChildren.Item) -> Row
+    @ViewBuilder var row: (BoardModel.SessionChildren.Item) -> Row
 
     @State private var windowDrag = ListDrag<String>(spacing: CardSpacing.row)
     @Environment(\.interfaceFontSize) private var fontSize
@@ -494,7 +494,7 @@ struct CardList<Heading: View, Row: View>: View {
         }
     }
 
-    private func markedRow(_ item: TopicsModel.SessionChildren.Item) -> some View {
+    private func markedRow(_ item: BoardModel.SessionChildren.Item) -> some View {
         row(item).overlay(alignment: .leading) {
             if let mark = agentSpines[item.id] {
                 AgentMarkSpine(mark: mark)

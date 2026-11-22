@@ -15,7 +15,7 @@ final class OpenPlaceChoicesTests: XCTestCase {
 
     /// In Play (2 places): "a" and an Open Place. Guests: the Topics "g2" and "g1" and a Guest Session. Bench: "c", "b"
     /// and "d", which the Sidebar hides. A Pinned Topic is neither.
-    private func model() -> TopicsModel {
+    private func model() -> BoardModel {
         var config = Config()
         config.topics.inPlay = 2
         let records = [
@@ -31,7 +31,7 @@ final class OpenPlaceChoicesTests: XCTestCase {
             .fixture(id: "@1", sessionID: "$1", sessionName: "deploy-scripts", topicID: "d"),
             .fixture(id: "@2", sessionID: "$2", sessionName: "scratch", savedSessionID: "$2"),
         ]
-        return TopicsModel(records: records, openPlaces: [OpenPlace(id: "open", order: 1)], locks: [SessionLock(id: "$2", order: 2.5)],
+        return BoardModel(records: records, openPlaces: [OpenPlace(id: "open", order: 1)], boardSessions: [BoardSession(id: "$2", order: 2.5)],
                            windows: windows, config: config,
                            selection: TopicSelection(), location: .openPlace("open"))
     }

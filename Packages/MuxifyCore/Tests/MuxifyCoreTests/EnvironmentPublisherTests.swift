@@ -611,7 +611,7 @@ final class EnvironmentPublisherTests: XCTestCase {
 
         try server.run(["kill-session", "-t", "=notes"])
         try await wait("the Lock of a Guest Session that ended on the same server stayed", seconds: 10) {
-            try store.read().locks.map(\.name) == ["scratch"]
+            try store.read().boardSessions.map(\.name) == ["scratch"]
         }
 
         try server.run(["kill-server"])
@@ -620,25 +620,25 @@ final class EnvironmentPublisherTests: XCTestCase {
             recorder.server?.isRunning == true && recorder.server?.serverID != first
         }
         try await Task.sleep(nanoseconds: 1_500_000_000)
-        let dormant = try XCTUnwrap(store.read().locks.first, "a tmux restart ended the Lock")
+        let dormant = try XCTUnwrap(store.read().boardSessions.first, "a tmux restart ended the Lock")
         XCTAssertEqual(dormant.name, "scratch")
         XCTAssertEqual(dormant.session["windows"]?.array?.count, 2, "the Lock keeps the Windows to Reopen")
-        XCTAssertTrue(recorder.items.joined().contains { if case .locks(let locks) = $0 { locks.map(\.id) == [dormant.id] } else { false } },
+        XCTAssertTrue(recorder.items.joined().contains { if case .boardSessions(let boardSessions) = $0 { boardSessions.map(\.id) == [dormant.id] } else { false } },
                       "the Locks go out on the subscription")
     }
 
     func testALockThatAnOlderMuxifyKeptInTmuxIsImportedOnce() async throws {
         try server.run(["new-session", "-d", "-s", "work"])
         try server.run(["new-session", "-d", "-s", "notes"])
-        try server.run(["set-option", "-t", "=notes:", SessionLock.legacyOption, "7"])
+        try server.run(["set-option", "-t", "=notes:", BoardSession.legacyOption, "7"])
         let store = TopicStore(paths: paths)
         _ = start()
-        try await wait("the Lock was not imported", seconds: 10) { try store.read().locks.count == 1 }
-        let lock = try XCTUnwrap(store.read().locks.first)
+        try await wait("the Lock was not imported", seconds: 10) { try store.read().boardSessions.count == 1 }
+        let lock = try XCTUnwrap(store.read().boardSessions.first)
         XCTAssertEqual(lock.order, 7, "the Lock keeps its order")
         XCTAssertEqual(lock.name, "notes")
         try await wait("the option stayed", seconds: 5) {
-            try self.server.run(["show-options", "-qv", "-t", "=notes:", SessionLock.legacyOption]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            try self.server.run(["show-options", "-qv", "-t", "=notes:", BoardSession.legacyOption]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "=notes:", "@muxify_session_id"]).trimmingCharacters(in: .whitespacesAndNewlines),
                        lock.id, "the Session points at its new Lock")

@@ -22,7 +22,7 @@ final class TopicsTests: XCTestCase {
                        window("@4", session: "$3", topic: "a", path: "/work/application"),
                        window("@5", session: "$4"), window("@6", session: "$5", topic: "missing"),
                        window("@7", session: "$6", topic: "settled")]
-        let model = TopicsModel(records: [topic, dormant, settled], windows: windows, config: Config(), selection: TopicSelection())
+        let model = BoardModel(records: [topic, dormant, settled], windows: windows, config: Config(), selection: TopicSelection())
         XCTAssertEqual(model.rows.map(\.title), ["Fix reward", "Untitled 3"])
         XCTAssertEqual(model.rows[0].sessions.map(\.baseName), ["renamed-by-hand", "renamed-by-hand", "renamed-by-hand"])
         XCTAssertEqual(model.rows[0].sessions[0].windows.count, 2)
@@ -38,7 +38,7 @@ final class TopicsTests: XCTestCase {
                        window("@3", session: "$2", topic: "b"), window("@4", session: "$3")]
         var selection = TopicSelection()
         func open() -> Set<TopicGroupID> {
-            Set(TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
+            Set(BoardModel(records: records, windows: windows, config: Config(), selection: selection,
                             location: selection.windowLocation).rows.filter(\.isExpanded).map(\.id))
         }
         selection.select(windowID: "@1", activeTopic: .topic("a"))
@@ -92,7 +92,7 @@ final class TopicsTests: XCTestCase {
         selection.select(windowID: "@1", activeTopic: .topic("a"))
         selection.setTopic(.topic("a"), open: false)
         selection.windowID = "@2"
-        let rows = TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
+        let rows = BoardModel(records: records, windows: windows, config: Config(), selection: selection,
                         location: selection.windowLocation).rows
         XCTAssertEqual(rows.filter(\.isExpanded).map(\.id), [.topic("b")])
     }
@@ -102,7 +102,7 @@ final class TopicsTests: XCTestCase {
         var second = TopicRecord(id: "b", slug: "untitled-1")
         let third = TopicRecord(id: "c")
         func titles() -> [TopicGroupID: String] {
-            let model = TopicsModel(records: [third, second, first], windows: [], config: Config(), selection: TopicSelection())
+            let model = BoardModel(records: [third, second, first], windows: [], config: Config(), selection: TopicSelection())
             return Dictionary(uniqueKeysWithValues: model.rows.map { ($0.id, $0.title) })
         }
         let before = titles()

@@ -31,7 +31,7 @@ public enum StateDatabase {
         BrowserHistoryTable.migration,
         RequestTable.migration,
         VisitTable.migration,
-        TopicTable.guestSessionsMigration,
+        TopicTable.boardSessionsMigration,
     ]
 
     /// The one-time imports, run after `migrations` on every open.

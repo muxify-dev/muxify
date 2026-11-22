@@ -5,24 +5,24 @@ extension TopicGroupID {
     var accessibilityID: String {
         switch self {
         case .topic(let id): return "topic-\(id)"
-        case .locked(let lock): return "locked-\(lock)"
+        case .session(let lock): return "locked-\(lock)"
         case .noTopic: return "no-topic"
         }
     }
 
     /// The card's place in the Topic order; No Topic has none.
-    var listID: TopicListID? {
+    var listID: BoardCardID? {
         switch self {
         case .topic(let id): return .topic(id)
-        case .locked(let lock): return .lock(lock)
+        case .session(let lock): return .session(lock)
         case .noTopic: return nil
         }
     }
 
-    init?(_ listID: TopicListID) {
+    init?(_ listID: BoardCardID) {
         switch listID {
         case .topic(let id): self = .topic(id)
-        case .lock(let lock): self = .locked(lock)
+        case .session(let lock): self = .session(lock)
         case .openPlace: return nil
         }
     }
@@ -60,7 +60,7 @@ struct TopicGroupsState: Equatable {
     /// Opens the group that lists the Active Topic, with the Settled pages that reach its row, and closes the open group
     /// when the Active Topic is in the Topics list, a Locked Session or No Topic. Only a change of the Active Topic or of
     /// the group that lists it does this, so a header click stays while the user works in the same Topic.
-    mutating func follow(_ model: TopicsModel) {
+    mutating func follow(_ model: BoardModel) {
         let place = Place(topic: model.activeTopic, group: model.activeTopicGroup)
         guard place != followed else { return }
         followed = place
@@ -167,7 +167,7 @@ enum SessionCardSelection {
     }
 }
 
-struct TopicsModel {
+struct BoardModel {
     /// A Window a Settled Topic's record remembers. Reopen rebuilds it; the row only shows it.
     struct RememberedWindow: Identifiable, Equatable {
         let id: String
@@ -345,7 +345,7 @@ struct TopicsModel {
             }
         }
 
-        var dragSlot: StackSlot<TopicListID> {
+        var dragSlot: StackSlot<BoardCardID> {
             switch self {
             case .card(let row): return row.id.listID.map(StackSlot.item) ?? .fixed(id)
             case .openPlace(let id, _): return .item(.openPlace(id))
@@ -437,10 +437,10 @@ struct TopicsModel {
     }
 
     /// The cards of `rows` and the Open Places, as MuxifyCore orders them for the CLI too (`TopicCards`).
-    private let cards: [TopicListEntry]
+    private let cards: [BoardCard]
     private let inPlayInTopicsMode: Int?
 
-    /// The cards that are not Pinned, cut at the Guests line and the Bench line, as `TopicsList` cuts them. It does not
+    /// The cards that are not Pinned, cut at the Guests line and the Bench line, as `Board` cuts them. It does not
     /// follow the Sidebar mode, so the In Play Actions work in Sessions mode too.
     let cut: InPlayCut<ListCard>
 
@@ -463,7 +463,7 @@ struct TopicsModel {
     /// The slots of `list` that the item `id` can reach in a drag: the cards with its Pin and, among the cards that are
     /// not Pinned, the Bench line and the opened No Topic Session, which a card passes. A card that crosses the line
     /// trades with a card on the other side.
-    func dragSlots(around id: ListItem.ID) -> [StackSlot<TopicListID>] {
+    func dragSlots(around id: ListItem.ID) -> [StackSlot<BoardCardID>] {
         func isPinned(_ item: ListItem) -> Bool {
             if case .card(let row) = item { return row.isPinned }
             return false
@@ -473,26 +473,26 @@ struct TopicsModel {
     }
 
     /// What Move Up and Move Down do to a card of the Topics list, with the Bench as the Sidebar shows it now.
-    func steps(of id: TopicListID) -> CardSteps {
+    func steps(of id: BoardCardID) -> CardSteps {
         guard let inPlay = inPlayInTopicsMode else { return CardSteps(up: .hidden, down: .hidden) }
         let benchShown = isBenchShown == true
         return CardSteps(up: TopicCards.step(id, .up, in: cards, inPlay: inPlay, benchShown: benchShown),
                          down: TopicCards.step(id, .down, in: cards, inPlay: inPlay, benchShown: benchShown))
     }
 
-    /// The opened No Topic Session has no card until it is Locked, but Move Up makes it a Guest (`TopicCards.stepUnlockedSession`).
+    /// The opened No Topic Session has no card until it is Locked, but Move Up makes it a Guest (`TopicCards.stepSessionWithoutCard`).
     func steps(of id: TopicGroupID) -> CardSteps {
         if let listID = id.listID { return steps(of: listID) }
         guard id == .noTopic, openedNoTopicSession != nil, inPlayInTopicsMode != nil else { return CardSteps(up: .hidden, down: .hidden) }
-        return CardSteps(up: TopicCards.stepUnlockedSession(.up), down: TopicCards.stepUnlockedSession(.down))
+        return CardSteps(up: TopicCards.stepSessionWithoutCard(.up), down: TopicCards.stepSessionWithoutCard(.down))
     }
 
     /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.
     let noTopicSessions: [Session]
     /// The live Guest Sessions, by Session ID.
-    let lockedSessionIDs: Set<String>
+    let sessionIDsOnBoard: Set<String>
     /// The Lock of each live Guest Session, by Session ID.
-    let locksBySession: [String: String]
+    let boardSessionsBySession: [String: String]
     /// The No Topic Session of the selected Window. The Topic list shows it as one card after the open Topics, or under
     /// the Bench line.
     /// Nil while the Active Topic is a Topic.
@@ -536,7 +536,7 @@ struct TopicsModel {
     let showsInPlay: Bool
     var showsToggle: Bool { topicsEnabled && sessionsEnabled }
 
-    init(records: [TopicRecord], openPlaces: [OpenPlace] = [], locks: [SessionLock] = [], windows: [TmuxWindow], config: Config,
+    init(records: [TopicRecord], openPlaces: [OpenPlace] = [], boardSessions: [BoardSession] = [], windows: [TmuxWindow], config: Config,
          selection: TopicSelection,
          location: Location? = nil,
          mode: SidebarMode = .topics, groups groupsState: TopicGroupsState = TopicGroupsState(), benchShown: Bool = false,
@@ -547,9 +547,9 @@ struct TopicsModel {
         tags = config.topics.tags
         self.mode = config.sidebar.shownMode(chosen: mode)
         let marks = AgentMarks(agents, notifications: config.notifications)
-        let topicsList = TopicsList(records: records, openPlaces: openPlaces, locks: locks, windows: windows, marks: marks, topics: config.topics)
-        lockedSessionIDs = topicsList.lockedSessionIDs
-        locksBySession = topicsList.locksBySession
+        let topicsList = Board(records: records, openPlaces: openPlaces, boardSessions: boardSessions, windows: windows, marks: marks, topics: config.topics)
+        sessionIDsOnBoard = topicsList.sessionIDsOnBoard
+        boardSessionsBySession = topicsList.boardSessionsBySession
         cards = topicsList.order
         inPlayInTopicsMode = self.mode == .topics ? config.topics.inPlay : nil
         let groupID = topicsList.group(of:)
@@ -589,7 +589,7 @@ struct TopicsModel {
                                contents: .live(children(windows)))
             }
         }
-        func row(_ card: TopicsList.Card) -> Row {
+        func row(_ card: Board.Card) -> Row {
             let id = card.id
             let sessions = sessions(of: id, members: grouped[id] ?? [], order: card.sessions, record: card.record)
             let usesRowMarks = id == active && openTopics.contains(id)
@@ -627,7 +627,7 @@ struct TopicsModel {
         let outsideTopics = windows.filter { window in
             switch groupID(window) {
             case .topic: return false
-            case .locked, .noTopic: return true
+            case .session, .noTopic: return true
             }
         }
         noTopicSessions = sessions(of: .noTopic, members: outsideTopics,

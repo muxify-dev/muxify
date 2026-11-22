@@ -175,9 +175,9 @@ final class CommandPalette {
         case .agent:
             if store?.link.features.contains(.topics) == true { actions += [.move] }
         case .sessionPath: actions += [.newSession]
-        case .guestSession(let lock):
+        case .boardSession(let lock):
             actions += [.startTopicFresh]
-            if store?.canBench(.lock(lock)) == true { actions += [.bench] }
+            if store?.canBench(.boardSession(lock)) == true { actions += [.bench] }
         case .choice, .command, .tag: break
         }
         if !item.path.isEmpty { actions += [.copyFolder]; if store?.link.isOnThisMac == true { actions += [.revealFolder] } }
@@ -199,7 +199,7 @@ final class CommandPalette {
             case .settled: return "Reopen Topic"
             case .tag: return flow == nil ? "Show its Topics" : "Choose Tag"
             case .session, .topicSession:
-                if case .guestSession = item.ref { return "Reopen Session" }
+                if case .boardSession = item.ref { return "Reopen Session" }
                 return "Switch to Session"
             // A SessionPath row's target is the Session ↩ goes to; without one, ↩ starts it.
             case .sessionPath, .worktree: return item.target == nil ? "Open as Session" : "Switch to Session"
@@ -381,7 +381,7 @@ final class CommandPalette {
             case .session(let session):
                 if let window = EntryWindow.ofSession(session.windows) { store.select(window) }
             case .sessionPath(let target): store.openDirectory(target)
-            case .guestSession(let lock): store.reopenGuestSession(lock, .reopen)
+            case .boardSession(let lock): store.reopenBoardSession(lock, .reopen)
             case .tag: break
             case .choice: break
             case .command: break

@@ -30,7 +30,7 @@ final class PaletteCatalogTests: XCTestCase {
         config.sessionPaths = sessionPaths ?? [game, notes]
         var selection = TopicSelection()
         selection.windowID = selected
-        let model = TopicsModel(records: records, windows: windows, config: config, selection: selection,
+        let model = BoardModel(records: records, windows: windows, config: config, selection: selection,
                         location: selection.windowLocation, mode: mode,
                                 agents: agents)
         return PaletteCatalog(windows: windows, agents: agents, sessionPaths: config.sessionPaths, selectedWindowID: selected,

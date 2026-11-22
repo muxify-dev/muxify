@@ -6,7 +6,7 @@ import Observation
 /// observable object, not state of the list's view, so only the views that read a value draw again when it changes:
 /// the block that sticks, the edge pills and the drag. The Benched cards read none of it, so a scroll of the Bench
 /// does not draw them again.
-@MainActor @Observable final class TopicsListScroll {
+@MainActor @Observable final class BoardScroll {
     /// How far the content has scrolled up in the viewport.
     var offset: CGFloat = 0
     /// Where each card stands against the visible part of the Topics list: the "N more above" and "N more below" pills

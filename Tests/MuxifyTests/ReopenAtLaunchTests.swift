@@ -23,14 +23,14 @@ final class ReopenAtLaunchTests: XCTestCase {
 
     /// Two Guest Sessions: `scratch` is live, `notes` is Dormant.
     private var contents: TopicContents {
-        TopicContents(records: records, locks: [SessionLock(id: "notes", order: 9), SessionLock(id: "scratch", order: 10)])
+        TopicContents(records: records, boardSessions: [BoardSession(id: "notes", order: 9), BoardSession(id: "scratch", order: 10)])
     }
 
     private var windows: [TmuxWindow] {
         [.fixture(topicID: "live"), .fixture(id: "@2", sessionID: "$2"), .fixture(id: "@3", sessionID: "$3", savedSessionID: "scratch")]
     }
 
-    private let dormantTopics: [TopicListID] = [.topic("pinned"), .topic("in-play"), .topic("guest"), .topic("bench-1"), .topic("bench-2")]
+    private let dormantTopics: [BoardCardID] = [.topic("pinned"), .topic("in-play"), .topic("guest"), .topic("bench-1"), .topic("bench-2")]
 
     func testTheKeyOffReopensNoTopic() {
         var reopen = ReopenAtLaunch()
@@ -40,12 +40,12 @@ final class ReopenAtLaunchTests: XCTestCase {
 
     func testTheKeyOnReopensEveryDormantOpenTopicAndGuestSessionAndNoSettledEmptyOrLiveOne() {
         var reopen = ReopenAtLaunch()
-        XCTAssertEqual(reopen.cards(in: "Local", enabled: true, contents: contents, windows: windows), dormantTopics + [.lock("notes")])
+        XCTAssertEqual(reopen.cards(in: "Local", enabled: true, contents: contents, windows: windows), dormantTopics + [.session("notes")])
     }
 
     func testAfterARestartEveryOpenTopicThatRemembersASessionAndEveryGuestSessionIsChosen() {
         XCTAssertEqual(ReopenAtLaunch.dormant(contents: contents, windows: []),
-                       dormantTopics + [.topic("live"), .lock("notes"), .lock("scratch")])
+                       dormantTopics + [.topic("live"), .session("notes"), .session("scratch")])
     }
 
     func testEachEnvironmentGetsOneAnswerPerLaunchSoATmuxRestartReopensNothing() {

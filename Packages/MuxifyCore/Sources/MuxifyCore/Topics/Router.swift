@@ -52,7 +52,7 @@ public struct Router: Equatable {
         /// The ids of the Open Places that hold an In Play place.
         public var openPlaces: Set<String>
         /// The Lock ids of the Guest Sessions, live or Dormant.
-        public var guestSessions: Set<String>
+        public var boardSessions: Set<String>
         public var hasTerminal: Bool
         public var allowAttach: Bool
         public var rememberedWindow: WindowID?
@@ -61,7 +61,7 @@ public struct Router: Equatable {
 
         public init(windows: [TmuxWindow] = [], ownClientWindow: WindowID? = nil,
                     records: [TopicRecord] = [], entryWindows: [TopicGroupID: WindowID] = [:],
-                    openPlaces: Set<String> = [], guestSessions: Set<String> = [], hasTerminal: Bool = true, allowAttach: Bool = false,
+                    openPlaces: Set<String> = [], boardSessions: Set<String> = [], hasTerminal: Bool = true, allowAttach: Bool = false,
                     rememberedWindow: WindowID? = nil, initialWindow: WindowID? = nil,
                     now: Date = Date()) {
             self.windows = windows
@@ -69,7 +69,7 @@ public struct Router: Equatable {
             self.records = records
             self.entryWindows = entryWindows
             self.openPlaces = openPlaces
-            self.guestSessions = guestSessions
+            self.boardSessions = boardSessions
             self.hasTerminal = hasTerminal
             self.allowAttach = allowAttach
             self.rememberedWindow = rememberedWindow
@@ -211,7 +211,7 @@ public struct Router: Equatable {
         guard intent == nil else { return nil }
         switch location {
         case .emptyTopic(.topic(let topic))? where !facts.records.contains(where: { $0.id == topic }): break
-        case .emptyTopic(.locked(let lock))? where !facts.guestSessions.contains(lock): break
+        case .emptyTopic(.session(let lock))? where !facts.boardSessions.contains(lock): break
         case .openPlace(let place)? where !facts.openPlaces.contains(place): break
         default: return nil
         }
@@ -293,7 +293,7 @@ private extension TopicGroupID {
     /// The page of a card with no Window: its own, as a Dormant Guest Session's offers Reopen and Start Fresh, or No
     /// Topic's for a Guest Session whose Lock is gone.
     func page(_ facts: Router.Facts) -> TopicGroupID {
-        if case .locked(let lock) = self, !facts.guestSessions.contains(lock) { return .noTopic }
+        if case .session(let lock) = self, !facts.boardSessions.contains(lock) { return .noTopic }
         return self
     }
 }

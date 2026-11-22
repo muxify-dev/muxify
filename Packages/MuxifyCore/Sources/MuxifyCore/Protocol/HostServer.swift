@@ -154,7 +154,7 @@ public enum HostServer {
                 request.finish()
                 server.stop(.shutdown)
             case .subscribe(.environment):
-                host.subscribe(request, nonce: nonce, guestSessions: declared(.guestSessions))
+                host.subscribe(request, nonce: nonce, boardSessions: declared(.board))
             case .subscribe(.config):
                 config.subscribe(request)
             case .subscribe(.repository(let repository)):
@@ -162,11 +162,11 @@ public enum HostServer {
             case .subscribe(.topic(let topic)):
                 host.subscribe(topic, for: request, nonce: nonce)
             case .subscribe(.snapshot):
-                host.subscribeSnapshot(request, nonce: nonce, guestSessions: declared(.guestSessions))
+                host.subscribeSnapshot(request, nonce: nonce, boardSessions: declared(.board))
             case .subscribe(.focus):
                 host.subscribeFocus(request, nonce: nonce)
             case .environment(let environmentRequest):
-                host.run(environmentRequest, for: request, nonce: nonce, guestSessions: declared(.guestSessions))
+                host.run(environmentRequest, for: request, nonce: nonce, boardSessions: declared(.board))
             case .markRead(let mark):
                 host.markRead(mark, for: request, nonce: nonce)
             case .view(let command):
@@ -323,7 +323,7 @@ final class HostEnvironment: @unchecked Sendable {
     private var hasState = false
     private var subscribers: [Int: ProtocolIncomingRequest] = [:]
     /// The `environment` and `snapshot` subscribers whose client declared `guest-sessions`.
-    private var guestSessionSubscribers: Set<Int> = []
+    private var boardSubscribers: Set<Int> = []
     /// The `snapshot` subscribers, the Config their items are computed with once it was read, and the JSON of the
     /// last item computed of each view, keyed by whether the client declared `guest-sessions`, so an item goes out
     /// only when the view that its client gets differs.
@@ -449,20 +449,20 @@ final class HostEnvironment: @unchecked Sendable {
 
     // MARK: - The subscription
 
-    func subscribe(_ request: ProtocolIncomingRequest, nonce: String?, guestSessions: Bool) {
+    func subscribe(_ request: ProtocolIncomingRequest, nonce: String?, boardSessions: Bool) {
         Task {
             let publisher = await self.publisher(nonce: nonce)
             let id = request.id
             delivery.async { [self] in
                 guard !request.isCancelled else { return }
                 subscribers[id] = request
-                if guestSessions { guestSessionSubscribers.insert(id) }
+                if boardSessions { boardSubscribers.insert(id) }
                 // Before the publisher's first item, the subscriber gets that item whole.
                 if hasState {
-                    send(guestSessions ? state.all : state.olderClientChanges(state.all, lockOrdersBefore: state.lockOrders), to: id, first: true)
+                    send(boardSessions ? state.all : state.olderClientChanges(state.all, lockOrdersBefore: state.lockOrders), to: id, first: true)
                 }
             }
-            request.onCancel { self.delivery.async { self.subscribers[id] = nil; self.guestSessionSubscribers.remove(id) } }
+            request.onCancel { self.delivery.async { self.subscribers[id] = nil; self.boardSubscribers.remove(id) } }
             start(publisher)
         }
     }
@@ -534,7 +534,7 @@ final class HostEnvironment: @unchecked Sendable {
         let sent = first ? state.all : changes
         let older = state.olderClientChanges(sent, lockOrdersBefore: lockOrders)
         for id in subscribers.keys.sorted() {
-            send(guestSessionSubscribers.contains(id) ? sent : older, to: id, first: first)
+            send(boardSubscribers.contains(id) ? sent : older, to: id, first: first)
         }
         details.changed()
         if !snapshotSubscribers.isEmpty { sendSnapshot() }
@@ -607,21 +607,21 @@ final class HostEnvironment: @unchecked Sendable {
 
     /// The `snapshot` subscription (ADR 0093): `environment show`'s view, computed from the state that the
     /// `environment` publisher keeps and the Config that the `config` feed reads, so an item costs no read of its own.
-    func subscribeSnapshot(_ request: ProtocolIncomingRequest, nonce: String?, guestSessions: Bool) {
+    func subscribeSnapshot(_ request: ProtocolIncomingRequest, nonce: String?, boardSessions: Bool) {
         Task {
             let publisher = await self.publisher(nonce: nonce)
             let id = request.id
             delivery.async { [self] in
                 guard !request.isCancelled else { return }
                 snapshotSubscribers[id] = request
-                if guestSessions { guestSessionSubscribers.insert(id) }
+                if boardSessions { boardSubscribers.insert(id) }
                 if !observesConfig {
                     observesConfig = true
                     config.observe { [weak self] hostConfig in self?.delivery.async { self?.configRead(hostConfig) } }
                 }
                 sendSnapshot(first: id)
             }
-            request.onCancel { self.delivery.async { self.snapshotSubscribers[id] = nil; self.guestSessionSubscribers.remove(id) } }
+            request.onCancel { self.delivery.async { self.snapshotSubscribers[id] = nil; self.boardSubscribers.remove(id) } }
             start(publisher)
         }
     }
@@ -649,15 +649,15 @@ final class HostEnvironment: @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var changed: [Bool: Bool] = [:]
-        for (guestSessions, shown) in [(true, whole), (false, older)] {
+        for (boardSessions, shown) in [(true, whole), (false, older)] {
             guard let data = try? encoder.encode(shown) else { return }
-            changed[guestSessions] = data != lastShown[guestSessions]
-            lastShown[guestSessions] = data
+            changed[boardSessions] = data != lastShown[boardSessions]
+            lastShown[boardSessions] = data
         }
         for (id, request) in snapshotSubscribers {
-            let guestSessions = guestSessionSubscribers.contains(id)
-            guard changed[guestSessions] == true || id == first else { continue }
-            if !request.sendEvent(guestSessions ? whole : older, key: "snapshot") { snapshotSubscribers[id] = nil }
+            let boardSessions = boardSubscribers.contains(id)
+            guard changed[boardSessions] == true || id == first else { continue }
+            if !request.sendEvent(boardSessions ? whole : older, key: "snapshot") { snapshotSubscribers[id] = nil }
         }
     }
 
@@ -666,7 +666,7 @@ final class HostEnvironment: @unchecked Sendable {
     /// Runs an `EnvironmentRequest` with the Host's Config, as the App Window's own Client, then reads, so the
     /// events of what it changed go out before its answer. One with a Request id runs through the Request ledger, as
     /// `muxify --request` does (ADR 0093): a second send gets the first answer and changes nothing.
-    func run(_ environmentRequest: EnvironmentRequest, for request: ProtocolIncomingRequest, nonce: String?, guestSessions: Bool) {
+    func run(_ environmentRequest: EnvironmentRequest, for request: ProtocolIncomingRequest, nonce: String?, boardSessions: Bool) {
         let command = environmentRequest.command
         let reads = command.onlyReads
         let pending = PendingRequest(environmentRequest)
@@ -701,7 +701,7 @@ final class HostEnvironment: @unchecked Sendable {
             if !reads { await readAgain(publisher) }
             if case .failed(let failure) = response {
                 request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
-            } else if case .snapshot(let snapshot) = response, !guestSessions {
+            } else if case .snapshot(let snapshot) = response, !boardSessions {
                 request.finish(EnvironmentResponse.snapshot(snapshot.withoutDormantSessions))
             } else {
                 request.finish(response)

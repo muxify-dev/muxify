@@ -17,12 +17,12 @@ final class AgentsScopeTests: XCTestCase {
     }
 
     private func model(_ records: [TopicRecord], _ windows: [TmuxWindow], _ agents: [Agent], selected: String,
-                       mode: SidebarMode = .topics, scope: Config.Sidebar.AgentsScope = .active) -> TopicsModel {
+                       mode: SidebarMode = .topics, scope: Config.Sidebar.AgentsScope = .active) -> BoardModel {
         var config = Config()
         config.sidebar.agentsScope = .init(scope)
         var selection = TopicSelection()
         selection.windowID = selected
-        return TopicsModel(records: records, windows: windows, config: config, selection: selection,
+        return BoardModel(records: records, windows: windows, config: config, selection: selection,
                         location: selection.windowLocation, mode: mode, agents: agents)
     }
 
@@ -30,7 +30,7 @@ final class AgentsScopeTests: XCTestCase {
         let inBeta = window("@1", session: "$1", topic: "b")
         var config = Config()
         config.sidebar.agentsScope = .init(.active)
-        let model = TopicsModel(records: [alpha, beta], windows: [inBeta], config: config,
+        let model = BoardModel(records: [alpha, beta], windows: [inBeta], config: config,
                                 selection: TopicSelection(), location: .emptyTopic(.topic("a")),
                                 agents: [agent("%1", in: inBeta)])
         XCTAssertEqual(model.activeTopic, .topic("a"))
@@ -106,7 +106,7 @@ final class AgentsScopeTests: XCTestCase {
         config.sidebar.topics = false
         var selection = TopicSelection()
         selection.windowID = "@1"
-        let scoped = TopicsModel(records: [alpha], windows: [first, other], config: config, selection: selection,
+        let scoped = BoardModel(records: [alpha], windows: [first, other], config: config, selection: selection,
                         location: selection.windowLocation,
                                  mode: .topics, agents: [agent("%1", in: first), agent("%2", in: other)])
         XCTAssertEqual(scoped.mode, .sessions)

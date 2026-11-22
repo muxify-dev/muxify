@@ -35,7 +35,7 @@ enum TopicTable {
 
     /// One row for each Lock, keyed by its id, which the live Session has in `@muxify_session_id`. `session` is its
     /// Remembered Session as JSON text, written whole.
-    static let guestSessionsMigration = StateDatabase.Migration(
+    static let boardSessionsMigration = StateDatabase.Migration(
         """
         CREATE TABLE guest_sessions (
             id TEXT PRIMARY KEY NOT NULL,
@@ -110,10 +110,10 @@ enum TopicTable {
         let openPlaces = try connection.query(#"SELECT id, "order" FROM open_places ORDER BY rowid"#) { row in
             OpenPlace(id: row.text(0) ?? "", order: row.double(1))
         }
-        let locks = try connection.query(#"SELECT id, "order", session FROM guest_sessions ORDER BY id"#) { row in
-            SessionLock(id: row.text(0) ?? "", order: row.double(1), session: decoded(JSONValue.self, row.value(2)) ?? .object([:]))
+        let boardSessions = try connection.query(#"SELECT id, "order", session FROM guest_sessions ORDER BY id"#) { row in
+            BoardSession(id: row.text(0) ?? "", order: row.double(1), session: decoded(JSONValue.self, row.value(2)) ?? .object([:]))
         }
-        return TopicContents(records: records, openPlaces: openPlaces, locks: locks)
+        return TopicContents(records: records, openPlaces: openPlaces, boardSessions: boardSessions)
     }
 
     static func insert(_ record: TopicRecord, _ connection: SQLiteConnection) throws {
@@ -157,13 +157,13 @@ enum TopicTable {
             default: try connection.execute(#"UPDATE open_places SET "order" = ? WHERE id = ?"#, place.order, place.id)
             }
         }
-        let locks = Dictionary(start.locks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let lockIDs = Set(end.locks.map(\.id))
-        for id in locks.keys.sorted() where !lockIDs.contains(id) {
+        let boardSessions = Dictionary(start.boardSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let boardSessionIDs = Set(end.boardSessions.map(\.id))
+        for id in boardSessions.keys.sorted() where !boardSessionIDs.contains(id) {
             try connection.execute("DELETE FROM guest_sessions WHERE id = ?", id)
         }
-        for lock in end.locks {
-            guard let old = locks[lock.id] else {
+        for lock in end.boardSessions {
+            guard let old = boardSessions[lock.id] else {
                 try connection.execute(#"INSERT INTO guest_sessions (id, "order", session) VALUES (?, ?, ?)"#, lock.id, lock.order,
                                        json(lock.session))
                 continue

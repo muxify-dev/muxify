@@ -10,7 +10,7 @@ public enum EnvironmentChange: Equatable {
     /// The Open Places of the Topics list.
     case openPlaces([OpenPlace])
     /// The Locks of the Topics list, live or Dormant.
-    case locks([SessionLock])
+    case boardSessions([BoardSession])
     /// The server as a whole: its Clients, the last Window, whether it runs, its socket and home.
     case server(EnvironmentServer)
 
@@ -20,7 +20,7 @@ public enum EnvironmentChange: Equatable {
         case .session(let id, _): "session \(id)"
         case .topic(let id, _): "topic \(id)"
         case .openPlaces: "open_places"
-        case .locks: "guest_sessions"
+        case .boardSessions: "guest_sessions"
         case .server: "server"
         }
     }
@@ -81,14 +81,14 @@ public struct EnvironmentState: Equatable {
     public private(set) var sessions: [String: EnvironmentSession] = [:]
     public private(set) var topics: [String: TopicRecord] = [:]
     public private(set) var openPlaces: [OpenPlace] = []
-    public private(set) var locks: [SessionLock] = []
+    public private(set) var boardSessions: [BoardSession] = []
     public private(set) var server: EnvironmentServer?
 
     public init() {}
 
     /// The Topic records in id order, as the state database lists them, the Open Places and the Locks.
     public var topicContents: TopicContents {
-        TopicContents(records: topics.values.sorted { $0.id < $1.id }, openPlaces: openPlaces, locks: locks)
+        TopicContents(records: topics.values.sorted { $0.id < $1.id }, openPlaces: openPlaces, boardSessions: boardSessions)
     }
 
     /// The Sessions in tmux's order: by name, each with its Windows and Panes in the order they came.
@@ -115,7 +115,7 @@ public struct EnvironmentState: Equatable {
     public var all: [EnvironmentChange] {
         sessions.sorted { $0.key < $1.key }.map { .session($0.key, $0.value) }
             + topics.values.sorted { $0.id < $1.id }.map { .topic($0.id, $0) }
-            + [.openPlaces(openPlaces), .locks(locks)]
+            + [.openPlaces(openPlaces), .boardSessions(boardSessions)]
             + (server.map { [.server($0)] } ?? [])
     }
 
@@ -125,7 +125,7 @@ public struct EnvironmentState: Equatable {
             case .session(let id, let session): sessions[id] = session
             case .topic(let id, let record): topics[id] = record
             case .openPlaces(let places): openPlaces = places
-            case .locks(let locks): self.locks = locks
+            case .boardSessions(let boardSessions): self.boardSessions = boardSessions
             case .server(let server): self.server = server
             }
         }
@@ -163,13 +163,13 @@ public struct EnvironmentState: Equatable {
             changes.append(.topic(id, nil))
         }
         if all || openPlaces != contents.openPlaces { changes.append(.openPlaces(contents.openPlaces)) }
-        if all || locks != contents.locks { changes.append(.locks(contents.locks)) }
+        if all || boardSessions != contents.boardSessions { changes.append(.boardSessions(contents.boardSessions)) }
         return changes
     }
 
     /// The order of each live Guest Session's Lock, by the Session's tmux id.
     public var lockOrders: [String: Double] {
-        locks.bySession(in: orderedSessions.flatMap(\.windows), open: Array(topics.values).openTopicIDs).mapValues(\.order)
+        boardSessions.bySession(in: orderedSessions.flatMap(\.windows), open: Array(topics.values).openTopicIDs).mapValues(\.order)
     }
 
     /// `changes`, which this state applied last, as a client that did not declare `guest-sessions` reads them, so an
@@ -182,7 +182,7 @@ public struct EnvironmentState: Equatable {
         var sent: Set<String> = []
         var older = changes.compactMap { change -> EnvironmentChange? in
             switch change {
-            case .locks: return nil
+            case .boardSessions: return nil
             case .session(let id, var session):
                 sent.insert(id)
                 session?.lockOrder = orders[id]

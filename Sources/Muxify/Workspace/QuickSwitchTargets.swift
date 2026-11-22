@@ -65,12 +65,12 @@ enum StepDirection {
 enum QuickSwitchTarget: Hashable {
     /// `locked` is a Guest Session's card in Topics mode, by its Lock id. `openPlace` is an Open Place, by its In Play
     /// place counted from 1: going there shows its Open Place page.
-    case topic(String), locked(String), openPlace(Int), session(String), window(String), tab(UUID), terminal
+    case topic(String), boardSession(String), openPlace(Int), session(String), window(String), tab(UUID), terminal
 
     var accessibilityID: String {
         switch self {
         case .topic(let id): "hint-topic-" + id
-        case .locked(let id): "hint-locked-" + id
+        case .boardSession(let id): "hint-locked-" + id
         case .openPlace(let place): "hint-open-place-\(place)"
         case .session(let id): "hint-session-" + id
         case .window(let id): "hint-window-" + id
@@ -130,7 +130,7 @@ struct QuickSwitchTargets {
 }
 
 extension QuickSwitchTargets {
-    init(model: TopicsModel, sessions: [SessionGroup], windows: [TmuxWindow], tabIDs: [UUID]) {
+    init(model: BoardModel, sessions: [SessionGroup], windows: [TmuxWindow], tabIDs: [UUID]) {
         // No Topic Sessions get no number: the Topics list shows at most one of them, and only while it is open.
         // A Locked Session's card is numbered by its place among the Topics. A hidden Benched card gets no number,
         // and a Topic step skips it, so repeated steps do not go through the whole Bench.
@@ -150,8 +150,8 @@ extension QuickSwitchTargets {
 
     /// The Sessions the Active Topic's card shows. No Topic has no card, so it gives its Sessions that have no
     /// Locked Session card of their own.
-    private static func sessions(of model: TopicsModel) -> [TopicsModel.Session] {
-        let shown: [TopicsModel.Session]
+    private static func sessions(of model: BoardModel) -> [BoardModel.Session] {
+        let shown: [BoardModel.Session]
         switch model.activeTopic {
         case nil: shown = []
         case .noTopic:
@@ -169,7 +169,7 @@ extension TopicGroupID {
     var quickSwitchTarget: QuickSwitchTarget? {
         switch self {
         case .topic(let id): .topic(id)
-        case .locked(let id): .locked(id)
+        case .session(let id): .boardSession(id)
         case .noTopic: nil
         }
     }
@@ -222,7 +222,7 @@ extension WorkspaceStore {
     private func go(to target: QuickSwitchTarget) {
         switch target {
         case .topic(let id): goToTopic(.topic(id))
-        case .locked(let id): goToTopic(.locked(id))
+        case .boardSession(let id): goToTopic(.session(id))
         case .openPlace(let place):
             if let id = topics.openPlaceID(at: place) { goToOpenPlace(id) }
         case .session(let id): goToSession(id)

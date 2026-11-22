@@ -426,7 +426,7 @@ private struct TerminalArea: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 
-    private func emptyTopic(_ topic: TopicsModel.Row) -> some View {
+    private func emptyTopic(_ topic: BoardModel.Row) -> some View {
         VStack(spacing: 12) {
             Image(systemName: offersReopen(topic) ? "clock.arrow.circlepath" : "folder.badge.plus")
                 .font(fontSize.font(34, weight: .light))
@@ -456,10 +456,10 @@ private struct TerminalArea: View {
                             .accessibilityIdentifier("empty-topic-add-session")
                     }
                 }
-            } else if case .locked(let lock) = topic.id {
+            } else if case .session(let lock) = topic.id {
                 switch (store.guestReopening(lock, .reopen), store.guestReopening(lock, .startFresh)) {
                 case (.success(let reopen)?, .success(let startFresh)?):
-                    ReopenChoiceView(store: store, reopen: [reopen], startFresh: [startFresh]) { store.reopenGuestSession(lock, $0) }
+                    ReopenChoiceView(store: store, reopen: [reopen], startFresh: [startFresh]) { store.reopenBoardSession(lock, $0) }
                 case (.failure(let error)?, _):
                     Text("This Guest Session cannot be reopened. \(String(describing: error))")
                         .foregroundStyle(.secondary)
@@ -479,10 +479,10 @@ private struct TerminalArea: View {
 
     /// A Settled Topic, a Dormant one that remembers a Session, or a Dormant Guest Session offers Reopen; an empty open
     /// Topic offers Add a Session.
-    private func offersReopen(_ topic: TopicsModel.Row) -> Bool {
+    private func offersReopen(_ topic: BoardModel.Row) -> Bool {
         if case .settled = topic.kind { return true }
         guard topic.state == .dormant else { return false }
-        if case .locked = topic.id { return true }
+        if case .session = topic.id { return true }
         guard case .topic(let id) = topic.id, case .success(let reopening)? = store.reopening(id, .reopen) else { return false }
         return !reopening.sessions.isEmpty
     }

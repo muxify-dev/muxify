@@ -18,8 +18,8 @@ final class TopicGroupsTests: XCTestCase {
     }
 
     private func model(_ records: [TopicRecord], windows: [TmuxWindow] = [], mode: SidebarMode = .topics,
-                       groups: TopicGroupsState = TopicGroupsState(), selection: TopicSelection = TopicSelection(), location: Location? = nil) -> TopicsModel {
-        TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
+                       groups: TopicGroupsState = TopicGroupsState(), selection: TopicSelection = TopicSelection(), location: Location? = nil) -> BoardModel {
+        BoardModel(records: records, windows: windows, config: Config(), selection: selection,
                         location: location ?? selection.windowLocation, mode: mode, groups: groups)
     }
 

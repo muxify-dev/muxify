@@ -34,7 +34,7 @@ public struct TopicMembershipPlan: Sendable {
     public let commands: [TopicPlan.Command]
     /// The Lock that the move ends, when the source is a Guest Session that goes into a Topic or ends. A Session in no
     /// Topic may have no Lock, and the write that ends this one then changes nothing.
-    private(set) var endedLock: String? = nil
+    private(set) var endedSession: String? = nil
     private(set) var leftTopic: TopicRecord? = nil
 
     init(removingSession window: TmuxWindow, records: [TopicRecord], sessionPaths: [SessionPath], windows: [TmuxWindow] = []) {
@@ -110,7 +110,7 @@ public struct TopicMembershipPlan: Sendable {
         }
         let ends = Self.ends(source, windows: windows)
         // A new Topic takes the place of the Guest Session that the move ends.
-        if ends, sourceTopic == nil, !window.savedSessionID.isEmpty { endedLock = window.savedSessionID }
+        if ends, sourceTopic == nil, !window.savedSessionID.isEmpty { endedSession = window.savedSessionID }
         if ends, let sourceTopic,
            let left = sourceTopic.forgetting(window) {
             if left.id == saved?.id { saved = saved?.forgetting(window) ?? saved }

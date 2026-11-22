@@ -8,7 +8,7 @@ extension EnvironmentService {
         var shown: Location?
         /// The Lock that the plan ends, written with the record before tmux changes: its Guest Session goes into a
         /// Topic, whose new record takes its place, or ends.
-        var endedLock: String? = nil
+        var endedSession: String? = nil
         /// What the plan renames, for the answer. What a plan makes comes from tmux instead.
         var session: SessionID? = nil
         var sessionName: String? = nil
@@ -22,7 +22,7 @@ extension EnvironmentService {
     /// `session move up|down` has one meaning for each Session: a Session in an open Topic takes one place among the
     /// Topic's Sessions, and a Guest Session, which is always in no Topic, moves its card, also when it is Dormant.
     func stepSession(_ request: EnvironmentRequest, _ move: CardMove, client: String?) -> EnvironmentResponse {
-        if case .guestSession? = request.target { return moveCard(request, move, client: client) }
+        if case .boardSession? = request.target { return moveCard(request, move, client: client) }
         do {
             let records = try store.read().records
             let window = try sessionWindow(request.target, caller: request.caller, snapshot: try serverSnapshot(), client: client)
@@ -68,17 +68,17 @@ extension EnvironmentService {
             }
             let read = edit.record.flatMap { record in records.first { $0.id == record.id } }
             // A plan names the Lock of any Session in no Topic that it ends; only a Guest Session has one.
-            let endedLock = planned.endedLock.flatMap { id in contents.locks.contains { $0.id == id } ? id : nil }
+            let endedSession = planned.endedSession.flatMap { id in contents.boardSessions.contains { $0.id == id } ? id : nil }
             if let record = edit.record {
                 try store.write { transaction in
                     if let left = edit.leftTopic {
                         try transaction.apply(TopicRecordChange(before: records.first { $0.id == left.id }, after: left))
                     }
-                    try transaction.apply(TopicRecordChange(before: read, after: record), endingLock: endedLock)
+                    try transaction.apply(TopicRecordChange(before: read, after: record), endingSession: endedSession)
                 }
                 phase = .recordSaved
-            } else if let ended = endedLock {
-                try store.write { $0.unlock(ended) }
+            } else if let ended = endedSession {
+                try store.write { $0.takeOffBoard(ended) }
                 phase = .recordSaved
             } else {
                 phase = .changesStarted
@@ -210,7 +210,7 @@ extension EnvironmentService {
             }
             var edit = TopicEdit(record: plan.record, commands: plan.commands, selection: selection)
             edit.leftTopic = plan.leftTopic
-            return Planned(edit: edit, shown: WindowID(rawValue: moved.window.id).map { .window($0) }, endedLock: plan.endedLock)
+            return Planned(edit: edit, shown: WindowID(rawValue: moved.window.id).map { .window($0) }, endedSession: plan.endedSession)
         case .removeFromTopic:
             if case .window = request.target { throw TopicRequestError.noTarget }
             let plan = TopicMembershipPlan(removingSession: try sessionWindow(request.target, caller: request.caller, snapshot: snapshot, client: client),
@@ -255,7 +255,7 @@ extension EnvironmentService {
                 case .chooseSession(let sessions): throw TopicRequestError.chooseSession(topic: TopicLabels(records).label(of: topic), sessions: sessions)
                 case .emptyTopic(let dormant): throw TopicRequestError.topicEmpty(topic: TopicLabels(records).label(of: topic), id: topic.id, dormant: dormant)
                 }
-            case .session?, .sessionName?, .guestSession?:
+            case .session?, .sessionName?, .boardSession?:
                 let found = try sessionWindow(request.target, caller: request.caller, snapshot: snapshot, client: client)
                 window = snapshot.windows.first { $0.sessionID == found.sessionID && $0.isActive } ?? found
             case .window?, .pane?, nil:
@@ -273,7 +273,7 @@ extension EnvironmentService {
                            session: SessionID(rawValue: window.sessionID), sessionName: full)
         case .renameWindow(let name):
             switch request.target {
-            case .topic?, .session?, .sessionName?, .guestSession?: throw TopicRequestError.noTarget
+            case .topic?, .session?, .sessionName?, .boardSession?: throw TopicRequestError.noTarget
             case .window?, .pane?, nil: break
             }
             let window = try source().0.window
@@ -281,14 +281,14 @@ extension EnvironmentService {
                            window: WindowID(rawValue: window.id))
         case .moveWindow(let placement):
             switch request.target {
-            case .topic?, .session?, .sessionName?, .guestSession?: throw TopicRequestError.noTarget
+            case .topic?, .session?, .sessionName?, .boardSession?: throw TopicRequestError.noTarget
             case .window?, .pane?, nil: break
             }
             let window = try source().0.window
             return Planned(edit: try TmuxObjectPlan.moveWindow(window, to: placement, windows: snapshot.windows).get(), window: WindowID(rawValue: window.id))
         case .zoomPane:
             switch request.target {
-            case .topic?, .session?, .sessionName?, .guestSession?: throw TopicRequestError.noTarget
+            case .topic?, .session?, .sessionName?, .boardSession?: throw TopicRequestError.noTarget
             case .window?, .pane?, nil: break
             }
             let pane = try source().0
@@ -299,7 +299,7 @@ extension EnvironmentService {
             let window: TmuxWindow
             switch request.target {
             case .topic?: throw TopicRequestError.noTarget
-            case .session?, .sessionName?, .guestSession?:
+            case .session?, .sessionName?, .boardSession?:
                 guard session else { throw TopicRequestError.noTarget }
                 window = try sessionWindow(request.target, caller: request.caller, snapshot: snapshot, client: client)
             case .window?, .pane?, nil:
@@ -311,7 +311,7 @@ extension EnvironmentService {
             // A kill that ends a Guest Session ends its Lock too: the tmux server may exit with it, and a Session that
             // ends with its server comes back as a Dormant Guest Session.
             let ends = session || !snapshot.windows.contains { $0.sessionID == window.sessionID && $0.id != window.id }
-            return Planned(edit: try kill.get(), endedLock: ends && topic == nil && !window.savedSessionID.isEmpty ? window.savedSessionID : nil,
+            return Planned(edit: try kill.get(), endedSession: ends && topic == nil && !window.savedSessionID.isEmpty ? window.savedSessionID : nil,
                            stopped: TmuxObjectPlan.agents(killedBy: window, session: session, in: snapshot))
         case .newSession(let path, let name):
             let launch = try sessionPath(at: path)
@@ -321,9 +321,9 @@ extension EnvironmentService {
                                                            in: launch.folder.path))
         case .reopen, .startFresh:
             let choice: TopicReopening.Choice = request.command == .startFresh ? .startFresh : .reopen
-            if case .guestSession(let id)? = request.target {
-                let lock = try guestSessionLock(id, in: contents)
-                return Planned(edit: try GuestSessionReopenPlan(lock: lock, records: records, windows: snapshot.windows, choice: choice).edit)
+            if case .boardSession(let id)? = request.target {
+                let lock = try boardSessionRow(id, in: contents)
+                return Planned(edit: try BoardSessionReopenPlan(lock: lock, records: records, windows: snapshot.windows, choice: choice).edit)
             }
             guard case .topic(let ref) = request.target else { throw TopicRequestError.noTarget }
             let topic = try ref.resolve(in: records, open: false)

@@ -3,8 +3,8 @@ import XCTest
 
 final class BodyCountsTests: XCTestCase {
     func testTheBodiesBetweenTwoReadingsAreTheirDifferenceWithNoZero() {
-        let bodies = BodyCounts(from: ["SidebarCard": 40, "TopicsList": 3, "TopicCard": 9],
-                                to: ["SidebarCard": 70, "TopicsList": 3, "TopicCard": 12, "AgentMarkSpine": 5])
+        let bodies = BodyCounts(from: ["SidebarCard": 40, "Board": 3, "TopicCard": 9],
+                                to: ["SidebarCard": 70, "Board": 3, "TopicCard": 12, "AgentMarkSpine": 5])
         XCTAssertEqual(bodies, BodyCounts(["SidebarCard": 30, "TopicCard": 3, "AgentMarkSpine": 5]))
         XCTAssertEqual(bodies.value, "AgentMarkSpine:5,SidebarCard:30,TopicCard:3")
     }

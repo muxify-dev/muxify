@@ -34,7 +34,7 @@ public struct TmuxWindow: Identifiable, Hashable {
     public var savedSessionID = ""
     public var sessionRecordID: String { savedSessionID.isEmpty ? sessionID : savedSessionID }
     /// The Session's `@muxify_lock`, where an older Muxify kept the order of a Lock. Muxify reads it only to import
-    /// that Lock into the state database (`SessionLock.importLegacy`).
+    /// that Lock into the state database (`BoardSession.importLegacy`).
     public var legacyLockOrder: Double? = nil
     public var sessionPath: String = ""
     public var activePaneID: String = ""

@@ -395,18 +395,18 @@ final class HostServerTests: XCTestCase {
     }
 
     func testOnlyAClientThatDeclaredGuestSessionsGetsTheLocksAndTheDormantCards() async throws {
-        let dormant = SessionLock(id: "gone", order: 0, session: .object(["name": .string("notes"), "directory": .string("/tmp")]))
-        try TopicStore(paths: paths).write { $0.lock(dormant) }
+        let dormant = BoardSession(id: "gone", order: 0, session: .object(["name": .string("notes"), "directory": .string("/tmp")]))
+        try TopicStore(paths: paths).write { $0.addToBoard(dormant) }
 
         let newer = try await connect(capabilities: ["snapshot", "guest-sessions"])
-        let locks = subscribe(newer)
+        let boardSessions = subscribe(newer)
         let shown = subscribeSnapshot(newer)
         let older = try await connect(capabilities: ["snapshot"])
         let plain = subscribe(older)
         let olderShown = subscribeSnapshot(older)
-        try await wait("no first items") { !locks.items.isEmpty && !plain.items.isEmpty && !shown.items.isEmpty && !olderShown.items.isEmpty }
+        try await wait("no first items") { !boardSessions.items.isEmpty && !plain.items.isEmpty && !shown.items.isEmpty && !olderShown.items.isEmpty }
 
-        XCTAssertTrue(locks.keys.contains("guest_sessions"))
+        XCTAssertTrue(boardSessions.keys.contains("guest_sessions"))
         XCTAssertFalse(plain.keys.contains("guest_sessions"), "an older Mac shows a Guest Session as a No Topic Session")
         XCTAssertEqual(shown.items.last?.snapshot.cards, [.dormantSession(id: "gone", name: "notes")])
         XCTAssertEqual(olderShown.items.last?.snapshot.cards, [], "an older phone gets no card that it does not know")
@@ -418,18 +418,18 @@ final class HostServerTests: XCTestCase {
 
     func testAnOlderMacGetsTheLockOrderOnTheWindowsOfALiveGuestSessionAndAgainWhenTheLockChanges() async throws {
         try tmux.run(["set-option", "-t", "=work:", "@muxify_session_id", "g1"])
-        try TopicStore(paths: paths).write { $0.lock(SessionLock(id: "g1", order: 0)) }
-        let order = try XCTUnwrap(TopicStore(paths: paths).read().locks.first).order
+        try TopicStore(paths: paths).write { $0.addToBoard(BoardSession(id: "g1", order: 0)) }
+        let order = try XCTUnwrap(TopicStore(paths: paths).read().boardSessions.first).order
         let work = try sessionID("work")
         let older = subscribeLockOrders(try await connect())
         let newer = subscribeLockOrders(try await connect(capabilities: ["guest-sessions"]))
         try await wait("the older Mac got no lock_order for the Guest Session") { older.lastOrder(of: work) == order }
         try await wait("the newer Mac got no first item") { newer.events(of: work) > 0 }
 
-        try TopicStore(paths: paths).write { $0.locks[0].order = order + 5 }
+        try TopicStore(paths: paths).write { $0.boardSessions[0].order = order + 5 }
         try await wait("a move of the Lock sent the older Mac no new lock_order", seconds: 5) { older.lastOrder(of: work) == order + 5 }
         let moved = older.events(of: work)
-        try TopicStore(paths: paths).write { $0.unlock("g1") }
+        try TopicStore(paths: paths).write { $0.takeOffBoard("g1") }
         try await wait("an ended Lock left the older Mac its lock_order", seconds: 5) {
             older.events(of: work) > moved && older.lastOrder(of: work) == nil
         }
@@ -441,8 +441,8 @@ final class HostServerTests: XCTestCase {
         let newer = subscribeSnapshot(try await connect(capabilities: ["snapshot", "guest-sessions"]))
         try await wait("no first items") { !older.items.isEmpty && !newer.items.isEmpty }
 
-        let dormant = SessionLock(id: "gone", order: 0, session: .object(["name": .string("notes")]))
-        try TopicStore(paths: paths).write { $0.lock(dormant) }
+        let dormant = BoardSession(id: "gone", order: 0, session: .object(["name": .string("notes")]))
+        try TopicStore(paths: paths).write { $0.addToBoard(dormant) }
         try await wait("the newer phone got no Dormant card", seconds: 5) {
             newer.items.last?.snapshot.cards.contains(.dormantSession(id: "gone", name: "notes")) == true
         }

@@ -787,7 +787,7 @@ final class CLIWindowAndSessionIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(try sandbox.topicOption(of: session), record.id)
         XCTAssertEqual(try sandbox.tmux(["list-windows", "-t", "=" + session + ":", "-F", "#{window_id}"]).split(separator: "\n").count, 2,
                        "both Windows move with the Session")
-        XCTAssertEqual(try sandbox.locks(), [], "the Lock ends")
+        XCTAssertEqual(try sandbox.boardSessions(), [], "the Lock ends")
 
         let id = try await newTopic("Ship", in: sandbox.tools, sandbox: sandbox)
         let moved = try await run(cli, arguments: ["session", "move", "--topic", id], environment: sandbox.cliEnvironment(pane: pane))
@@ -2031,7 +2031,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         try sandbox.tmux(["new-window", "-d", "-t", "=notes:", "-c", sandbox.game.path])
         let guest = try await run(cli, arguments: ["topic", "make-guest", "--session", "notes"], environment: environment)
         XCTAssertEqual(guest.status, 0, guest.output)
-        let lock = try XCTUnwrap(try sandbox.locks().only)
+        let lock = try XCTUnwrap(try sandbox.boardSessions().only)
         // tmux ends the Session with no Muxify to see it, as a tmux restart does.
         try sandbox.tmux(["kill-session", "-t", "=notes"])
 
@@ -2060,7 +2060,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
 
         let benched = try await run(cli, arguments: ["topic", "bench", "--guest-session", lock.id], environment: environment)
         XCTAssertEqual(benched.status, 0, benched.output)
-        XCTAssertEqual(try sandbox.locks(), [])
+        XCTAssertEqual(try sandbox.boardSessions(), [])
         let gone = try await run(cli, arguments: ["topic", "reopen", "--guest-session", lock.id], environment: environment)
         XCTAssertEqual(gone.status, 1, gone.output)
         XCTAssertEqual(gone.stderr, "muxify: No Guest Session has the id \(lock.id). No changes were made.\n")
@@ -2507,8 +2507,8 @@ private final class TopicSandbox {
     }
 
     /// The Locks of the Guest Sessions in the state database, in id order.
-    func locks() throws -> [SessionLock] {
-        try TopicStore(paths: paths).read().locks
+    func boardSessions() throws -> [BoardSession] {
+        try TopicStore(paths: paths).read().boardSessions
     }
 
     /// The Muxify Worktree records in the state database, oldest first.

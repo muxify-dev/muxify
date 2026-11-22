@@ -1,6 +1,6 @@
 import MuxifyCore
 
-extension TopicsModel {
+extension BoardModel {
     /// The rows that are not Pinned, cut at the Guests line and the Bench line, without the Open Places.
     var split: InPlayCut<Row> { cut.compactMap(\.row) }
 }
@@ -63,8 +63,8 @@ extension CommandPalette {
     /// A row for a card of the Topics list: a Topic, or a Locked Session. A query such as `#work` narrows by Tag. A step
     /// that follows another one with the same cards gives its rows a `prefix`: SwiftUI keeps the accessibility action of
     /// a row with the same id, so a press there would still check the card.
-    func cardCandidate(_ row: TopicsModel.Row, choice: PaletteChoice, prefix: String = "") -> PickCandidate<PaletteItem> {
-        let kind: RowKind = if case .locked = row.id { .session } else { .topic }
+    func cardCandidate(_ row: BoardModel.Row, choice: PaletteChoice, prefix: String = "") -> PickCandidate<PaletteItem> {
+        let kind: RowKind = if case .session = row.id { .session } else { .topic }
         return PickCandidate(id: prefix + row.id.accessibilityID, kind: kind, title: row.title,
                              fields: (row.idleLabel.map { [.detail($0)] } ?? []) + row.sessions.map { .label($0.baseName) }
                                 + SearchField.tags(row.tags),

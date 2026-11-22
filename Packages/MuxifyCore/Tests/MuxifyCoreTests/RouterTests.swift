@@ -177,7 +177,7 @@ final class RouterTests: XCTestCase {
     }
 
     func testNextTopicWithoutAWindowShowsItsPageAndAMissingLockedSessionShowsNoTopic() {
-        for (next, expected) in [(TopicGroupID.topic("work"), TopicGroupID.topic("work")), (.noTopic, .noTopic), (.locked("$1"), .noTopic)] {
+        for (next, expected) in [(TopicGroupID.topic("work"), TopicGroupID.topic("work")), (.noTopic, .noTopic), (.session("$1"), .noTopic)] {
             var router = Router()
             _ = router.handle(.settled(next: next), .init())
             XCTAssertEqual(router.handle(.read(1), .init()), [.visit(.emptyTopic(expected))])
@@ -187,22 +187,22 @@ final class RouterTests: XCTestCase {
     }
 
     func testADormantGuestSessionShowsItsPageEntersItsWindowWhenItAppearsAndLeavesWhenItsLockEnds() {
-        let page = Location.emptyTopic(.locked("g1"))
+        let page = Location.emptyTopic(.session("g1"))
         var router = Router()
-        let dormant = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"), guestSessions: ["g1"])
-        _ = router.handle(.settled(next: .locked("g1")), dormant)
+        let dormant = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"), boardSessions: ["g1"])
+        _ = router.handle(.settled(next: .session("g1")), dormant)
         XCTAssertEqual(router.handle(.read(1), dormant), [.visit(page)], "Next Topic shows the Dormant Guest Session's own page")
         XCTAssertTrue(router.handle(.read(2), dormant).isEmpty, "the page stays while the Guest Session is Dormant")
 
         var reopened = dormant
         reopened.windows.append(window("@2"))
-        reopened.entryWindows = [.locked("g1"): id("@2")]
+        reopened.entryWindows = [.session("g1"): id("@2")]
         _ = router.handle(.read(3), reopened)
         XCTAssertEqual(router.location, .window(id("@2")), "a Session made again elsewhere replaces the page")
 
         _ = router.handle(.go(page), dormant)
         var benched = dormant
-        benched.guestSessions = []
+        benched.boardSessions = []
         XCTAssertEqual(router.handle(.topicsChanged, benched), [.visit(.window(id("@1")))], "Bench of the Guest Session ends its page")
     }
 

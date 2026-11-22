@@ -23,7 +23,7 @@ public enum HostProtocol {
     /// uses: the Mac `macCapabilities`, the phone all of them.
     public static let capabilities: [String] = HostCapability.allCases.map(\.rawValue)
     /// What the Mac uses of a Host Server's capabilities.
-    public static let macCapabilities: [String] = [HostCapability.statusLine.rawValue, HostCapability.guestSessions.rawValue]
+    public static let macCapabilities: [String] = [HostCapability.statusLine.rawValue, HostCapability.board.rawValue]
     /// How long the client waits for the server's `hello`.
     public static let helloTimeout: TimeInterval = 10
     /// How long the server waits for any frame before it exits. Longer than the Mac's own master timeout
@@ -52,7 +52,7 @@ public enum HostCapability: String, CaseIterable, Sendable {
     /// card of an `environment` request, which `reopen`, `start_fresh`, `bench_topic` and the card moves take. A client
     /// that did not declare it gets no `guest_sessions` event, and no card for a Dormant Guest Session; it still gets a
     /// live one as a `session` card.
-    case guestSessions = "guest-sessions"
+    case board = "guest-sessions"
 }
 
 /// The `kind` of a frame.

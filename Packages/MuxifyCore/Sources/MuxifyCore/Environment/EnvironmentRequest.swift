@@ -65,12 +65,12 @@ public enum EnvironmentTarget: Codable, Hashable, Sendable {
     case pane(PaneID)
     /// A Guest Session, live or Dormant, by its Lock id: Reopen, Start Fresh, Bench and the card moves take it, also when
     /// tmux has no Session for it.
-    case guestSession(String)
+    case boardSession(String)
 
     private enum CodingKeys: String, CodingKey {
         case topic, session, window, pane
         case sessionName = "session_name"
-        case guestSession = "guest_session"
+        case boardSession = "guest_session"
     }
 
     public init(from decoder: Decoder) throws {
@@ -79,7 +79,7 @@ public enum EnvironmentTarget: Codable, Hashable, Sendable {
         else if let session = try values.decodeIfPresent(SessionID.self, forKey: .session) { self = .session(session) }
         else if let name = try values.decodeIfPresent(String.self, forKey: .sessionName) { self = .sessionName(name) }
         else if let window = try values.decodeIfPresent(WindowID.self, forKey: .window) { self = .window(window) }
-        else if let lock = try values.decodeIfPresent(String.self, forKey: .guestSession) { self = .guestSession(lock) }
+        else if let lock = try values.decodeIfPresent(String.self, forKey: .boardSession) { self = .boardSession(lock) }
         else { self = .pane(try values.decode(PaneID.self, forKey: .pane)) }
     }
 
@@ -91,7 +91,7 @@ public enum EnvironmentTarget: Codable, Hashable, Sendable {
         case .sessionName(let name): try values.encode(name, forKey: .sessionName)
         case .window(let window): try values.encode(window, forKey: .window)
         case .pane(let pane): try values.encode(pane, forKey: .pane)
-        case .guestSession(let lock): try values.encode(lock, forKey: .guestSession)
+        case .boardSession(let lock): try values.encode(lock, forKey: .boardSession)
         }
     }
 }
@@ -216,10 +216,10 @@ public enum CardMove: Codable, Hashable, Sendable {
     /// One card up or down among the cards that the Topics list shows now, or into the next In Play section (`TopicCards`).
     case up, down
     /// Next to another card, shown or not, as the Sidebar drag puts it.
-    case before(TopicListRef)
-    case after(TopicListRef)
+    case before(BoardCardRef)
+    case after(BoardCardRef)
     /// A trade, as the Sidebar drag across the Bench line makes it: the two cards exchange their places.
-    case trade(TopicListRef)
+    case trade(BoardCardRef)
 
     private enum BeforeCodingKeys: String, CodingKey { case _0 = "card" }
     private enum AfterCodingKeys: String, CodingKey { case _0 = "card" }
@@ -228,21 +228,22 @@ public enum CardMove: Codable, Hashable, Sendable {
 
 /// A card on the wire: a Topic, a live Guest Session by its tmux id, a Guest Session, live or Dormant, by its Lock id, or
 /// an Open Place by its id. An Open Place is only an anchor: the Sidebar drag puts a card before or after it.
-public enum TopicListRef: Codable, Hashable, Sendable {
+public enum BoardCardRef: Codable, Hashable, Sendable {
     case topic(TopicRef)
-    case lock(SessionID)
+    case liveSession(SessionID)
     case openPlace(String)
-    case guestSession(String)
+    case boardSession(String)
 
     private enum CodingKeys: String, CodingKey {
-        case topic, lock, openPlace
-        case guestSession = "guest_session"
+        case topic, openPlace
+        case liveSession = "lock"
+        case boardSession = "guest_session"
     }
 
     private enum TopicCodingKeys: String, CodingKey { case _0 = "ref" }
-    private enum LockCodingKeys: String, CodingKey { case _0 = "session" }
+    private enum LiveSessionCodingKeys: String, CodingKey { case _0 = "session" }
     private enum OpenPlaceCodingKeys: String, CodingKey { case _0 = "id" }
-    private enum GuestSessionCodingKeys: String, CodingKey { case _0 = "id" }
+    private enum BoardSessionCodingKeys: String, CodingKey { case _0 = "id" }
 }
 
 /// Where `move` puts its target.
@@ -365,10 +366,10 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// the last of them are Open Places. A Guest Topic that fills a place loses its Guest mark. Of the other cards, the
     /// regular ones go to the top of the Bench, and a Guest stays a Guest. A Guest Session cannot fill a place. It takes
     /// no target.
-    case chooseInPlay([TopicListRef])
+    case chooseInPlay([BoardCardRef])
     /// The Benched card `with` takes the position of the target's card, which must be In Play. The target's card goes
     /// to the end of the Bench.
-    case replaceFromBench(with: TopicListRef)
+    case replaceFromBench(with: BoardCardRef)
     /// Make a Guest: the target's Benched Topic goes to the end of the Guests with the Guest mark, and no card goes to
     /// the Bench for it. A target Session in no Topic gets a Lock in the state database, which makes it a Guest Session
     /// at the end of the Guests (ADR 0061). A Guest does not change.

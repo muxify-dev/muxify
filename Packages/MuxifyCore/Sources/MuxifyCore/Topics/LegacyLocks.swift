@@ -1,6 +1,6 @@
 import Foundation
 
-extension SessionLock {
+extension BoardSession {
     /// Moves each Lock that an older Muxify kept in the tmux option `legacyOption` into the `guest_sessions` table, with
     /// the order that the option had, then removes the option. The new Lock's id is the Session's `sessionRecordID`, so
     /// two Muxify processes that import one Session at the same time make one row. A Session in an open Topic had no
@@ -16,7 +16,7 @@ extension SessionLock {
         let imported = try store.write { transaction -> [TmuxWindow] in
             let open = transaction.records.openTopicIDs
             let noTopic = legacy.filter { $0.window.topicID.map { !open.contains($0) } ?? true }
-            for (window, order) in noTopic { transaction.importLock(SessionLock(session: window, order: order, snapshot: snapshot)) }
+            for (window, order) in noTopic { transaction.importBoardSession(BoardSession(session: window, order: order, snapshot: snapshot)) }
             return noTopic.map(\.window)
         }
         for window in imported { try run(["set-option", "-t", window.sessionID, "@muxify_session_id", window.sessionRecordID]) }

@@ -97,11 +97,11 @@ struct RequestInvocation: Equatable {
             case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .fillPlace, .moveCard, .placeCard, .tradeCard,
                  .sortSessions:
                 return [.topic, .window, .pane]
-            case .moveSession: return [.session, .guestSession, .pane]
+            case .moveSession: return [.session, .boardSession, .pane]
             case .moveWholeSession: return [.session, .pane]
             case .replaceFromBench, .makeGuest: return [.topic, .session, .window, .pane]
-            case .benchTopic: return [.topic, .session, .guestSession, .window, .pane]
-            case .reopen, .startFresh: return [.topic, .guestSession]
+            case .benchTopic: return [.topic, .session, .boardSession, .window, .pane]
+            case .reopen, .startFresh: return [.topic, .boardSession]
             case .moveWindow, .moveToNewTopic, .removeWindowFromTopic: return [.window, .pane]
             case .moveToNewWindow: return [.pane]
             case .newWindow: return [.topic, .session, .window, .pane]
@@ -226,7 +226,7 @@ struct RequestInvocation: Equatable {
         case openPlace(String)
 
         /// A Session name becomes its id here, because a card on the wire names a Locked Session by its id.
-        var ref: TopicListRef {
+        var ref: BoardCardRef {
             get throws {
                 switch self {
                 case .topic(let name): return .topic(.named(name))
@@ -236,7 +236,7 @@ struct RequestInvocation: Equatable {
                           let id = SessionID(rawValue: window.sessionID) else {
                         throw CLIError(TopicRequestError.sessionUnavailable(value).description)
                     }
-                    return .lock(id)
+                    return .liveSession(id)
                 }
             }
         }
@@ -253,7 +253,7 @@ struct RequestInvocation: Equatable {
         case pane = "--pane"
         case session = "--session"
         /// A Guest Session, live or Dormant, by the id of its Lock, which `environment show` gives.
-        case guestSession = "--guest-session"
+        case boardSession = "--guest-session"
 
         var usage: String {
             switch self {
@@ -261,7 +261,7 @@ struct RequestInvocation: Equatable {
             case .topic: return "--topic <id|label>"
             case .window: return "--window <id>"
             case .pane: return "--pane <id>"
-            case .guestSession: return "--guest-session <id>"
+            case .boardSession: return "--guest-session <id>"
             }
         }
 
@@ -278,9 +278,9 @@ struct RequestInvocation: Equatable {
             case .session:
                 guard !value.isEmpty else { throw CLIError("--session takes the name or id of a tmux Session", exitCode: 2) }
                 return SessionID(rawValue: value).map(EnvironmentTarget.session) ?? .sessionName(value)
-            case .guestSession:
+            case .boardSession:
                 guard !value.isEmpty else { throw CLIError("--guest-session takes the id of a Guest Session, as environment show gives it", exitCode: 2) }
-                return .guestSession(value)
+                return .boardSession(value)
             }
         }
 

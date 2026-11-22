@@ -3,10 +3,10 @@ import XCTest
 
 final class TopicNavigationTests: XCTestCase {
     private func model(_ records: [TopicRecord], _ windows: [TmuxWindow], _ selection: TopicSelection,
-                       inPlay: Int = Config.Topics.defaultInPlay) -> TopicsModel {
+                       inPlay: Int = Config.Topics.defaultInPlay) -> BoardModel {
         var config = Config()
         config.topics.inPlay = inPlay
-        return TopicsModel(records: records, windows: windows, config: config, selection: selection,
+        return BoardModel(records: records, windows: windows, config: config, selection: selection,
                         location: selection.windowLocation)
     }
 

@@ -2,7 +2,7 @@ import XCTest
 @testable import MuxifyCore
 import MuxifyTestSupport
 
-/// The Sidebar's sections, in order, with each card's label, state and mark, from the cards that `TopicsList` builds.
+/// The Sidebar's sections, in order, with each card's label, state and mark, from the cards that `Board` builds.
 final class SidebarCardsTests: XCTestCase {
     /// A Window of `session`; a `guest` one points at the Lock whose id is the Session's tmux id.
     private func window(_ session: String, topic: String? = nil, guest: Bool = false) -> TmuxWindow {
@@ -10,7 +10,7 @@ final class SidebarCardsTests: XCTestCase {
                  savedSessionID: guest ? session : "")
     }
 
-    private let locks = [SessionLock(id: "$4", order: 4)]
+    private let boardSessions = [BoardSession(id: "$4", order: 4)]
 
     private func agent(in session: String, _ status: AgentStatus, unread: Bool = false) -> TmuxPane {
         TmuxPane(id: "%" + session.dropFirst() + status.rawValue, windowID: "@" + session.dropFirst(), command: "claude", agent: "claude",
@@ -55,7 +55,7 @@ final class SidebarCardsTests: XCTestCase {
     /// Each section as lines of `kind id label state mark`, as the Sidebar lists its cards.
     private func sidebar(inPlay: Int) -> [String: [String]] {
         let tmux = tmux
-        let model = TopicsModel(records: records, openPlaces: openPlaces, locks: locks, windows: tmux.windows, config: config(inPlay: inPlay),
+        let model = BoardModel(records: records, openPlaces: openPlaces, boardSessions: boardSessions, windows: tmux.windows, config: config(inPlay: inPlay),
                                 selection: TopicSelection(), benchShown: true, agents: tmux.agents)
         var sections: [String: [String]] = [:]
         var section = "pinned"
@@ -65,7 +65,7 @@ final class SidebarCardsTests: XCTestCase {
                 if section == "pinned", !row.isPinned { section = "places" }
                 switch row.id {
                 case .topic(let id): sections[section, default: []].append(["topic", id, row.title, row.state?.rawValue ?? "-", row.mark?.rawValue ?? "-"].joined(separator: " "))
-                case .locked(let session): sections[section, default: []].append(["session", session, row.mark?.rawValue ?? "-"].joined(separator: " "))
+                case .session(let session): sections[section, default: []].append(["session", session, row.mark?.rawValue ?? "-"].joined(separator: " "))
                 case .noTopic: XCTFail("No Topic has no card")
                 }
             case .openPlace(let id, _): sections[section, default: []].append("open " + id)

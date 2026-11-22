@@ -257,7 +257,7 @@ enum CLIVerbs {
         },
         CLIVerb(path: .sessionMove,
                 synopsis: "(up | down | --topic <id|label> | --new-topic [\"title\"]) [--session <name|id> | --guest-session <id> | --pane <id>] [--json]",
-                options: [.value("--topic"), .flag("--new-topic"), .flag("--json")], targets: [.session, .guestSession, .pane],
+                options: [.value("--topic"), .flag("--new-topic"), .flag("--json")], targets: [.session, .boardSession, .pane],
                 help: """
                 Moves this Pane's Session, or the Session that --session or --pane names.
                   up | down              one place up or down among the Sessions of its Topic, as
@@ -646,7 +646,7 @@ enum CLIVerbs {
             }
         },
         CLIVerb(path: .topicReopen, synopsis: "(--topic <id|label> | --guest-session <id>) [--json]", options: [.flag("--json")],
-                targets: [.topic, .guestSession, .window, .pane],
+                targets: [.topic, .boardSession, .window, .pane],
                 help: """
                 Makes the remembered Sessions, Windows, Tabs and Agents of a Dormant or
                 Settled Topic again, as Reopen Topic does.
@@ -658,7 +658,7 @@ enum CLIVerbs {
             .request(try RequestInvocation(try reopening(.reopen, parsed), parsed: parsed))
         },
         CLIVerb(path: .topicStartFresh, synopsis: "(--topic <id|label> | --guest-session <id>) [--json]", options: [.flag("--json")],
-                targets: [.topic, .guestSession, .window, .pane],
+                targets: [.topic, .boardSession, .window, .pane],
                 help: """
                 Makes one Session with one shell Window in each Session Path that a
                 Dormant or Settled Topic remembers, as Start Topic Fresh does.
@@ -773,7 +773,7 @@ enum CLIVerbs {
             return .request(try RequestInvocation(.makeGuest, parsed: parsed))
         },
         CLIVerb(path: .topicBench, synopsis: "[--topic <id|label> | --session <name|id> | --guest-session <id> | --window <id> | --pane <id>] [--json]",
-                options: [.flag("--json")], targets: [.topic, .session, .guestSession, .window, .pane],
+                options: [.flag("--json")], targets: [.topic, .session, .boardSession, .window, .pane],
                 help: """
                 Puts this Pane's In Play Topic at the top of the Bench, as Bench does.
                 It keeps its Sessions and Agents. A Topic from an In Play place leaves an

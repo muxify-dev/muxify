@@ -119,7 +119,7 @@ private struct OpenPlaceRow: View {
     let listHasFocus: Bool
     @Environment(\.interfaceFontSize) private var fontSize
 
-    private var row: TopicsModel.Row { choice.row }
+    private var row: BoardModel.Row { choice.row }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)

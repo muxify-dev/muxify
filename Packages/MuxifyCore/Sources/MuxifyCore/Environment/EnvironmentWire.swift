@@ -17,7 +17,7 @@ extension EnvironmentChange: Codable {
     private enum CodingKeys: String, CodingKey {
         case session, topic, value
         case openPlaces = "open_places"
-        case locks = "guest_sessions"
+        case boardSessions = "guest_sessions"
         case server
     }
 
@@ -29,8 +29,8 @@ extension EnvironmentChange: Codable {
             self = .topic(id, try values.decodeIfPresent(TopicRecord.self, forKey: .value))
         } else if let places = try values.decodeIfPresent([OpenPlace].self, forKey: .openPlaces) {
             self = .openPlaces(places)
-        } else if let locks = try values.decodeIfPresent([SessionLock].self, forKey: .locks) {
-            self = .locks(locks)
+        } else if let boardSessions = try values.decodeIfPresent([BoardSession].self, forKey: .boardSessions) {
+            self = .boardSessions(boardSessions)
         } else if let server = try values.decodeIfPresent(EnvironmentServer.self, forKey: .server) {
             self = .server(server)
         } else {
@@ -48,7 +48,7 @@ extension EnvironmentChange: Codable {
             try values.encode(id, forKey: .topic)
             try values.encode(record, forKey: .value)
         case .openPlaces(let places): try values.encode(places, forKey: .openPlaces)
-        case .locks(let locks): try values.encode(locks, forKey: .locks)
+        case .boardSessions(let boardSessions): try values.encode(boardSessions, forKey: .boardSessions)
         case .server(let server): try values.encode(server, forKey: .server)
         }
     }

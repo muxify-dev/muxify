@@ -19,7 +19,7 @@ struct OpenPlaceChoices {
     struct Choice: Identifiable {
         let topicID: String
         let section: Section
-        let row: TopicsModel.Row
+        let row: BoardModel.Row
         /// The title, with the marks of the query.
         let title: Highlighted
         /// The Topic Note, with the marks of the query.
@@ -36,10 +36,10 @@ struct OpenPlaceChoices {
     let total: Int
 
     /// `title` gives the title that the row's Sidebar card shows.
-    init(_ cut: InPlayCut<TopicsModel.Row>, query: String, title: (TopicsModel.Row) -> String = \.title) {
+    init(_ cut: InPlayCut<BoardModel.Row>, query: String, title: (BoardModel.Row) -> String = \.title) {
         let query = FuzzyQuery(query)
         let candidates = [(Section.guests, cut.guests), (.bench, cut.bench)].flatMap { section, rows in
-            rows.compactMap { row -> (Section, String, TopicsModel.Row)? in
+            rows.compactMap { row -> (Section, String, BoardModel.Row)? in
                 guard case .topic(let id) = row.id else { return nil }
                 return (section, id, row)
             }
@@ -66,7 +66,7 @@ struct OpenPlaceChoices {
 
     /// The fields follow the title in a fixed order, so the marks of each are at a known index: the Note, then each
     /// Session's name, then the Tags.
-    private static func choice(_ id: String, section: Section, row: TopicsModel.Row, title: String, query: FuzzyQuery) -> Choice? {
+    private static func choice(_ id: String, section: Section, row: BoardModel.Row, title: String, query: FuzzyQuery) -> Choice? {
         let note = row.note.flatMap { $0.isEmpty ? nil : $0 }
         let sessions = row.sessions.map(\.baseName)
         let fields = [SearchField.title(title)] + (note.map { [.hidden($0)] } ?? []) + sessions.map(SearchField.hidden)

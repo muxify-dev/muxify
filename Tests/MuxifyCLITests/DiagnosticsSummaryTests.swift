@@ -103,7 +103,7 @@ final class DiagnosticsSummaryTests: XCTestCase {
              digest freeze-2026-11-10-090230.txt  samples 2500  busy 100.0%
                libraries SwiftUI 70.0%
                symbols none
-               frames TopicsList.body 50.0%
+               frames Board.body 50.0%
 
         Errors 4 kinds
           5     system log: error com.apple.foo: bad thing
@@ -205,7 +205,7 @@ final class DiagnosticsSummaryTests: XCTestCase {
             try line(day, "09:02:33", DiagnosticsRecord(.digest, [("sample", freezeSample), ("samples", "2500"), ("busy", "100.0"),
                                                                   ("libraries", "SwiftUI:70.0")]).text),
             try line(day, "09:02:33", DiagnosticsRecord(.digest, [("sample", freezeSample), ("symbols", "none")]).text),
-            try line(day, "09:02:33", DiagnosticsRecord(.digest, [("sample", freezeSample), ("frames", "TopicsList.body:50.0")]).text),
+            try line(day, "09:02:33", DiagnosticsRecord(.digest, [("sample", freezeSample), ("frames", "Board.body:50.0")]).text),
             try minute(day, "09:03:00", cpu: 3, busy: 1.5, memory: 305, groups: [.tmux: figures(2.5, 21)]),
             try line(day, "09:03:00", "system log 09:02:59: error com.apple.foo: bad thing (2 times)"),
             try line(day, "09:03:13", "burst: sampling the process for 5 s to \(burstSample)"),

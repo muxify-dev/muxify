@@ -10,7 +10,7 @@ final class TopicCardsStepTests: XCTestCase {
 
     private let places = 2
 
-    private var cards: [TopicListEntry] {
+    private var cards: [BoardCard] {
         TopicCards.order(records: ["a", "b", "c", "d", "e"].enumerated().map { topic($1, order: Double($0)) })
     }
 
@@ -35,10 +35,10 @@ final class TopicCardsStepTests: XCTestCase {
 
     /// The cards of `list` in order, as GuestTests writes a Sidebar: `📌name` is Pinned, `name(G)` is a Guest Topic,
     /// `~name` is a Guest Session, `_` is the Open Place, and `+` and `|` only mark the Guests line and the Bench line.
-    private func cards(_ list: String) -> [TopicListEntry] {
+    private func cards(_ list: String) -> [BoardCard] {
         list.split(separator: " ").filter { $0 != "+" && $0 != "|" }.enumerated().map { order, card in
             if card == "_" { return .openPlace(OpenPlace(id: "open", order: Double(order))) }
-            if card.hasPrefix("~") { return .lock(SessionLock(id: String(card.dropFirst()), order: Double(order))) }
+            if card.hasPrefix("~") { return .session(BoardSession(id: String(card.dropFirst()), order: Double(order))) }
             var record = topic(String(card).replacingOccurrences(of: "📌", with: "").replacingOccurrences(of: "(G)", with: ""), order: Double(order))
             record.isPinned = card.hasPrefix("📌")
             record.isGuest = card.hasSuffix("(G)")
@@ -59,19 +59,19 @@ final class TopicCardsStepTests: XCTestCase {
             ("a b + c(G) | d", "c", .down, .bench, "Down from the last Guest is Bench"),
             ("📌p 📌q a b + |", "p", .down, .reorder(.after(.topic("q"))), "a Pinned Topic steps among the Pinned Topics"),
             ("📌p 📌q a b + |", "q", .down, .atEnd, "a Pinned Topic does not cross into the places"),
-            ("a b + ~s | c", "~s", .up, .refused(.guestSession), "a Guest Session cannot take a place"),
-            ("a _ + ~s | c", "~s", .up, .refused(.guestSession), "an Open Place does not change that"),
+            ("a b + ~s | c", "~s", .up, .refused(.boardSession), "a Guest Session cannot take a place"),
+            ("a _ + ~s | c", "~s", .up, .refused(.boardSession), "an Open Place does not change that"),
             ("a b + c(G) ~s | d", "~s", .up, .reorder(.before(.topic("c"))), "a Guest Session's card steps among the Guests"),
             ("a b + ~s | c", "~s", .down, .bench, "Down from the last Guest Unlocks the Session"),
         ]
         for (list, card, step, outcome, why) in cases {
-            let id: TopicListID = card.hasPrefix("~") ? .lock(String(card.dropFirst())) : .topic(card)
+            let id: BoardCardID = card.hasPrefix("~") ? .session(String(card.dropFirst())) : .topic(card)
             XCTAssertEqual(TopicCards.step(id, step, in: cards(list), inPlay: places), outcome, "\(list): \(card) \(step): \(why)")
         }
     }
 
     func testTheUnlockedNoTopicSessionMakesAGuestOnUpAndHasNoOtherStep() {
-        XCTAssertEqual(TopicCards.stepUnlockedSession(.up), .makeGuest)
-        XCTAssertEqual(TopicCards.stepUnlockedSession(.down), .hidden)
+        XCTAssertEqual(TopicCards.stepSessionWithoutCard(.up), .makeGuest)
+        XCTAssertEqual(TopicCards.stepSessionWithoutCard(.down), .hidden)
     }
 }

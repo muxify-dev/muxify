@@ -14,24 +14,24 @@ final class ProtocolWireTests: XCTestCase {
     /// id and drops a card next to it; the phone gets the Dormant one as a `dormant_session` card; Start Fresh takes the
     /// same `guest_session` target.
     private func thisReleasesFrames() throws -> [Data] {
-        let lock = SessionLock(id: "s1", order: 3, session: .object(["id": .string("s1"), "name": .string("notes"), "base_name": .string("notes"),
+        let lock = BoardSession(id: "s1", order: 3, session: .object(["id": .string("s1"), "name": .string("notes"), "base_name": .string("notes"),
                                                                      "directory": .string("/work/notes"), "windows": .array([])]))
-        let shown = EnvironmentShown(contents: TopicContents(records: [], locks: [lock]),
+        let shown = EnvironmentShown(contents: TopicContents(records: [], boardSessions: [lock]),
                                      tmux: TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true), config: Config())
         return [
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: HostProtocol.capabilities)),
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, build: Self.build, capabilities: HostProtocol.macCapabilities,
                                                  nonce: "0a1b2c3d")),
             try ProtocolLine.request(id: 1, HostRequest.subscribe(.environment)),
-            try ProtocolLine.item(id: 1, EnvironmentItem(changes: [.locks([lock])])),
-            try ProtocolLine.request(id: 2, HostRequest.environment(EnvironmentRequest(.reopen, target: .guestSession("s1")))),
+            try ProtocolLine.item(id: 1, EnvironmentItem(changes: [.boardSessions([lock])])),
+            try ProtocolLine.request(id: 2, HostRequest.environment(EnvironmentRequest(.reopen, target: .boardSession("s1")))),
             try ProtocolLine.ok(id: 2, EnvironmentResponse.changed(TopicChange(topicID: nil, session: SessionID(rawValue: "$4"), sessionName: "notes"))),
-            try ProtocolLine.request(id: 3, HostRequest.environment(EnvironmentRequest(.moveCard(.after(.guestSession("s1"))),
-                                                                                       target: .guestSession("s2")))),
+            try ProtocolLine.request(id: 3, HostRequest.environment(EnvironmentRequest(.moveCard(.after(.boardSession("s1"))),
+                                                                                       target: .boardSession("s2")))),
             try ProtocolLine.ok(id: 3, EnvironmentResponse.changed(TopicChange(topicID: nil))),
             try ProtocolLine.request(id: 4, HostRequest.subscribe(.snapshot)),
             try ProtocolLine.item(id: 4, shown),
-            try ProtocolLine.request(id: 5, HostRequest.environment(EnvironmentRequest(.startFresh, target: .guestSession("s1")))),
+            try ProtocolLine.request(id: 5, HostRequest.environment(EnvironmentRequest(.startFresh, target: .boardSession("s1")))),
             try ProtocolLine.ok(id: 5, EnvironmentResponse.changed(TopicChange(topicID: nil, session: SessionID(rawValue: "$5"), sessionName: "notes"))),
         ]
     }
@@ -339,7 +339,7 @@ final class ProtocolWireTests: XCTestCase {
         let changes: [EnvironmentChange] = [
             .session("$1", EnvironmentSession(windows: [window], panes: [pane])), .session("$9", nil),
             .topic("t1", record), .topic("t2", nil), .openPlaces([]),
-            .locks([SessionLock(id: "s1", order: 2, session: .object(["name": .string("work"), "directory": .string("/w")]))]),
+            .boardSessions([BoardSession(id: "s1", order: 2, session: .object(["name": .string("work"), "directory": .string("/w")]))]),
             .server(EnvironmentServer(isRunning: false, home: "/home/u", hostName: "box")),
         ]
         let line = try ProtocolLine.item(id: 1, EnvironmentItem(changes: changes))

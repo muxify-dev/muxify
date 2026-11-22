@@ -349,7 +349,7 @@ final class HostEnvironmentLink: EnvironmentLink {
         if state.topicContents != topics { events.send(.topics(state.topicContents)) }
         if changes.contains(where: {
             switch $0 {
-            case .topic, .openPlaces, .locks: false
+            case .topic, .openPlaces, .boardSessions: false
             case .session, .server: true
             }
         }) {

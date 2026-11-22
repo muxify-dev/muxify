@@ -89,7 +89,7 @@ extension TopicRecord {
     }
 }
 
-extension SessionLock {
+extension BoardSession {
     /// A new Lock for the live No Topic Session of `window`, at `order`. Its id is the Session's `sessionRecordID`, so
     /// two Make a Guest of one Session make one Lock, and it remembers the Session as `snapshot` shows it.
     public init(session window: TmuxWindow, order: Double, snapshot: TmuxSnapshot) {

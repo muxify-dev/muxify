@@ -2,14 +2,14 @@ import Foundation
 
 public enum TopicGroupID: Hashable, Sendable {
     case topic(String)
-    case locked(String)
+    case session(String)
     case noTopic
 
-    /// The card that a Window's Session is on: its open Topic, else its Lock, else none. `locks` has the Lock id of each
+    /// The card that a Window's Session is on: its open Topic, else its Lock, else none. `boardSessions` has the Lock id of each
     /// live Guest Session, by the Session's tmux id.
-    public init(_ window: TmuxWindow, open: Set<String>, locks: [String: String]) {
+    public init(_ window: TmuxWindow, open: Set<String>, boardSessions: [String: String]) {
         if let id = window.topicID, open.contains(id) { self = .topic(id) }
-        else if let lock = locks[window.sessionID] { self = .locked(lock) }
+        else if let lock = boardSessions[window.sessionID] { self = .session(lock) }
         else { self = .noTopic }
     }
 }
@@ -69,7 +69,7 @@ public enum Location: Hashable, Codable, Sendable {
             var page = values.nestedContainer(keyedBy: ValueKeys.self, forKey: .emptyTopic)
             switch group {
             case .topic(let id): try page.encode(id, forKey: .id)
-            case .locked:
+            case .session:
                 throw EncodingError.invalidValue(group, .init(codingPath: encoder.codingPath,
                                                               debugDescription: "Only the Mac shows a Guest Session's page; no request names it."))
             case .noTopic: try page.encode(true, forKey: .noTopic)

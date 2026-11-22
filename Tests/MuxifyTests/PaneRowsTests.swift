@@ -14,15 +14,15 @@ final class PaneRowsTests: XCTestCase {
                  unread: false)
     }
 
-    private func model(_ windows: [TmuxWindow], panes: [TmuxPane]?, mode: SidebarMode = .topics) -> TopicsModel {
+    private func model(_ windows: [TmuxWindow], panes: [TmuxPane]?, mode: SidebarMode = .topics) -> BoardModel {
         var selection = TopicSelection()
         selection.select(windowID: windows[0].id, activeTopic: .topic("t"))
-        return TopicsModel(records: [TopicRecord(id: "t", title: "T")], windows: windows, config: Config(),
+        return BoardModel(records: [TopicRecord(id: "t", title: "T")], windows: windows, config: Config(),
                            selection: selection, location: selection.windowLocation, mode: mode,
                            agents: Agent.list(panes: panes ?? [], windows: windows, ordered: false), panes: panes)
     }
 
-    private func items(_ children: TopicsModel.SessionChildren?) -> [String] {
+    private func items(_ children: BoardModel.SessionChildren?) -> [String] {
         (children?.items ?? []).map { item in
             switch item {
             case .window(let window): return "window " + window.id
@@ -31,7 +31,7 @@ final class PaneRowsTests: XCTestCase {
         }
     }
 
-    private func liveChildren(_ topics: TopicsModel) -> TopicsModel.SessionChildren? {
+    private func liveChildren(_ topics: BoardModel) -> BoardModel.SessionChildren? {
         guard case .live(let children) = topics.rows.first?.sessions.first?.contents else { return nil }
         return children
     }

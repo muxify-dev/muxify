@@ -352,7 +352,7 @@ extension TopicReopening.Session {
     /// The Session that Reopen or Start Fresh creates for a Dormant Guest Session, which the app shows before the user
     /// chooses: its Lock's name, +2 when a live Session has it, in its folder, with the Windows that `choice` gives. A
     /// Guest Session has no Topic, so it makes no Worktree again.
-    public init(guest lock: SessionLock, windows: [TmuxWindow], choice: TopicReopening.Choice) throws {
+    public init(guest lock: BoardSession, windows: [TmuxWindow], choice: TopicReopening.Choice) throws {
         guard let directory = lock.session["directory"]?.string, !directory.isEmpty else { throw TopicEditFailure.invalidSessionPath }
         try SessionNaming.validate(lock.name)
         let name = SessionNaming.available(lock.name, taken: Set(windows.map(\.sessionName)))
@@ -364,12 +364,12 @@ extension TopicReopening.Session {
 /// What Reopen or Start Fresh creates for a Dormant Guest Session: the Session of `TopicReopening.Session(guest:)`,
 /// pointing at its Lock with `@muxify_session_id`. Reopen of a live Guest Session only shows it. Start Fresh of a live
 /// one fails, as it does for a live Topic.
-struct GuestSessionReopenPlan {
+struct BoardSessionReopenPlan {
     let edit: TopicEdit
 
-    init(lock: SessionLock, records: [TopicRecord], windows: [TmuxWindow], choice: TopicReopening.Choice = .reopen) throws {
+    init(lock: BoardSession, records: [TopicRecord], windows: [TmuxWindow], choice: TopicReopening.Choice = .reopen) throws {
         if let live = lock.windows(in: windows, open: records.openTopicIDs).first {
-            guard choice == .reopen else { throw TopicRequestError.guestSessionLive(lock.id) }
+            guard choice == .reopen else { throw TopicRequestError.boardSessionLive(lock.id) }
             edit = TopicEdit(record: nil, commands: [], selection: .sessionID(live.sessionID))
             return
         }

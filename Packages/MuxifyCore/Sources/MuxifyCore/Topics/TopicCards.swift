@@ -14,7 +14,7 @@ public enum TopicCards {
         /// Up from the top Guest: the card fills the lowest Open Place.
         case fill(openPlace: String)
         /// Up from the top Guest, with every place full: the card trades with the card in the last place.
-        case trade(TopicListID)
+        case trade(BoardCardID)
         /// Up from the top Guest, with room in the places and no Open Place: the card takes the next place.
         case takePlace
         /// Down from the last Guest: a Topic goes to the top of the Bench, and a Guest Session is Unlocked.
@@ -31,14 +31,14 @@ public enum TopicCards {
     }
 
     /// The open Topics, the Locks, live or Dormant, and the Open Places, in list order: Pinned first.
-    public static func order(records: [TopicRecord], locks: [SessionLock] = [], openPlaces: [OpenPlace] = []) -> [TopicListEntry] {
-        TopicOrder.sorted(TopicListEntry.all(records: records, locks: locks, openPlaces: openPlaces))
+    public static func order(records: [TopicRecord], boardSessions: [BoardSession] = [], openPlaces: [OpenPlace] = []) -> [BoardCard] {
+        TopicOrder.sorted(BoardCard.all(records: records, boardSessions: boardSessions, openPlaces: openPlaces))
     }
 
     /// What one step does to the card. A card that is not Pinned moves inside its section of the cut
     /// (`InPlayCut`), and a step past the end of a section goes into the next one. A hidden Bench has no card to reorder
     /// with below its top, so Up from any Benched card makes a Guest.
-    public static func step(_ id: TopicListID, _ step: Step, in cards: [TopicListEntry], inPlay: Int,
+    public static func step(_ id: BoardCardID, _ step: Step, in cards: [BoardCard], inPlay: Int,
                             benchShown: Bool = true) -> Outcome {
         guard let card = cards.first(where: { $0.id == id }) else { return .hidden }
         guard !card.isPinned else { return neighbor(of: id, step, in: cards.filter { $0.isPinned == card.isPinned }) }
@@ -62,18 +62,18 @@ public enum TopicCards {
 
     /// What one step does to the No Topic Session that is not Locked. It has no card, so only Up does anything: Make a
     /// Guest, which is a Lock.
-    public static func stepUnlockedSession(_ step: Step) -> Outcome {
+    public static func stepSessionWithoutCard(_ step: Step) -> Outcome {
         step == .up ? .makeGuest : .hidden
     }
 
-    private static func upFromTopGuest(_ guest: TopicListEntry, cut: InPlayCut<TopicListEntry>, inPlay: Int) -> Outcome {
-        if case .lock = guest { return .refused(.guestSession) }
+    private static func upFromTopGuest(_ guest: BoardCard, cut: InPlayCut<BoardCard>, inPlay: Int) -> Outcome {
+        if case .session = guest { return .refused(.boardSession) }
         if let open = cut.places.last(where: { $0.slot == .openPlace }), case .openPlace(let place) = open { return .fill(openPlace: place.id) }
         if cut.places.count >= inPlay, let last = cut.places.last { return .trade(last.id) }
         return .takePlace
     }
 
-    private static func neighbor(of id: TopicListID, _ step: Step, in zone: [TopicListEntry]) -> Outcome {
+    private static func neighbor(of id: BoardCardID, _ step: Step, in zone: [BoardCard]) -> Outcome {
         guard let index = zone.firstIndex(where: { $0.id == id }) else { return .hidden }
         switch step {
         case .up: return index > 0 ? .reorder(.before(zone[index - 1].id)) : .atEnd

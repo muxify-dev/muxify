@@ -1,10 +1,10 @@
 import Foundation
 
 /// One card of the Topics list: an open Topic, a Lock or an Open Place.
-public enum TopicListID: Hashable, Sendable {
+public enum BoardCardID: Hashable, Sendable {
     case topic(String)
     /// A Lock, by its id: the row id of the `guest_sessions` table.
-    case lock(String)
+    case session(String)
     case openPlace(String)
 }
 
@@ -12,7 +12,7 @@ public enum TopicListID: Hashable, Sendable {
 /// order, in the same scale as the Topic records, and the Session's Remembered Session, in the shape of one entry of a
 /// Topic record's `sessions`. The live Session points at it with `@muxify_session_id`, so a tmux restart does not end
 /// it: with no such Session, the Guest Session is Dormant, and Reopen creates its Session again.
-public struct SessionLock: Codable, Equatable, Sendable {
+public struct BoardSession: Codable, Equatable, Sendable {
     /// The tmux option where an older Muxify kept a Lock's order. Muxify reads it once, to import that Lock.
     public static let legacyOption = "@muxify_lock"
 
@@ -60,20 +60,20 @@ public struct OpenPlace: Codable, Hashable, Sendable {
     }
 }
 
-public enum TopicListEntry: Equatable, Sendable {
+public enum BoardCard: Equatable, Sendable {
     case topic(TopicRecord)
-    case lock(SessionLock)
+    case session(BoardSession)
     case openPlace(OpenPlace)
 
     /// The open and Settled Topics of `records`, the Locks, live or Dormant, and the Open Places.
-    public static func all(records: [TopicRecord], locks: [SessionLock] = [], openPlaces: [OpenPlace] = []) -> [TopicListEntry] {
-        records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) + openPlaces.map(TopicListEntry.openPlace)
+    public static func all(records: [TopicRecord], boardSessions: [BoardSession] = [], openPlaces: [OpenPlace] = []) -> [BoardCard] {
+        records.map(BoardCard.topic) + boardSessions.map(BoardCard.session) + openPlaces.map(BoardCard.openPlace)
     }
 
-    public var id: TopicListID {
+    public var id: BoardCardID {
         switch self {
         case .topic(let record): return .topic(record.id)
-        case .lock(let lock): return .lock(lock.id)
+        case .session(let lock): return .session(lock.id)
         case .openPlace(let place): return .openPlace(place.id)
         }
     }
@@ -81,7 +81,7 @@ public enum TopicListEntry: Equatable, Sendable {
     public var order: Double? {
         switch self {
         case .topic(let record): return record.order
-        case .lock(let lock): return lock.order
+        case .session(let lock): return lock.order
         case .openPlace(let place): return place.order
         }
     }
@@ -96,7 +96,7 @@ public enum TopicListEntry: Equatable, Sendable {
     public var isGuest: Bool {
         switch self {
         case .topic(let record): return record.isGuest && !record.isPinned
-        case .lock: return true
+        case .session: return true
         case .openPlace: return false
         }
     }
@@ -120,19 +120,19 @@ public enum TopicListEntry: Equatable, Sendable {
     fileprivate var tieBreak: String {
         switch self {
         case .topic(let record): return record.id
-        case .lock(let lock): return lock.id
+        case .session(let lock): return lock.id
         case .openPlace(let place): return place.id
         }
     }
 
-    fileprivate func with(order: Double) -> TopicListEntry {
+    fileprivate func with(order: Double) -> BoardCard {
         switch self {
         case .topic(var record):
             record.order = order
             return .topic(record)
-        case .lock(var lock):
+        case .session(var lock):
             lock.order = order
-            return .lock(lock)
+            return .session(lock)
         case .openPlace(var place):
             place.order = order
             return .openPlace(place)
@@ -140,14 +140,14 @@ public enum TopicListEntry: Equatable, Sendable {
     }
 
     /// A Pinned Topic is not In Play, so Pin also ends its Guest mark.
-    fileprivate func pinned(_ pinned: Bool) -> TopicListEntry {
+    fileprivate func pinned(_ pinned: Bool) -> BoardCard {
         guard case .topic(var record) = self else { return self }
         record.isPinned = pinned
         if pinned { record.isGuest = false }
         return .topic(record)
     }
 
-    fileprivate func guest(_ guest: Bool) -> TopicListEntry {
+    fileprivate func guest(_ guest: Bool) -> BoardCard {
         guard case .topic(var record) = self else { return self }
         record.isGuest = guest
         return .topic(record)
@@ -200,13 +200,13 @@ public struct InPlayCut<Card> {
     }
 }
 
-extension Array where Element == TopicListEntry {
+extension Array where Element == BoardCard {
     public var records: [TopicRecord] {
         compactMap { if case .topic(let record) = $0 { return record }; return nil }
     }
 
-    public var locks: [SessionLock] {
-        compactMap { if case .lock(let lock) = $0 { return lock }; return nil }
+    public var boardSessions: [BoardSession] {
+        compactMap { if case .session(let lock) = $0 { return lock }; return nil }
     }
 
     public var openPlaces: [OpenPlace] {
@@ -219,23 +219,23 @@ extension Array where Element == TopicRecord {
     var openTopicIDs: Set<String> { Set(filter { $0.settledAt == nil }.map(\.id)) }
 }
 
-extension Array where Element == SessionLock {
+extension Array where Element == BoardSession {
     /// The Lock of each live Guest Session, by the Session's tmux id. `open` are the open Topics. A Session points at
     /// one Lock id, so no two Locks share a Session.
-    func bySession(in windows: [TmuxWindow], open: Set<String>) -> [String: SessionLock] {
-        var locks: [String: SessionLock] = [:]
+    func bySession(in windows: [TmuxWindow], open: Set<String>) -> [String: BoardSession] {
+        var boardSessions: [String: BoardSession] = [:]
         for lock in self {
-            if let session = lock.windows(in: windows, open: open).first?.sessionID { locks[session] = lock }
+            if let session = lock.windows(in: windows, open: open).first?.sessionID { boardSessions[session] = lock }
         }
-        return locks
+        return boardSessions
     }
 }
 
 public enum TopicPlacement: Equatable, Sendable {
-    case before(TopicListID)
-    case after(TopicListID)
+    case before(BoardCardID)
+    case after(BoardCardID)
 
-    public var anchorID: TopicListID {
+    public var anchorID: BoardCardID {
         switch self {
         case .before(let id), .after(let id): return id
         }
@@ -244,14 +244,14 @@ public enum TopicPlacement: Equatable, Sendable {
 
 /// What a change of the Topics list writes: the entries with a new order or a new mark, the ids of the Locks that end,
 /// and the Open Places that close.
-public struct TopicListChange: Equatable, Sendable {
-    public var entries: [TopicListEntry]
-    public var endedLocks: [String]
+public struct BoardChange: Equatable, Sendable {
+    public var entries: [BoardCard]
+    public var endedSessions: [String]
     public var closedPlaces: [String]
 
-    public init(_ entries: [TopicListEntry], endedLocks: [String] = [], closedPlaces: [String] = []) {
+    public init(_ entries: [BoardCard], endedSessions: [String] = [], closedPlaces: [String] = []) {
         self.entries = entries
-        self.endedLocks = endedLocks
+        self.endedSessions = endedSessions
         self.closedPlaces = closedPlaces
     }
 }
@@ -270,7 +270,7 @@ public enum TopicOrder {
         /// Choose In Play: a Pinned Topic is neither In Play nor Benched, and each place takes one card.
         case pinned, chosenTwice
         /// A Guest Session cannot take an In Play place, and an In Play card cannot take the position of one.
-        case guestSession
+        case boardSession
         /// Fill an Open Place: the place is not an Open Place, or the card is not a Guest Topic or a Benched Topic.
         case notOpenPlace, cannotFill
         /// Bench of a Topic: the Topic is not In Play.
@@ -284,7 +284,7 @@ public enum TopicOrder {
             case .notBenched: return "The card to put In Play is not on the Bench."
             case .pinned: return "A Pinned Topic is neither In Play nor on the Bench."
             case .chosenTwice: return "A card is chosen twice."
-            case .guestSession: return "A Guest Session cannot take an In Play place. Make it a Topic first."
+            case .boardSession: return "A Guest Session cannot take an In Play place. Make it a Topic first."
             case .notOpenPlace: return "The In Play place is not an Open Place."
             case .cannotFill: return "Only a Guest Topic or a Benched Topic can fill an Open Place."
             case .notInPlayTopic: return "The Topic is not In Play: it is on the Bench, or Pinned."
@@ -293,7 +293,7 @@ public enum TopicOrder {
     }
 
     /// The Pinned Topics first, then the others; each part in its own hand-set order.
-    public static func sorted(_ entries: [TopicListEntry]) -> [TopicListEntry] {
+    public static func sorted(_ entries: [BoardCard]) -> [BoardCard] {
         entries.filter(\.isOpen).sorted {
             if $0.isPinned != $1.isPinned { return $0.isPinned }
             if rank($0) != rank($1) { return rank($0) < rank($1) }
@@ -303,12 +303,12 @@ public enum TopicOrder {
     }
 
     /// The open cards that are not Pinned, cut into the In Play places, the Guests and the Bench.
-    public static func cut(_ entries: [TopicListEntry], inPlay: Int) -> InPlayCut<TopicListEntry> {
+    public static func cut(_ entries: [BoardCard], inPlay: Int) -> InPlayCut<BoardCard> {
         InPlayCut(sorted(entries).filter { !$0.isPinned }, limit: inPlay, slot: \.slot)
     }
 
     /// A move stays among the entries with the same pin: an anchor in the other part puts the entry at the edge of its own.
-    public static func moving(_ id: TopicListID, to placement: TopicPlacement, in entries: [TopicListEntry]) throws -> [TopicListEntry] {
+    public static func moving(_ id: BoardCardID, to placement: TopicPlacement, in entries: [BoardCard]) throws -> [BoardCard] {
         let original = sorted(entries)
         guard let source = original.first(where: { $0.id == id }) else { throw Failure.sourceUnavailable }
         guard let anchor = original.first(where: { $0.id == placement.anchorID }) else { throw Failure.anchorUnavailable }
@@ -331,7 +331,7 @@ public enum TopicOrder {
 
     /// Pin puts the Topic last among the Pinned Topics and ends its Guest mark. Unpin puts it at the top of the Bench,
     /// where a returning Topic goes.
-    public static func pinning(_ id: String, _ pinned: Bool, inPlay: Int, in entries: [TopicListEntry]) throws -> [TopicListEntry] {
+    public static func pinning(_ id: String, _ pinned: Bool, inPlay: Int, in entries: [BoardCard]) throws -> [BoardCard] {
         guard let found = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
         guard found.isPinned != pinned, case .topic(let record) = found.pinned(pinned) else { return [] }
         return inserting(record, inPlay: inPlay, in: entries)
@@ -339,9 +339,9 @@ public enum TopicOrder {
 
     /// Places a Topic that Reopen, Start Fresh or Unpin brings back at the top of the Bench. A Pinned
     /// Topic has no Bench, so it goes last among the Pinned Topics.
-    public static func inserting(_ record: TopicRecord, inPlay: Int, in entries: [TopicListEntry]) -> [TopicListEntry] {
+    public static func inserting(_ record: TopicRecord, inPlay: Int, in entries: [BoardCard]) -> [BoardCard] {
         let original = sorted(entries).filter { $0.id != .topic(record.id) }
-        let source = TopicListEntry.topic(record)
+        let source = BoardCard.topic(record)
         var zone = original.filter { $0.isPinned == record.isPinned }
         let index = record.isPinned ? zone.count : topOfBench(in: zone, inPlay: inPlay)
         zone.insert(source, at: index)
@@ -351,7 +351,7 @@ public enum TopicOrder {
     /// The index in `zone`, the cards that are not Pinned, where a returning Topic goes: right after the last
     /// In Play place while there are fewer places than `inPlay`, else right before the first Benched card, or last when
     /// there is none. A Guest does not count toward `inPlay`.
-    static func topOfBench(in zone: [TopicListEntry], inPlay: Int) -> Int {
+    static func topOfBench(in zone: [BoardCard], inPlay: Int) -> Int {
         let regulars = zone.indices.filter { zone[$0].slot != .guest }
         if regulars.count > inPlay { return regulars[inPlay] }
         return regulars.count < inPlay ? regulars.last.map { $0 + 1 } ?? 0 : zone.count
@@ -360,7 +360,7 @@ public enum TopicOrder {
     /// Choose In Play: the first `inPlay` of `chosen` fill the In Play places in this order, and the places after the
     /// last of them are Open Places. A Guest Topic that fills a place loses its Guest mark. Of the other chosen cards,
     /// the regular ones lead the Bench, and a Guest stays a Guest. The other cards keep their order in their sections.
-    public static func choosingInPlay(_ chosen: [TopicListID], inPlay: Int, in entries: [TopicListEntry]) throws -> TopicListChange {
+    public static func choosingInPlay(_ chosen: [BoardCardID], inPlay: Int, in entries: [BoardCard]) throws -> BoardChange {
         let original = layout(entries, inPlay: inPlay)
         guard Set(chosen).count == chosen.count else { throw Failure.chosenTwice }
         let cards = try chosen.map { id in
@@ -369,10 +369,10 @@ public enum TopicOrder {
             return entry
         }
         let placed = Array(cards.prefix(inPlay))
-        guard !placed.contains(where: { if case .lock = $0 { return true } else { return false } }) else { throw Failure.guestSession }
+        guard !placed.contains(where: { if case .session = $0 { return true } else { return false } }) else { throw Failure.boardSession }
         let leading = cards.dropFirst(inPlay).filter { $0.slot == .regular }
         let taken = Set((placed + leading).map(\.id))
-        let open = (placed.count..<inPlay).map { _ in TopicListEntry.openPlace(OpenPlace(order: .nan)) }
+        let open = (placed.count..<inPlay).map { _ in BoardCard.openPlace(OpenPlace(order: .nan)) }
         let guests = original.filter { $0.isGuest && !taken.contains($0.id) }
         let bench = original.filter { $0.slot == .regular && !taken.contains($0.id) }
         return rewriting(placed.map { $0.guest(false) } + open + guests + leading + bench, from: original)
@@ -381,65 +381,65 @@ public enum TopicOrder {
     /// Replace from Bench: `benched` takes the position of `card`, and `card` goes to the end of the Bench. Each card
     /// takes the mark of its new section: a Benched card that takes a Guest's position becomes a Guest, a Guest Topic goes
     /// to the Bench without its mark, and the Lock of a Guest Session ends. On an Open Place, `benched` fills it.
-    public static func replacingFromBench(_ card: TopicListID, with benched: TopicListID, inPlay: Int,
-                                          in entries: [TopicListEntry]) throws -> TopicListChange {
+    public static func replacingFromBench(_ card: BoardCardID, with benched: BoardCardID, inPlay: Int,
+                                          in entries: [BoardCard]) throws -> BoardChange {
         let original = layout(entries, inPlay: inPlay)
         let cut = cut(entries, inPlay: inPlay)
         guard let position = cut.inPlay.firstIndex(where: { $0.id == card }) else { throw Failure.notInPlay }
         guard let incoming = cut.bench.first(where: { $0.id == benched }) else { throw Failure.notBenched }
-        if case .lock = incoming, position < cut.places.count { throw Failure.guestSession }
+        if case .session = incoming, position < cut.places.count { throw Failure.boardSession }
         let replaced = cut.inPlay[position]
         var inPlay = cut.inPlay
         inPlay[position] = incoming.guest(position >= cut.places.count)
         var zone = inPlay + cut.bench.filter { $0.id != benched }
         var ended: [String] = []
         switch replaced {
-        case .lock(let lock): ended.append(lock.id)
+        case .session(let lock): ended.append(lock.id)
         case .openPlace: break
         case .topic: zone.append(replaced.guest(false))
         }
-        return rewriting(zone, from: original, endedLocks: ended)
+        return rewriting(zone, from: original, endedSessions: ended)
     }
 
     /// A trade: two cards that are not Pinned exchange their positions, and no other card moves. Each
     /// card takes the mark of the section it lands in: a Guest that comes into a place loses its Guest mark, and a card
     /// that comes into the Guests section gets it. A Guest Session cannot take a place, and its Lock ends when it goes
     /// to the Bench. An Open Place that leaves the places closes, so a trade with one fills it.
-    public static func trading(_ card: TopicListID, with other: TopicListID, inPlay: Int,
-                               in entries: [TopicListEntry]) throws -> TopicListChange {
+    public static func trading(_ card: BoardCardID, with other: BoardCardID, inPlay: Int,
+                               in entries: [BoardCard]) throws -> BoardChange {
         let all = sorted(entries)
         guard let source = all.first(where: { $0.id == card }) else { throw Failure.sourceUnavailable }
         guard let anchor = all.first(where: { $0.id == other }) else { throw Failure.anchorUnavailable }
         guard !source.isPinned, !anchor.isPinned else { throw Failure.pinned }
         let cut = cut(entries, inPlay: inPlay)
         enum Section { case places, guests, bench }
-        func section(_ id: TopicListID) -> Section {
+        func section(_ id: BoardCardID) -> Section {
             if cut.places.contains(where: { $0.id == id }) { return .places }
             return cut.guests.contains(where: { $0.id == id }) ? .guests : .bench
         }
         var ended: [String] = []
-        func landing(_ entry: TopicListEntry, in section: Section) throws -> TopicListEntry? {
+        func landing(_ entry: BoardCard, in section: Section) throws -> BoardCard? {
             switch (entry, section) {
-            case (.lock, .places): throw Failure.guestSession
-            case (.lock(let lock), .bench): ended.append(lock.id); return nil
+            case (.session, .places): throw Failure.boardSession
+            case (.session(let lock), .bench): ended.append(lock.id); return nil
             case (.openPlace, .guests), (.openPlace, .bench): return nil
             default: return entry.guest(section == .guests)
             }
         }
         let sourceLanded = try landing(source, in: section(other)), anchorLanded = try landing(anchor, in: section(card))
         let original = cut.places + cut.guests + cut.bench
-        let zone = original.compactMap { entry -> TopicListEntry? in
+        let zone = original.compactMap { entry -> BoardCard? in
             switch entry.id {
             case card: return anchorLanded
             case other: return sourceLanded
             default: return entry
             }
         }
-        return rewriting(zone, from: original, endedLocks: ended)
+        return rewriting(zone, from: original, endedSessions: ended)
     }
 
     /// Make a Guest: the Benched Topic goes to the end of the Guests with the Guest mark, and no other card moves.
-    public static func makingGuest(_ id: String, inPlay: Int, in entries: [TopicListEntry]) throws -> TopicListChange {
+    public static func makingGuest(_ id: String, inPlay: Int, in entries: [BoardCard]) throws -> BoardChange {
         guard let entry = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
         guard !entry.isPinned else { throw Failure.pinned }
         let cut = cut(entries, inPlay: inPlay)
@@ -449,11 +449,11 @@ public enum TopicOrder {
 
     /// A new Topic: it goes to the end of the Guests with the Guest mark, as Make a Guest puts a Benched Topic there.
     /// It takes no place, also when one is free, so no other card moves.
-    static func insertingGuest(_ record: TopicRecord, inPlay: Int, in entries: [TopicListEntry]) -> TopicListChange {
+    static func insertingGuest(_ record: TopicRecord, inPlay: Int, in entries: [BoardCard]) -> BoardChange {
         appendingGuest(.topic(record), inPlay: inPlay, in: entries)
     }
 
-    private static func appendingGuest(_ entry: TopicListEntry, inPlay: Int, in entries: [TopicListEntry]) -> TopicListChange {
+    private static func appendingGuest(_ entry: BoardCard, inPlay: Int, in entries: [BoardCard]) -> BoardChange {
         let cut = cut(entries, inPlay: inPlay)
         return rewriting(cut.places + cut.guests + [entry.guest(true)] + cut.bench.filter { $0.id != entry.id },
                          from: layout(entries, inPlay: inPlay))
@@ -461,7 +461,7 @@ public enum TopicOrder {
 
     /// Bench of a Topic: the In Play Topic goes to the top of the Bench without a Guest mark. A Topic in a place leaves an
     /// Open Place there; a Guest Topic leaves none, so the Guests section gets shorter.
-    public static func benching(_ id: String, inPlay: Int, in entries: [TopicListEntry]) throws -> TopicListChange {
+    public static func benching(_ id: String, inPlay: Int, in entries: [BoardCard]) throws -> BoardChange {
         guard let entry = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
         let cut = cut(entries, inPlay: inPlay)
         let places = cut.places.map { $0.id == entry.id ? .openPlace(OpenPlace(order: .nan)) : $0 }
@@ -471,7 +471,7 @@ public enum TopicOrder {
     }
 
     /// Move Down from the last place: the Topic becomes the top Guest, and an Open Place stays at its place.
-    public static func sendingToGuests(_ id: String, inPlay: Int, in entries: [TopicListEntry]) throws -> TopicListChange {
+    public static func sendingToGuests(_ id: String, inPlay: Int, in entries: [BoardCard]) throws -> BoardChange {
         guard let entry = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
         let cut = cut(entries, inPlay: inPlay)
         guard cut.places.contains(where: { $0.id == entry.id }) else { throw Failure.notInPlayTopic }
@@ -481,7 +481,7 @@ public enum TopicOrder {
 
     /// Move Up from the top Guest, with room in the places and no Open Place: the Guest Topic takes the next place,
     /// without its Guest mark.
-    public static func takingNextPlace(_ id: String, inPlay: Int, in entries: [TopicListEntry]) throws -> TopicListChange {
+    public static func takingNextPlace(_ id: String, inPlay: Int, in entries: [BoardCard]) throws -> BoardChange {
         guard let entry = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
         let cut = cut(entries, inPlay: inPlay)
         guard cut.guests.contains(where: { $0.id == entry.id }), cut.places.count < inPlay else { throw Failure.cannotFill }
@@ -491,7 +491,7 @@ public enum TopicOrder {
 
     /// Fill an Open Place: a Guest Topic or a Benched Topic takes the place, without a Guest mark. It is a trade with
     /// the Open Place, so no other card moves.
-    public static func fillingOpenPlace(_ place: String, with id: String, inPlay: Int, in entries: [TopicListEntry]) throws -> TopicListChange {
+    public static func fillingOpenPlace(_ place: String, with id: String, inPlay: Int, in entries: [BoardCard]) throws -> BoardChange {
         let cut = cut(entries, inPlay: inPlay)
         guard cut.places.contains(where: { $0.id == .openPlace(place) }) else { throw Failure.notOpenPlace }
         guard (cut.guests + cut.bench).contains(where: { $0.id == .topic(id) }) else { throw Failure.cannotFill }
@@ -501,7 +501,7 @@ public enum TopicOrder {
     /// The order after a change that took cards out of the list, such as Settle, Forget, Pin or the end of a Lock: each
     /// regular card that left an In Play place `before` leaves an Open Place there, so no other card moves. A Guest that
     /// leaves leaves no Open Place. Each Open Place past the last place closes.
-    public static func keepingPlaces(from before: [TopicListEntry], in after: [TopicListEntry], inPlay: Int) -> TopicListChange {
+    public static func keepingPlaces(from before: [BoardCard], in after: [BoardCard], inPlay: Int) -> BoardChange {
         let zone = sorted(after).filter { !$0.isPinned }
         let ids = Set(zone.map(\.id))
         let left = cut(before, inPlay: inPlay).places.enumerated().filter { _, entry in
@@ -510,7 +510,7 @@ public enum TopicOrder {
         }.map(\.offset)
         guard !left.isEmpty else {
             let held = Set(InPlayCut(zone, limit: inPlay, slot: \.slot).places.map(\.id))
-            return TopicListChange([], closedPlaces: zone.openPlaces.map(\.id).filter { !held.contains(.openPlace($0)) })
+            return BoardChange([], closedPlaces: zone.openPlaces.map(\.id).filter { !held.contains(.openPlace($0)) })
         }
         var regulars = zone.filter { $0.slot != .guest }
         for index in left { regulars.insert(.openPlace(OpenPlace(order: .nan)), at: min(index, regulars.count)) }
@@ -520,29 +520,29 @@ public enum TopicOrder {
 
     /// The order in the three sections, as the Sidebar shows it: each Locked Session that an older Muxify kept among
     /// the Topics goes to the Guests. A list in that order does not change.
-    public static func gatheringGuests(inPlay: Int, in entries: [TopicListEntry]) -> TopicListChange {
-        guard !isInSections(entries, inPlay: inPlay) else { return TopicListChange([]) }
+    public static func gatheringGuests(inPlay: Int, in entries: [BoardCard]) -> BoardChange {
+        guard !isInSections(entries, inPlay: inPlay) else { return BoardChange([]) }
         let zone = sorted(entries).filter { !$0.isPinned }
         return rewriting(layout(entries, inPlay: inPlay), from: zone)
     }
 
     /// Whether the cards that are not Pinned are in the order of the three sections, as the Sidebar shows them.
-    public static func isInSections(_ entries: [TopicListEntry], inPlay: Int) -> Bool {
+    public static func isInSections(_ entries: [BoardCard], inPlay: Int) -> Bool {
         sorted(entries).filter { !$0.isPinned }.map(\.id) == layout(entries, inPlay: inPlay).map(\.id)
     }
 
     /// Puts a new Lock at the end of the Guests.
-    static func appendingLock(_ lock: SessionLock, inPlay: Int, in entries: [TopicListEntry]) -> [TopicListEntry] {
+    static func appendingBoardSession(_ lock: BoardSession, inPlay: Int, in entries: [BoardCard]) -> [BoardCard] {
         var lock = lock
         // NaN is never an index, so a renumber gives the new Lock its order too.
         lock.order = .nan
-        let source = TopicListEntry.lock(lock)
+        let source = BoardCard.session(lock)
         let cut = cut(entries, inPlay: inPlay)
         return normalized(cut.places + cut.guests + [source] + cut.bench, from: layout(entries, inPlay: inPlay))
     }
 
     /// The open cards that are not Pinned, in the three sections, with each Open Place past the last place.
-    private static func layout(_ entries: [TopicListEntry], inPlay: Int) -> [TopicListEntry] {
+    private static func layout(_ entries: [BoardCard], inPlay: Int) -> [BoardCard] {
         let zone = sorted(entries).filter { !$0.isPinned }
         let cut = InPlayCut(zone, limit: inPlay, slot: \.slot)
         let shown = Set((cut.places + cut.guests + cut.bench).map(\.id))
@@ -551,15 +551,15 @@ public enum TopicOrder {
 
     /// `zone` numbered 0, 1, 2…: the entries that changed from `original`, and each Open Place of `original` that
     /// `zone` does not hold any more.
-    private static func rewriting(_ zone: [TopicListEntry], from original: [TopicListEntry], endedLocks: [String] = []) -> TopicListChange {
+    private static func rewriting(_ zone: [BoardCard], from original: [BoardCard], endedSessions: [String] = []) -> BoardChange {
         let kept = Set(zone.map(\.id))
-        return TopicListChange(normalized(zone, from: original), endedLocks: endedLocks,
+        return BoardChange(normalized(zone, from: original), endedSessions: endedSessions,
                                closedPlaces: original.openPlaces.map(\.id).filter { !kept.contains(.openPlace($0)) })
     }
 
     /// Gives `source`, at `index` in `zone`, an order between its neighbors there, or renumbers every open entry
     /// when no order fits between them.
-    private static func placing(_ source: TopicListEntry, at index: Int, in zone: [TopicListEntry], others: [TopicListEntry]) -> [TopicListEntry] {
+    private static func placing(_ source: BoardCard, at index: Int, in zone: [BoardCard], others: [BoardCard]) -> [BoardCard] {
         if let value = rank(between: index > 0 ? rank(zone[index - 1]) : nil,
                             and: index + 1 < zone.count ? rank(zone[index + 1]) : nil) {
             return [source.with(order: value)]
@@ -568,7 +568,7 @@ public enum TopicOrder {
         return renumbered.contains { $0.id == source.id } ? renumbered : renumbered + [source]
     }
 
-    private static func rank(_ entry: TopicListEntry) -> Double {
+    private static func rank(_ entry: BoardCard) -> Double {
         guard let order = entry.order, order.isFinite else { return 0 }
         return order
     }
@@ -591,7 +591,7 @@ public enum TopicOrder {
 
     /// Numbers `entries` 0, 1, 2… and returns those that differ from their entry in `original`: a new order, a new
     /// mark, or an entry that `original` does not have.
-    private static func normalized(_ entries: [TopicListEntry], from original: [TopicListEntry]? = nil) -> [TopicListEntry] {
+    private static func normalized(_ entries: [BoardCard], from original: [BoardCard]? = nil) -> [BoardCard] {
         let original = original ?? entries
         return entries.enumerated().compactMap { index, entry in
             let placed = entry.with(order: Double(index))

@@ -7,12 +7,12 @@ public struct TopicContents: Equatable, Sendable {
     /// The Open Places of the Topics list.
     public var openPlaces: [OpenPlace] = []
     /// The Locks, live or Dormant, in id order.
-    public var locks: [SessionLock] = []
+    public var boardSessions: [BoardSession] = []
 
-    public init(records: [TopicRecord], openPlaces: [OpenPlace] = [], locks: [SessionLock] = []) {
+    public init(records: [TopicRecord], openPlaces: [OpenPlace] = [], boardSessions: [BoardSession] = []) {
         self.records = records
         self.openPlaces = openPlaces
-        self.locks = locks
+        self.boardSessions = boardSessions
     }
 }
 
@@ -72,11 +72,11 @@ public struct TopicStore: Sendable {
             try connection.transaction {
                 let start = try TopicTable.contents(connection)
                 var transaction = TopicTransaction(records: start.records, inPlay: inPlay)
-                transaction.locks = start.locks
+                transaction.boardSessions = start.boardSessions
                 transaction.openPlaces = start.openPlaces
                 let result = try body(&transaction)
                 try TopicTable.save(from: start, to: TopicContents(records: transaction.records, openPlaces: transaction.openPlaces,
-                                                                   locks: transaction.locks), connection)
+                                                                   boardSessions: transaction.boardSessions), connection)
                 if let request { try RequestTable.start(request, now: Date(), connection) }
                 return result
             }
@@ -94,7 +94,7 @@ public struct TopicStore: Sendable {
 public struct TopicTransaction {
     public private(set) var records: [TopicRecord]
     /// The Locks, live or Dormant, which share the records' order.
-    public internal(set) var locks: [SessionLock] = []
+    public internal(set) var boardSessions: [BoardSession] = []
     /// The Open Places, which share the records' order.
     public internal(set) var openPlaces: [OpenPlace] = []
     /// The Config's `topics.in_play`: a regular card that leaves an In Play place leaves an Open Place.
@@ -115,22 +115,22 @@ public struct TopicTransaction {
         }
     }
 
-    public var entries: [TopicListEntry] {
-        records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) + openPlaces.map(TopicListEntry.openPlace)
+    public var entries: [BoardCard] {
+        records.map(BoardCard.topic) + boardSessions.map(BoardCard.session) + openPlaces.map(BoardCard.openPlace)
     }
 
-    /// Adds a new Topic as a Guest: at the end of the Guests, or in the place of the Lock `replacedLock`, which then
+    /// Adds a new Topic as a Guest: at the end of the Guests, or in the place of the Lock `replacedSession`, which then
     /// ends. A Pinned record goes last among the Pinned Topics. An id that a record has is taken.
-    public mutating func create(_ record: TopicRecord, replacingLock replacedLock: String? = nil) throws {
+    public mutating func create(_ record: TopicRecord, replacingSession replacedSession: String? = nil) throws {
         try TopicStore.check(record)
         guard !records.contains(where: { $0.id == record.id }) else {
             throw CocoaError(.fileWriteFileExists)
         }
-        if let lock = locks.first(where: { $0.id == replacedLock }) {
+        if let lock = boardSessions.first(where: { $0.id == replacedSession }) {
             var placed = record
             placed.order = lock.order
             placed.isGuest = true
-            return put(TopicListChange([.topic(placed)], endedLocks: [lock.id]))
+            return put(BoardChange([.topic(placed)], endedSessions: [lock.id]))
         }
         if record.isPinned { return put(TopicOrder.inserting(record, inPlay: inPlay, in: entries)) }
         put(TopicOrder.insertingGuest(record, inPlay: inPlay, in: entries))
@@ -157,13 +157,13 @@ public struct TopicTransaction {
     /// `after` when it differs from `before`, else the value in the database. A Tag that another writer set while
     /// the plan ran stays. When two writers change one column, the last write wins for that column. A Topic that is
     /// not in the database is created only when the plan read no previous record, as `create` does, in the place of
-    /// the Lock `endedLock`. When the record is there, that Lock just ends: its Session went into the Topic.
-    public mutating func apply(_ change: TopicRecordChange, endingLock endedLock: String? = nil) throws {
+    /// the Lock `endedSession`. When the record is there, that Lock just ends: its Session went into the Topic.
+    public mutating func apply(_ change: TopicRecordChange, endingSession endedSession: String? = nil) throws {
         guard let current = records.first(where: { $0.id == change.after.id }) else {
             guard change.before == nil else { throw Failure.topicUnavailable(change.after.id) }
-            return try create(change.after, replacingLock: endedLock)
+            return try create(change.after, replacingSession: endedSession)
         }
-        if let endedLock { unlock(endedLock) }
+        if let endedSession { takeOffBoard(endedSession) }
         let before = TopicTable.values(of: change.before ?? TopicRecord(id: current.id))
         let after = TopicTable.values(of: change.after)
         var merged = TopicTable.values(of: current)
@@ -199,23 +199,23 @@ public struct TopicTransaction {
         let before = entries
         let forgotten = Set(ids)
         records.removeAll { forgotten.contains($0.id) }
-        put(TopicListChange([]), from: before)
+        put(BoardChange([]), from: before)
     }
 
-    public mutating func move(_ id: TopicListID, to placement: TopicPlacement) throws {
+    public mutating func move(_ id: BoardCardID, to placement: TopicPlacement) throws {
         put(try TopicOrder.moving(id, to: placement, in: entries))
     }
 
-    public mutating func trade(_ id: TopicListID, with other: TopicListID) throws {
+    public mutating func trade(_ id: BoardCardID, with other: BoardCardID) throws {
         put(try TopicOrder.trading(id, with: other, inPlay: inPlay, in: entries))
     }
 
     /// Writes what one step of a card does (`TopicCards.step`), with the operation that each effect already has.
     /// `atEnd` and `hidden` change nothing, and `refused` throws its failure. Make a Guest of a Lock changes nothing:
     /// the Session is a Guest already, and a new Lock comes through `lock`.
-    public mutating func apply(_ outcome: TopicCards.Outcome, to id: TopicListID) throws {
+    public mutating func apply(_ outcome: TopicCards.Outcome, to id: BoardCardID) throws {
         func topicID() throws -> String {
-            guard case .topic(let topic) = id else { throw TopicOrder.Failure.guestSession }
+            guard case .topic(let topic) = id else { throw TopicOrder.Failure.boardSession }
             return topic
         }
         switch outcome {
@@ -225,10 +225,10 @@ public struct TopicTransaction {
         case .trade(let other): return try trade(id, with: other)
         case .takePlace: return put(try TopicOrder.takingNextPlace(topicID(), inPlay: inPlay, in: entries))
         case .bench:
-            guard case .lock(let lock) = id else { return try bench(topicID(), inPlay: inPlay) }
-            unlock(lock)
+            guard case .session(let lock) = id else { return try bench(topicID(), inPlay: inPlay) }
+            takeOffBoard(lock)
         case .makeGuest:
-            guard case .lock = id else { return try makeGuest(topicID(), inPlay: inPlay) }
+            guard case .session = id else { return try makeGuest(topicID(), inPlay: inPlay) }
         case .refused(let failure): throw failure
         case .atEnd, .hidden: break
         }
@@ -238,7 +238,7 @@ public struct TopicTransaction {
         put(try TopicOrder.pinning(id, pinned, inPlay: inPlay, in: entries))
     }
 
-    public mutating func chooseInPlay(_ chosen: [TopicListID], inPlay: Int) throws {
+    public mutating func chooseInPlay(_ chosen: [BoardCardID], inPlay: Int) throws {
         put(try TopicOrder.choosingInPlay(chosen, inPlay: inPlay, in: entries))
     }
 
@@ -252,7 +252,7 @@ public struct TopicTransaction {
         put(try TopicOrder.fillingOpenPlace(place, with: id, inPlay: inPlay, in: entries))
     }
 
-    public mutating func replaceFromBench(_ card: TopicListID, with benched: TopicListID, inPlay: Int) throws {
+    public mutating func replaceFromBench(_ card: BoardCardID, with benched: BoardCardID, inPlay: Int) throws {
         put(try TopicOrder.replacingFromBench(card, with: benched, inPlay: inPlay, in: entries))
     }
 
@@ -267,59 +267,59 @@ public struct TopicTransaction {
 
     /// Make a Guest of a No Topic Session: its new Lock goes to the end of the Guests. A Lock with that id keeps its
     /// place, so a second Make a Guest of the same Session changes nothing.
-    public mutating func lock(_ lock: SessionLock) {
-        guard !locks.contains(where: { $0.id == lock.id }) else { return }
-        put(TopicOrder.appendingLock(lock, inPlay: inPlay, in: entries))
+    public mutating func addToBoard(_ lock: BoardSession) {
+        guard !boardSessions.contains(where: { $0.id == lock.id }) else { return }
+        put(TopicOrder.appendingBoardSession(lock, inPlay: inPlay, in: entries))
     }
 
     /// Ends the Lock. It is a Guest that leaves, so it leaves no Open Place.
-    public mutating func unlock(_ id: String) {
-        guard locks.contains(where: { $0.id == id }) else { return }
-        put(TopicListChange([], endedLocks: [id]))
+    public mutating func takeOffBoard(_ id: String) {
+        guard boardSessions.contains(where: { $0.id == id }) else { return }
+        put(BoardChange([], endedSessions: [id]))
     }
 
-    /// The import of a Lock that an older Muxify kept in the tmux option `SessionLock.legacyOption`: it keeps the order
+    /// The import of a Lock that an older Muxify kept in the tmux option `BoardSession.legacyOption`: it keeps the order
     /// that the option had. A Lock with that id stays as it is.
-    public mutating func importLock(_ lock: SessionLock) {
-        guard !locks.contains(where: { $0.id == lock.id }) else { return }
-        locks.append(lock)
+    public mutating func importBoardSession(_ lock: BoardSession) {
+        guard !boardSessions.contains(where: { $0.id == lock.id }) else { return }
+        boardSessions.append(lock)
     }
 
     /// Saves a Lock's Remembered Session, with the same rule as `remember(_:of:)`: the last write wins, and False,
     /// with nothing written, when the Lock has ended meanwhile.
-    public mutating func remember(_ session: JSONValue, ofLock id: String) -> Bool {
-        guard let index = locks.firstIndex(where: { $0.id == id }) else { return false }
-        locks[index].session = session
+    public mutating func remember(_ session: JSONValue, ofBoardSession id: String) -> Bool {
+        guard let index = boardSessions.firstIndex(where: { $0.id == id }) else { return false }
+        boardSessions[index].session = session
         return true
     }
 
-    private mutating func put(_ changed: [TopicListEntry]) {
-        put(TopicListChange(changed))
+    private mutating func put(_ changed: [BoardCard]) {
+        put(BoardChange(changed))
     }
 
     /// Writes the change into the transaction. A Settled or Pinned Topic loses its Guest mark. When a regular card left
     /// an In Play place since `before`, it leaves an Open Place there (`TopicOrder.keepingPlaces`).
-    private mutating func put(_ change: TopicListChange, from before: [TopicListEntry]? = nil) {
+    private mutating func put(_ change: BoardChange, from before: [BoardCard]? = nil) {
         let before = before ?? entries
         apply(change)
         apply(TopicOrder.keepingPlaces(from: before, in: entries, inPlay: inPlay))
     }
 
-    private mutating func apply(_ change: TopicListChange) {
+    private mutating func apply(_ change: BoardChange) {
         for var record in change.entries.records {
             if record.settledAt != nil || record.isPinned { record.isGuest = false }
             if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
             else { records.append(record) }
         }
-        for lock in change.entries.locks {
-            if let index = locks.firstIndex(where: { $0.id == lock.id }) { locks[index] = lock }
-            else { locks.append(lock) }
+        for lock in change.entries.boardSessions {
+            if let index = boardSessions.firstIndex(where: { $0.id == lock.id }) { boardSessions[index] = lock }
+            else { boardSessions.append(lock) }
         }
         for place in change.entries.openPlaces {
             if let index = openPlaces.firstIndex(where: { $0.id == place.id }) { openPlaces[index] = place }
             else { openPlaces.append(place) }
         }
-        locks.removeAll { change.endedLocks.contains($0.id) }
+        boardSessions.removeAll { change.endedSessions.contains($0.id) }
         openPlaces.removeAll { change.closedPlaces.contains($0.id) }
     }
 }

@@ -19,17 +19,17 @@ final class BenchTests: XCTestCase {
     /// The Topics model as the Sidebar builds it, at the Location of a Topic id, a Window id ("@…") or nowhere.
     private func model(inPlay: Int, benchShown: Bool = false, at place: String? = nil,
                        records: [TopicRecord]? = nil, windows: [TmuxWindow]? = nil, openPlaces: [OpenPlace] = [],
-                       locks: [SessionLock] = [], benchPeek: TopicsModel.BenchPeek? = nil) -> TopicsModel {
+                       boardSessions: [BoardSession] = [], benchPeek: BoardModel.BenchPeek? = nil) -> BoardModel {
         var config = Config()
         config.topics.inPlay = inPlay
         let location: Location? = place.map { place in
             place.hasPrefix("@") ? .window(WindowID(rawValue: place)!) : .emptyTopic(.topic(place))
         }
-        return TopicsModel(records: records ?? self.records, openPlaces: openPlaces, locks: locks, windows: windows ?? self.windows, config: config,
+        return BoardModel(records: records ?? self.records, openPlaces: openPlaces, boardSessions: boardSessions, windows: windows ?? self.windows, config: config,
                            selection: TopicSelection(), location: location, benchShown: benchShown, benchPeek: benchPeek)
     }
 
-    private func shown(_ model: TopicsModel) -> [String] { model.list.map(\.id) }
+    private func shown(_ model: BoardModel) -> [String] { model.list.map(\.id) }
 
     func testAnOpenPlaceKeepsItsCardNumberForItsKeyToGoToItsPage() {
         let open = model(inPlay: 3, at: "@1", openPlaces: [OpenPlace(id: "o", order: 0.5)])
@@ -59,8 +59,8 @@ final class BenchTests: XCTestCase {
                        "with no other In Play card, a Benched card, not the Pinned Topic next in the order")
         XCTAssertEqual(model(inPlay: 1, at: "a", records: Array(pinnedBetween.prefix(2))).nextTopic(after: .topic("a")), .noTopic,
                        "with only a Pinned Topic left, no Topic")
-        XCTAssertEqual(model(inPlay: 2, at: "@1", windows: [.fixture(savedSessionID: "$1")], locks: [SessionLock(id: "$1", order: 5)])
-                        .nextTopic(after: .locked("$1")), .topic("a"),
+        XCTAssertEqual(model(inPlay: 2, at: "@1", windows: [.fixture(savedSessionID: "$1")], boardSessions: [BoardSession(id: "$1", order: 5)])
+                        .nextTopic(after: .session("$1")), .topic("a"),
                        "a Guest Session, the last card that shows, goes to the first In Play card")
         let onlyInPlay = model(inPlay: 1, at: "a")
         XCTAssertEqual(onlyInPlay.nextTopic(after: .topic("a")), .topic("b"), "with no other card In Play, a Benched card")
@@ -94,14 +94,14 @@ final class BenchTests: XCTestCase {
     }
 
     func testAGuestSessionCannotMoveUpFromTheTopOfTheGuestsAndMovesDownToTheBench() {
-        let topics = model(inPlay: 2, windows: [.fixture(savedSessionID: "$1")], locks: [SessionLock(id: "$1", order: 5)])
-        XCTAssertEqual(topics.steps(of: .locked("$1")).up, .refused(.guestSession))
-        XCTAssertFalse(topics.steps(of: .locked("$1")).canMove(.up))
-        XCTAssertEqual(topics.steps(of: .locked("$1")).down, .bench)
+        let topics = model(inPlay: 2, windows: [.fixture(savedSessionID: "$1")], boardSessions: [BoardSession(id: "$1", order: 5)])
+        XCTAssertEqual(topics.steps(of: TopicGroupID.session("$1")).up, .refused(.boardSession))
+        XCTAssertFalse(topics.steps(of: TopicGroupID.session("$1")).canMove(.up))
+        XCTAssertEqual(topics.steps(of: TopicGroupID.session("$1")).down, .bench)
         XCTAssertEqual(topics.steps(of: TopicGroupID.topic("b")).down, .toGuests)
     }
 
-    private func cards(_ model: TopicsModel) -> [QuickSwitchTarget] {
+    private func cards(_ model: BoardModel) -> [QuickSwitchTarget] {
         QuickSwitchTargets(model: model, sessions: [], windows: [], tabIDs: []).cards
     }
 
@@ -123,10 +123,10 @@ final class BenchTests: XCTestCase {
     }
 
     func testAGuestIsInPlayAndDoesNotCountTowardInPlay() {
-        let lock = model(inPlay: 2, windows: [.fixture(id: "@2", sessionID: "$2", savedSessionID: "$2")], locks: [SessionLock(id: "$2", order: 0.5)])
+        let lock = model(inPlay: 2, windows: [.fixture(id: "@2", sessionID: "$2", savedSessionID: "$2")], boardSessions: [BoardSession(id: "$2", order: 0.5)])
         XCTAssertEqual(shown(lock), ["topic-pinned", "topic-a", "topic-b", "guests-line", "locked-$2", "bench-line"],
                        "a Locked Session is a Guest, under the Guests line and never between two places")
-        XCTAssertEqual(lock.rows.filter(\.isGuest).map(\.id), [.locked("$2")])
+        XCTAssertEqual(lock.rows.filter(\.isGuest).map(\.id), [.session("$2")])
         XCTAssertEqual(CheckAction.chooseInPlay(places: 2).listed(lock).map(\.id), [.topic("a"), .topic("b"), .topic("c"), .topic("d")],
                        "Choose In Play does not list a Guest Session")
 
@@ -187,7 +187,7 @@ final class BenchTests: XCTestCase {
 
     func testADragReachesTheCardsWithItsPinAndTheLineAndTheNoTopicSessionStayAmongThem() {
         let topics = model(inPlay: 2, benchShown: true, at: "@1")
-        let unpinned: [StackSlot<TopicListID>] = [.item(.topic("a")), .item(.topic("b")), .fixed("bench-line"), .fixed("no-topic"),
+        let unpinned: [StackSlot<BoardCardID>] = [.item(.topic("a")), .item(.topic("b")), .fixed("bench-line"), .fixed("no-topic"),
                                                   .item(.topic("c")), .item(.topic("d"))]
         XCTAssertEqual(topics.dragSlots(around: "topic-a"), unpinned)
         XCTAssertEqual(topics.dragSlots(around: "topic-d"), unpinned)
@@ -197,13 +197,13 @@ final class BenchTests: XCTestCase {
 
     func testWhileTheBenchIsHiddenEveryCardCanReachTheOtherSideOfTheLine() {
         let topics = model(inPlay: 2, at: "d")
-        let unpinned: [StackSlot<TopicListID>] = [.item(.topic("a")), .item(.topic("b")), .fixed("bench-line"), .item(.topic("d"))]
+        let unpinned: [StackSlot<BoardCardID>] = [.item(.topic("a")), .item(.topic("b")), .fixed("bench-line"), .item(.topic("d"))]
         XCTAssertEqual(topics.dragSlots(around: "topic-a"), unpinned, "an In Play card can cross the hidden line")
         XCTAssertEqual(topics.dragSlots(around: "topic-d"), unpinned)
         let locked = model(inPlay: 2, at: "@2", windows: [.fixture(), .fixture(id: "@2", sessionID: "$2", savedSessionID: "$2")],
-                           locks: [SessionLock(id: "$2", order: 4)])
+                           boardSessions: [BoardSession(id: "$2", order: 4)])
         XCTAssertEqual(locked.dragSlots(around: "locked-$2"),
-                       [.item(.topic("a")), .item(.topic("b")), .fixed("guests-line"), .item(.lock("$2")), .fixed("bench-line")],
+                       [.item(.topic("a")), .item(.topic("b")), .fixed("guests-line"), .item(.session("$2")), .fixed("bench-line")],
                        "a Locked Session is a Guest, so it is In Play, also when its order is after the Bench")
     }
 
@@ -211,7 +211,7 @@ final class BenchTests: XCTestCase {
         let records = records + [topic("e", order: 4)]
         let topics = model(inPlay: 2, benchShown: true, at: "d", records: records)
         XCTAssertEqual(shown(topics), ["topic-pinned", "topic-a", "topic-b", "bench-line", "topic-c", "topic-d", "topic-e"])
-        let unpinned: [StackSlot<TopicListID>] = [.item(.topic("a")), .item(.topic("b")), .fixed("bench-line"),
+        let unpinned: [StackSlot<BoardCardID>] = [.item(.topic("a")), .item(.topic("b")), .fixed("bench-line"),
                                                   .item(.topic("c")), .item(.topic("d")), .item(.topic("e"))]
         XCTAssertEqual(topics.dragSlots(around: "topic-c"), unpinned, "the Location's card is a place to land as each other card")
         XCTAssertEqual(topics.dragSlots(around: "topic-d"), unpinned)
@@ -238,7 +238,7 @@ final class BenchTests: XCTestCase {
     func testSessionsModeHasNoBench() {
         var config = Config()
         config.topics.inPlay = 1
-        let sessions = TopicsModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: .sessions)
+        let sessions = BoardModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: .sessions)
         XCTAssertNil(sessions.isBenchShown)
     }
 }

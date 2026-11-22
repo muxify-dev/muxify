@@ -16,7 +16,7 @@ enum CheckAction: Equatable {
     }
 
     /// The cards that the step lists, in list order.
-    func listed(_ topics: TopicsModel) -> [TopicsModel.Row] {
+    func listed(_ topics: BoardModel) -> [BoardModel.Row] {
         switch self {
         case .chooseInPlay: topics.rows.filter { row in
             guard case .topic = row.id else { return false }

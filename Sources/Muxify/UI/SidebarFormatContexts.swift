@@ -9,12 +9,12 @@ struct SidebarFormatContexts {
     var sessions: [String: Context] = [:]
     /// The Session that each Dormant Guest Session's Lock remembers, by Lock id. Its card shows it with the Session
     /// Formats, as a live one shows its Session.
-    var dormantGuestSessions: [String: Context] = [:]
+    var dormantBoardSessions: [String: Context] = [:]
     var windows: [String: Context] = [:]
     var panes: [String: Context] = [:]
 
-    init(model: TopicsModel, windows: [TmuxWindow], panes: [TmuxPane], agents: [Agent],
-         branches: TopicBranches, records: [TopicRecord], locks: [SessionLock] = [], sessionPaths: [SessionPath], tabCounts: [String: Int],
+    init(model: BoardModel, windows: [TmuxWindow], panes: [TmuxPane], agents: [Agent],
+         branches: TopicBranches, records: [TopicRecord], boardSessions: [BoardSession] = [], sessionPaths: [SessionPath], tabCounts: [String: Int],
          isOnThisMac: Bool = true, features: EnvironmentFeatures = .all) {
         // A branch is read from a HEAD file on this Mac, and a Topic only where the Environment serves Topics.
         let servesTopics = features.contains(.topics)
@@ -78,12 +78,12 @@ struct SidebarFormatContexts {
             }
             sessions[sessionID] = Context(values: sessionValues, loops: [.windows: windowContexts, .panes: paneContexts])
         }
-        let locksByID = Dictionary(locks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let boardSessionsByID = Dictionary(boardSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for topic in model.rows + model.groups.flatMap(\.topics) {
             // A Locked card shows its Session's Formats: a live one its Session, a Dormant one the Session that its Lock
             // remembers.
-            if case .locked(let id) = topic.id, topic.state == .dormant, let lock = locksByID[id] {
-                dormantGuestSessions[id] = Context(values: [
+            if case .session(let id) = topic.id, topic.state == .dormant, let lock = boardSessionsByID[id] {
+                dormantBoardSessions[id] = Context(values: [
                     .session_name: topic.title, .session_base_name: lock.session["base_name"]?.string ?? topic.title,
                     .window_count: String(lock.session["windows"]?.array?.count ?? 0),
                 ])

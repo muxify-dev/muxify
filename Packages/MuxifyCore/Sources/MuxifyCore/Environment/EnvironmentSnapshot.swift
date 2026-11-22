@@ -176,7 +176,7 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
 
     public init(contents: TopicContents, tmux: TmuxSnapshot, topics: Config.Topics, notifications: Config.Notifications) {
         let marks = AgentMarks(tmux.agents, notifications: notifications)
-        let list = TopicsList(records: contents.records, openPlaces: contents.openPlaces, locks: contents.locks, windows: tmux.windows,
+        let list = Board(records: contents.records, openPlaces: contents.openPlaces, boardSessions: contents.boardSessions, windows: tmux.windows,
                               marks: marks, topics: topics)
         let firsts = TopicSessionOrder.firstWindows(tmux.windows, record: nil, order: topics.sessionOrder)
         func topic(of window: TmuxWindow) -> String? {
@@ -215,16 +215,16 @@ extension EnvironmentSnapshot {
 }
 
 extension EnvironmentSnapshot.Card {
-    init(_ entry: TopicsList.Entry) {
+    init(_ entry: Board.Entry) {
         switch entry {
         case .openPlace(let id): self = .openPlace(id: id)
         case .card(let card): self.init(card)
         }
     }
 
-    init(_ card: TopicsList.Card) {
+    init(_ card: Board.Card) {
         switch card.subject {
-        case .locked(let lock):
+        case .session(let lock):
             self = card.sessions.first.map { .session($0, mark: card.mark) } ?? .dormantSession(id: lock.id, name: card.label)
         case .topic(let record):
             let topic = EnvironmentSnapshot.Topic(id: record.id, label: card.label, note: record.note, tags: card.tags.map(\.tag),
