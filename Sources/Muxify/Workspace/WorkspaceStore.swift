@@ -445,7 +445,7 @@ final class WorkspaceStore {
     /// Whether the card is Pinned. Nil when Pin does not apply: a Settled Topic, a No Topic Session that has no card, or
     /// Topics are off.
     func pinState(of card: GuestCard) -> Bool? {
-        guard link.features.contains(.topics) else { return nil }
+        guard link.features.contains(.topics), board.topicsEnabled else { return nil }
         switch card {
         case .topic(let id): return records.first { $0.id == id && $0.settledAt == nil }?.isPinned
         case .session(let id): return board.boardSessionsBySession[id].flatMap(boardSession)?.isPinned

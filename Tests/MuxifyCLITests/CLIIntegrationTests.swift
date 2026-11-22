@@ -561,7 +561,7 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
                        [changed["session"] as? String, changed["window"] as? String, pane, id].compactMap { $0 }.joined(separator: " "))
     }
 
-    func testTopicPinPutsTheTopicFirstAndUnpinPutsItAtTheTopOfTheBench() async throws {
+    func testTopicPinPutsTheTopicFirstAndUnpinMakesItTheLastGuest() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
         let config = try String(contentsOf: sandbox.config, encoding: .utf8)
@@ -586,7 +586,11 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(unpin.status, 0, unpin.output)
         let after = try await topicList(sandbox: sandbox)
         XCTAssertFalse(after.contains { $0["pinned"] as? Bool == true }, "a Pin stays")
-        XCTAssertEqual(after.compactMap { $0["id"] as? String }, [inPlay, pinned, benched], "Unpin puts the Topic at the top of the Bench")
+        XCTAssertEqual(after.compactMap { $0["id"] as? String }, [inPlay, pinned, benched], "Unpin puts the Topic at the end of the Guests")
+        let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: environment)
+        let unpinned = try XCTUnwrap(try jsonLine(shown.stdout)["unpinned"] as? [String: Any], shown.stdout)
+        let guests = (unpinned["guests"] as? [[String: Any]] ?? []).compactMap { ($0["topic"] as? [String: Any])?["label"] as? String }
+        XCTAssertEqual(guests, ["Pin pinned"], "Unpin makes the Topic a Guest")
     }
 
     func testTopicMoveStepsTheCardAndFailsAtTheEndOrForASettledTopic() async throws {

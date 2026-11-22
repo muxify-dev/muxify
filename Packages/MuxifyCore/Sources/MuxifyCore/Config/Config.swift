@@ -574,10 +574,11 @@ public struct Config: Equatable {
         #   # oldest_first or newest_first. Once you move a Session, the Topic
         #   # keeps your order, and a new Session goes to this order's end.
         #   session_order: oldest_first
-        #   # The number of In Play places. The Sidebar shows the Pinned Topics,
-        #   # the Topics in these places and the Guests. The other Topics wait on
-        #   # the Bench, behind one line that shows them. New and returning
-        #   # Settled Topics go to the top of the Bench.
+        #   # The number of In Play places. The Sidebar shows the Pinned cards,
+        #   # the cards in these places and the Guests. The other Topics wait on
+        #   # the Bench, behind one line that shows them. A new Topic is a Guest
+        #   # at the end of the Guests, and so is a card that you Unpin. A
+        #   # returning Settled Topic goes to the top of the Bench.
         #   in_play: 3
         #   # The number of days that Forget Settled Older Than… offers first.
         #   # It forgets the Settled Topics that were Settled more days ago.

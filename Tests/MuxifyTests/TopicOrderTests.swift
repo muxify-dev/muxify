@@ -377,7 +377,7 @@ final class TopicOrderTests: XCTestCase {
         let appended = applying(TopicOrder.appendingBoardSession(BoardSession(id: "$2", order: 0, isGuest: true), inPlay: 5, in: entries), to: entries)
         XCTAssertEqual(shown(appended), ["p", "a", "b", "session:$1", "session:$2"], "the Board Session that was among the Topics goes to the Guests too")
         let moved = applying(try TopicOrder.moving(.session("$2"), to: .before(.topic("p")), in: appended), to: appended)
-        XCTAssertEqual(shown(moved), ["p", "session:$2", "a", "b", "session:$1"], "a Board Session is never Pinned, so it stays below the Pinned Topics")
+        XCTAssertEqual(shown(moved), ["p", "session:$2", "a", "b", "session:$1"], "a Board Session that is not Pinned stays below the Pinned cards")
         let added = applying(TopicOrder.inserting(record("new", order: nil), inPlay: 5, in: moved), to: moved)
         XCTAssertEqual(shown(added), ["p", "session:$2", "a", "b", "new", "session:$1"], "a returning Topic goes after the last place, and a Board Session takes none")
     }
