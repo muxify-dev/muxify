@@ -21,16 +21,11 @@ extension EnvironmentService {
         }
     }
 
-    /// Pin and Unpin move the card among the Topics, with the Board Sessions in the same order.
+    /// Pin and Unpin of the target's card, an open Topic or a Board Session, live or Dormant. A card that already has
+    /// that Pin does not change.
     private func pin(_ request: EnvironmentRequest, _ pinned: Bool, client: String?) -> EnvironmentResponse {
-        do {
-            let records = try store.read().records
-            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: try serverSnapshot(), client: client)
-            if topic.isPinned == pinned { return .changed(TopicChange(topicID: topic.id)) }
-            try store.write { try $0.pin(topic.id, pinned) }
-            return .changed(TopicChange(topicID: topic.id))
-        } catch {
-            return .failed(failure(error, phase: .nothingChanged))
+        cardChange(request, client: client) { card in
+            card.pinned == pinned ? nil : { try $0.pin(card.id, pinned) }
         }
     }
 
@@ -287,7 +282,8 @@ extension EnvironmentService {
         if case .boardSession(let id)? = target {
             let boardSession = try boardSessionRow(id, in: contents)
             let live = boardSession.windows(in: snapshot.windows, open: records.openTopicIDs).first
-            return RequestCard(id: .session(id), label: "The Board Session " + (live?.sessionName ?? boardSession.name), pinned: false,
+            return RequestCard(id: .session(id), label: "The Board Session " + (live?.sessionName ?? boardSession.name),
+                               pinned: boardSession.isPinned,
                                session: live?.sessionID, withoutCard: nil)
         }
         let window = try sessionWindow(target, caller: caller, snapshot: snapshot, client: client)
@@ -300,7 +296,7 @@ extension EnvironmentService {
             return RequestCard(id: .session(window.sessionRecordID), label: "The Session " + window.sessionName, pinned: false,
                                session: window.sessionID, withoutCard: window)
         }
-        return RequestCard(id: .session(boardSession.id), label: "The Board Session " + window.sessionName, pinned: false,
+        return RequestCard(id: .session(boardSession.id), label: "The Board Session " + window.sessionName, pinned: boardSession.isPinned,
                            session: window.sessionID, withoutCard: nil)
     }
 

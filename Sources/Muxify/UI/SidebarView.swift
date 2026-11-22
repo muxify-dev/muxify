@@ -927,7 +927,7 @@ struct TopicCard: View, Equatable {
     }
 
     private func pinButton(_ id: String) -> some View {
-        Button(topic.isPinned ? "Unpin Topic" : "Pin Topic") { store.pinTopic(id, !topic.isPinned) }
+        Button(topic.isPinned ? "Unpin" : "Pin") { store.pin(.topic(id), !topic.isPinned) }
             .accessibilityIdentifier("pin-topic")
             .disabled(store.changingTopic)
     }
@@ -1073,8 +1073,9 @@ private struct BoardSessionCard: View, Equatable {
     }
 
     private var header: some View {
-        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isGuest: row.isGuest, isBoardSession: true,
-                   hintTarget: .boardSession(boardSession), notes: (row.isGuest ? ["Guest"] : []) + (row.idleLabel.map { [$0] } ?? []),
+        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isPinned: row.isPinned, isGuest: row.isGuest,
+                   isBoardSession: true, hintTarget: .boardSession(boardSession),
+                   notes: (row.isPinned ? ["Pinned"] : []) + (row.isGuest ? ["Guest"] : []) + (row.idleLabel.map { [$0] } ?? []),
                    summary: formatted.summary) {
             if let label = row.idleLabel { Text(label).font(fontSize.font(10)).foregroundStyle(.secondary) }
             if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
@@ -1094,8 +1095,9 @@ private struct BoardSessionCard: View, Equatable {
         }
     }
 
-    /// The Actions of a Board Session. It is not a Topic, so it has no Settle, Pin or Forget. Bench takes its card off
-    /// the Board. A Dormant one has no Session to rename, move or kill, and offers Start Fresh beside Reopen.
+    /// The Actions of a Board Session. It is not a Topic, so it has no Settle or Forget. Bench takes its card off the
+    /// Board, so a Pinned one, which is not In Play, has none. A Dormant one has no Session to rename, move or kill, and
+    /// offers Start Fresh beside Reopen.
     @ViewBuilder
     private var actions: some View {
         if isDormant {
@@ -1103,8 +1105,13 @@ private struct BoardSessionCard: View, Equatable {
                 .accessibilityIdentifier("start-fresh-" + row.id.accessibilityID)
                 .disabled(store.changingTopic)
         }
-        Button("Bench") { store.bench(.boardSession(boardSession)) }
+        Button(row.isPinned ? "Unpin" : "Pin") { store.pin(.boardSession(boardSession), !row.isPinned) }
+            .accessibilityIdentifier("pin-" + row.id.accessibilityID)
             .disabled(store.changingTopic)
+        if !row.isPinned {
+            Button("Bench") { store.bench(.boardSession(boardSession)) }
+                .disabled(store.changingTopic)
+        }
         if let window {
             Button("Rename Session…") { store.palette.begin(.text(.renameSession(window)), text: window.sessionName) }
             Button("Move to Topic…") { store.palette.openMove(window, scope: .session) }

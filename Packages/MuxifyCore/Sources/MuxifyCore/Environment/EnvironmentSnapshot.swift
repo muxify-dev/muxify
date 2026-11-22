@@ -156,7 +156,7 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
     public var tags: [DefinedTag]
     /// Every live Session once, in tmux order: Sessions mode.
     public var sessions: [Session]
-    /// The Pinned Topics, in the order the user gave.
+    /// The Pinned cards, Topics and Board Sessions, in the order the user gave.
     public var pinned: [Card]
     public var unpinned: Unpinned
     /// The Sessions in no open Topic and not a Board Session, in tmux order. They have no card in the Sidebar.
@@ -201,16 +201,19 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
 }
 
 extension EnvironmentSnapshot {
-    /// The view for a reader that does not know the `dormant_session` card: the same, without the Dormant Board
-    /// Sessions. In an In Play place, an Open Place card with the Board Session's id stands for one, so each place keeps
-    /// its number; a fill of that place fails, because it is not open.
-    public var withoutDormantSessions: EnvironmentSnapshot {
+    /// The view for a reader that did not declare `board`: the same, without the Dormant Board Sessions. In an In Play
+    /// place, an Open Place card with the Board Session's id stands for one, so each place keeps its number; a fill of
+    /// that place fails, because it is not open. Such a reader knows only Topics among the Pinned cards, so a live
+    /// Pinned Board Session is a No Topic Session there, in `no_topic`.
+    public var withoutBoard: EnvironmentSnapshot {
         func live(_ cards: [Card]) -> [Card] { cards.filter { if case .dormantSession = $0 { false } else { true } } }
         func held(_ places: [Card]) -> [Card] {
             places.map { if case .dormantSession(let id, _) = $0 { .openPlace(id: id) } else { $0 } }
         }
         var older = self
-        older.pinned = live(pinned)
+        older.pinned = pinned.filter { if case .topic = $0 { true } else { false } }
+        let pinnedSessions = Set(pinned.compactMap { if case .session(let id, _) = $0 { id } else { nil } })
+        older.noTopic = sessions.map(\.id).filter { noTopic.contains($0) || pinnedSessions.contains($0) }
         switch unpinned {
         case .inPlay(let limit, let places, let guests, let bench):
             older.unpinned = .inPlay(limit: limit, places: held(places), guests: live(guests), bench: live(bench))

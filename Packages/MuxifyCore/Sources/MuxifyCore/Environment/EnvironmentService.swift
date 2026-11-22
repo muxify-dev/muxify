@@ -408,8 +408,8 @@ extension EnvironmentCommand {
         case .listWorktrees: "List Worktrees"
         case .tags: "Change Tags"
         case .note: "Set Topic Note"
-        case .pin: "Pin Topic"
-        case .unpin: "Unpin Topic"
+        case .pin: "Pin"
+        case .unpin: "Unpin"
         case .moveCard: "Move Topic"
         case .chooseInPlay: "Choose In Play"
         case .replaceFromBench: "Replace from Bench"
@@ -552,7 +552,7 @@ public enum TopicRequestError: Error, CustomStringConvertible {
                            : "The Topic \(topic) has no Session. Add one first: muxify topic add-session <dir> --topic \(id)."
         case .panesChanged: return "The Windows or Panes changed. Review them and confirm again."
         case .cardAtEnd(let card, let up, let pinned):
-            return "\(card) is the \(up ? "first" : "last") card among the \(pinned ? "Pinned Topics" : "Topics that are not Pinned")."
+            return "\(card) is the \(up ? "first" : "last") card among the \(pinned ? "Pinned cards" : "cards that are not Pinned")."
         case .sessionAtEnd(let session, let topic, let up):
             return "The Session \(session) is the \(up ? "first" : "last") Session of the Topic \(topic)."
         case .cardHidden(let message): return message

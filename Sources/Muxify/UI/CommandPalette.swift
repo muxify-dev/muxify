@@ -167,7 +167,9 @@ final class CommandPalette {
                 actions += [.move]
                 if session.windows.first?.topicID != nil { actions += [.removeFromTopic, .removeFromTopicAndKill] }
             }
-            if let guest = store?.guestState(of: .session(session.id)) { actions += [guest ? .bench : .makeGuest] }
+            if let pinned = store?.pinState(of: .session(session.id)) { actions += [pinned ? .unpinTopic : .pinTopic] }
+            if store?.guestState(of: .session(session.id)) == false { actions += [.makeGuest] }
+            if store?.canBench(.session(session.id)) == true { actions += [.bench] }
             actions += [.newSession, .rename, .newWindow, .killSession]
         case .window(let window):
             if store?.link.features.contains(.topics) == true { actions += [.move]; if window.topicID != nil { actions += [.removeFromTopic] } }
@@ -177,6 +179,7 @@ final class CommandPalette {
         case .sessionPath: actions += [.newSession]
         case .boardSession(let id):
             actions += [.startTopicFresh]
+            if let pinned = store?.pinState(of: .boardSession(id)) { actions += [pinned ? .unpinTopic : .pinTopic] }
             if store?.canBench(.boardSession(id)) == true { actions += [.bench] }
         case .choice, .command, .tag: break
         }

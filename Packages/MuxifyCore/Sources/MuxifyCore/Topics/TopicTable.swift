@@ -34,7 +34,7 @@ enum TopicTable {
     )
 
     /// One row for each Board Session, keyed by its id, which the live Session has in `@muxify_session_id`. `guest`
-    /// is its Guest mark, as in `topics`, and `session` its Remembered Session as JSON text, written whole.
+    /// is its Guest mark, as in `topics` (step 7 adds `pinned`), and `session` its Remembered Session as JSON text, written whole.
     static let boardSessionsMigration = StateDatabase.Migration(
         """
         CREATE TABLE board_sessions (
@@ -44,6 +44,12 @@ enum TopicTable {
             session TEXT NOT NULL DEFAULT '{}'
         )
         """
+    )
+
+    /// Step 7: the Pin of a Board Session, as `topics` has it. An older build reads the table by its named columns, so it
+    /// ignores this one.
+    static let boardSessionPinsMigration = StateDatabase.Migration(
+        "ALTER TABLE board_sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
     )
 
     /// The columns of a record besides `id`, in the order `values(of:)` gives them.
@@ -111,9 +117,9 @@ enum TopicTable {
         let openPlaces = try connection.query(#"SELECT id, "order" FROM open_places ORDER BY rowid"#) { row in
             OpenPlace(id: row.text(0) ?? "", order: row.double(1))
         }
-        let boardSessions = try connection.query(#"SELECT id, "order", guest, session FROM board_sessions ORDER BY id"#) { row in
-            BoardSession(id: row.text(0) ?? "", order: row.double(1), isGuest: row.value(2).isTrue,
-                         session: decoded(JSONValue.self, row.value(3)) ?? .object([:]))
+        let boardSessions = try connection.query(#"SELECT id, "order", pinned, guest, session FROM board_sessions ORDER BY id"#) { row in
+            BoardSession(id: row.text(0) ?? "", order: row.double(1), isPinned: row.value(2).isTrue, isGuest: row.value(3).isTrue,
+                         session: decoded(JSONValue.self, row.value(4)) ?? .object([:]))
         }
         return TopicContents(records: records, openPlaces: openPlaces, boardSessions: boardSessions)
     }
@@ -167,12 +173,16 @@ enum TopicTable {
         }
         for boardSession in end.boardSessions {
             guard let old = boardSessions[boardSession.id] else {
-                try connection.execute(#"INSERT INTO board_sessions (id, "order", guest, session) VALUES (?, ?, ?, ?)"#, boardSession.id,
-                                       boardSession.order, boardSession.isGuest, json(boardSession.session))
+                try connection.execute(#"INSERT INTO board_sessions (id, "order", pinned, guest, session) VALUES (?, ?, ?, ?, ?)"#,
+                                       boardSession.id, boardSession.order, boardSession.isPinned, boardSession.isGuest,
+                                       json(boardSession.session))
                 continue
             }
             if old.order != boardSession.order {
                 try connection.execute(#"UPDATE board_sessions SET "order" = ? WHERE id = ?"#, boardSession.order, boardSession.id)
+            }
+            if old.isPinned != boardSession.isPinned {
+                try connection.execute("UPDATE board_sessions SET pinned = ? WHERE id = ?", boardSession.isPinned, boardSession.id)
             }
             if old.isGuest != boardSession.isGuest {
                 try connection.execute("UPDATE board_sessions SET guest = ? WHERE id = ?", boardSession.isGuest, boardSession.id)

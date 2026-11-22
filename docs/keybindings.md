@@ -32,7 +32,7 @@ listed below.
 | `mark_all_read` | Unbound | Clear Unread in the Active Environment |
 | `move_topic_up` | ⌥⌘↑ | Move the card of the Active Topic, or of the current Board Session, one card up among the cards with its Pin. A step past the Guests line or the Bench line changes the section of the card, one section for each step. It does nothing at the top, for No Topic, for a Settled Topic, and in Sessions mode |
 | `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Board Session, one card down among the cards with its Pin, or into the next In Play section as for Move Topic Up. It does nothing at the bottom, for No Topic, for a Settled Topic, and in Sessions mode |
-| `toggle_pin_topic` | Unbound | Pin the Active Topic, or Unpin it while it is Pinned. It does nothing for a Settled Topic |
+| `toggle_pin_topic` | Unbound | Pin the card of the Active Topic or of the current Board Session, or Unpin it while it is Pinned. Unpin puts the card at the end of the Guests. It does nothing for a Settled Topic and for a No Topic Session that has no card |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_sidebar_mode` | ⌥⌘T | Switch the Sidebar between the Board and Sessions, as the button of the other view does. A hidden Sidebar shows in the other view. While only one view can show (`sidebar.board` or `sidebar.sessions` is off, or a Remote App Window, which shows only Sessions), it changes nothing and an Explanation Pill says why. The Command and the View menu item are "Switch to Sessions" / "Switch to Board" |
 | `toggle_bench` | ⇧⌘S | Show or hide the Bench, the Topics after the ones [In Play](configuration.md#topics-in-play). It does nothing while the Board has no Bench line |
@@ -119,9 +119,9 @@ Tab, Add a Session, Settle Topic, and Make a Guest or Bench. These use
 the current item and appear when that item is available. Back returns from an input
 step to the Commands search.
 
-Commands also lists Move Topic Up and Move Topic Down, and Pin Topic or Unpin
-Topic. They run at once on the Active Topic, as their keybindings
-do. Move Topic Up and Move Topic Down also move the card of the current Board
+Commands also lists Move Topic Up and Move Topic Down, and Pin or Unpin. They
+run at once on the Active Topic, as their keybindings do. Pin and Unpin also act
+on the card of the current Board Session. Move Topic Up and Move Topic Down also move the card of the current Board
 Session, and appear only when the card can move that way: among the cards with its Pin, or
 into the next In Play section.
 
@@ -369,8 +369,8 @@ conflict with the actions above:
 | `forget_topic` | Unbound | Forget the highlighted Topic |
 | `reopen_topic` | Unbound | Reopen the highlighted Topic |
 | `start_topic_fresh` | Unbound | Start Fresh for the highlighted Topic or Dormant Board Session |
-| `pin_topic` | Unbound | Pin the highlighted Topic |
-| `unpin_topic` | Unbound | Unpin the highlighted Topic |
+| `pin_topic` | Unbound | Pin the highlighted Topic or Board Session |
+| `unpin_topic` | Unbound | Unpin the highlighted Topic or Board Session |
 | `remove_from_topic` | Unbound | Remove the highlighted Session or Window from its Topic |
 | `remove_from_topic_and_kill` | Unbound | Confirm a removal of the highlighted Session from its Topic and a kill of it |
 | `new_window` | Unbound | Create a Window in the highlighted Session |

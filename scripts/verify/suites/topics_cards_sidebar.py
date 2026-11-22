@@ -1,6 +1,6 @@
 """Topics in the Sidebar: moving a Window to a Topic, Topic and Session cards, and the Settled group.
 
-The Topic and Session card headers in UI/SidebarView.swift give "Pin Topic", "Go to Topic" and "Go to Session"
+The Topic and Session card headers in UI/SidebarView.swift give "Pin", "Go to Topic" and "Go to Session"
 as accessibility actions, so the checks reach them without the header's context menu.
 
 The fixture and the helpers that several suites use are in scripts/verify/topics_sidebar.py.
@@ -272,8 +272,8 @@ class TopicsCardsSidebar(TopicsSidebar):
         # frame() is (bottom, top), a larger value higher on screen.
         self.assertLessEqual(settle[1], row[0] + 1, 'Settle %s is not on the footer line below the row %s' % (settle, row))
         self.assertLessEqual(card[0], settle[0], 'the card %s does not cover the footer line with Settle %s' % (card, settle))
-        s.act('action', 'card-topic-' + topic, 'Pin Topic')
-        wait(lambda: self.records().get(topic, {}).get('pinned') is True, 'Pin Topic of the card\'s menu did not pin the Topic')
+        s.act('action', 'card-topic-' + topic, 'Pin')
+        wait(lambda: self.records().get(topic, {}).get('pinned') is True, 'Pin of the card\'s menu did not pin the Topic')
 
     def test_settle_on_a_closed_topic_card_opens_the_settle_palette_and_leaves_the_card_closed(self):
         s = self.s
@@ -445,7 +445,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
         self.find('topic-pin-lower')
         s.wait_rows(lambda rs: above('topic-pin-upper', 'topic-pin-lower', rs), 'Pin upper is not above Pin lower before the Pin')
-        s.act('action', 'topic-pin-lower', 'Pin Topic')
+        s.act('action', 'topic-pin-lower', 'Pin')
         rs = s.wait_rows(lambda rs: above('topic-pin-lower', 'topic-pin-upper', rs),
                          'the Pinned Topic did not move above the other Topic')
         self.assertIn('Pinned', s.row('topic-pin-lower', rs).get('accessibilityValue', ''), self.describe('topic-pin-lower', rs))

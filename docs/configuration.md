@@ -290,8 +290,9 @@ and the other Topics go to the Bench. No Topic is lost: click the Bench line, or
 `topics.insert_position` is gone. A Config that sets it shows a Config
 problem, and you can remove the line.
 
-- Pinned Topics always show, and they do not count toward `in_play`.
-- The Sidebar shows the Pinned Topics, then the `in_play` In Play places, then
+- Pinned cards, Topics and Board Sessions, always show, and they do not count
+  toward `in_play`.
+- The Sidebar shows the Pinned cards, then the `in_play` In Play places, then
   a "Guests" line and the Guests, then the Bench line and the Bench. A Guest
   never shows between two places. The Guests line shows only when there is a
   Guest.
@@ -305,7 +306,8 @@ problem, and you can remove the line.
   Topic's card. Move Topic Up and Move Topic Down, a trade, Fill an Open Place
   and Choose In Play work on it as on a Topic. `muxify session move
   up` and `down` move its card, and `--board-session <id>` names it, also a
-  Dormant one. It is never Pinned and never on the Bench. Settle, Pin, Forget,
+  Dormant one. Pin and Unpin work on it as on a Topic, and a Pinned one stays
+  among the Pinned cards, also Dormant. It is never on the Bench. Settle, Forget,
   the Topic Note and Tags are for Topics only. On the Board, its card shows a
   small terminal glyph before its title. A Topic's card has none, and Sessions
   mode does not show the glyph. A Dormant Board Session keeps its place, In Play
@@ -352,7 +354,11 @@ problem, and you can remove the line.
   Fresh brings back goes to the top of the Bench, right after the In Play cards.
   It does not fill an Open Place. When the Board has fewer cards than
   `in_play`, it goes last. A Pinned Topic that returns goes last among the
-  Pinned Topics. A Dormant Topic keeps its place.
+  Pinned cards. A Dormant Topic keeps its place.
+- Pin puts a Topic or a Board Session last among the Pinned cards. From an In
+  Play place it leaves an Open Place, and a Guest loses its mark. Unpin puts the
+  card at the end of the Guests, as a Guest, also when an In Play place is free,
+  so it never fills an Open Place.
   A Topic made from a Board Session, or from its last Window or Pane, takes the
   Board Session's place and section: its In Play place, or its place among the
   Guests.

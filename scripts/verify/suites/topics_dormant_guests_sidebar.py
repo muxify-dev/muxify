@@ -5,8 +5,8 @@ Start Fresh, which creates the Session with one shell Window.
 A restart ends every Session of the fixture, so these checks have a suite of their own. BoardSessionTests and
 EnvironmentPublisherTests prove the rules: a restart keeps the row, and an end on the same server ends it.
 
-The Session card gives "Make a Guest", and the card of a Board Session gives "Move Up" and its default action on its
-own header (UI/SidebarView.swift), so the checks reach them without a context menu. The page shows when the Dormant
+The Session card gives "Make a Guest", and the card of a Board Session gives "Move Up", "Pin", "Unpin" and its default
+action on its own header (UI/SidebarView.swift), so the checks reach them without a context menu. The page shows when the Dormant
 Board Session is the Next Topic after a Settle, as a Dormant Topic's page does.
 
 Run from the repo root after `make build`:
@@ -171,6 +171,35 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
         time.sleep(REFRESH_LIMIT)
         self.assertEqual(len(s.tmux('list-windows', '-t', '=fresh-notes:', '-F', '#{window_id}').split()), 1,
                          'a remembered Window came back after Start Fresh')
+
+    def test_a_pinned_board_session_stays_pinned_and_dormant_after_a_tmux_restart_and_unpin_makes_it_the_last_guest(self):
+        s = self.s
+        notes = self.make_guest('pin-notes', windows=1)
+        later = self.make_guest('pin-later', windows=1)
+        key, later_key = 'board-session-' + notes, 'board-session-' + later
+        def row():
+            return next((b for b in self.store.board_sessions() if b['id'] == notes), {})
+
+        s.act('action', key, 'Pin')
+        wait(lambda: (row().get('pinned'), row().get('guest')) == (True, False),
+             lambda: 'Pin did not write the Pin and end the Guest mark: %s' % row())
+        rs = s.wait_rows(lambda rs: s.has(key, rs) and 'Pinned' in s.row(key, rs).get('accessibilityValue', '')
+                         and self.above(key, later_key, rs), 'the card is not among the Pinned cards')
+        self.assertNotIn('Guest', s.row(key, rs).get('accessibilityValue', ''), self.describe(key, rs))
+
+        self.restart_tmux()
+        rs = s.wait_rows(lambda rs: s.has(key, rs) and 'Dormant' in s.row(key, rs).get('accessibilityValue', ''),
+                         'the Pinned Board Session has no Dormant card after the tmux restart', seconds=15)
+        self.assertIn('Pinned', s.row(key, rs).get('accessibilityValue', ''), self.describe(key, rs))
+        self.assertTrue(self.above(key, later_key, rs), 'the Dormant card left the Pinned cards: %s'
+                        % [self.describe(k, rs) for k in (key, later_key)])
+
+        s.act('action', key, 'Unpin')
+        wait(lambda: (row().get('pinned'), row().get('guest')) == (False, True),
+             lambda: 'Unpin did not make the card a Guest: %s' % row())
+        rs = s.wait_rows(lambda rs: s.has(key, rs) and 'Pinned' not in s.row(key, rs).get('accessibilityValue', '')
+                         and self.above(later_key, key, rs), 'Unpin did not put the card at the end of the Guests', seconds=15)
+        self.assertIn('Guest', s.row(key, rs).get('accessibilityValue', ''), self.describe(key, rs))
 
 
 if __name__ == '__main__':

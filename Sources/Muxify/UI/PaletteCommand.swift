@@ -22,8 +22,8 @@ enum PaletteCommand: String, CaseIterable {
     case editTags = "Edit Tags…"
     case moveTopicUp = "Move Topic Up"
     case moveTopicDown = "Move Topic Down"
-    case pinTopic = "Pin Topic"
-    case unpinTopic = "Unpin Topic"
+    case pinTopic = "Pin"
+    case unpinTopic = "Unpin"
     case makeGuest = "Make a Guest"
     case bench = "Bench"
     case maximize = "Maximize"
@@ -228,8 +228,8 @@ extension CommandPalette {
             case .moveTopicUp: return canChangeTopics && store.canMoveActiveCard(.previous)
             case .moveTopicDown: return canChangeTopics && store.canMoveActiveCard(.next)
             case .pinTopic, .unpinTopic:
-                guard canChangeTopics, let topic = store.pinnableActiveTopic else { return false }
-                return topic.isPinned == (command == .unpinTopic)
+                guard canChangeTopics, let pinned = store.currentGuestCard.flatMap(store.pinState) else { return false }
+                return pinned == (command == .unpinTopic)
             case .makeGuest: return canChangeTopics && store.currentGuestCard.map { store.guestState(of: $0) == false } == true
             case .bench: return canChangeTopics && store.currentGuestCard.map(store.canBench) == true
             case .installExtensions: return store.link.isOnThisMac
@@ -323,7 +323,8 @@ extension CommandPalette {
         case .bench: if let card = store.currentGuestCard { store.bench(card) }
         case .moveTopicUp: store.moveActiveCard(.previous)
         case .moveTopicDown: store.moveActiveCard(.next)
-        case .pinTopic, .unpinTopic: store.togglePinOfActiveTopic()
+        case .pinTopic: if let card = store.currentGuestCard { store.pin(card, true) }
+        case .unpinTopic: if let card = store.currentGuestCard { store.pin(card, false) }
         case .toggleBench: store.toggleBench()
         case .chooseInPlay: store.presentChooseInPlay(keepingHistory: true)
         case .replaceFromBench: store.presentReplaceFromBench(keepingHistory: true)

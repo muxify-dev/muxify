@@ -1320,7 +1320,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         XCTAssertEqual(try topicList(), ["_", "A", "C", "B", "D"], "A goes down past the Open Place, and the Bench does not change")
     }
 
-    func testPinOfACardInAPlaceLeavesAnOpenPlaceAndUnpinPutsItAtTheTopOfTheBench() throws {
+    func testPinOfACardInAPlaceLeavesAnOpenPlaceAndUnpinPutsItAtTheEndOfTheGuests() throws {
         let inPlay = service(inPlay: 2)
         for title in ["A", "B", "C", "D"] { try regularTopic(title, using: inPlay) }
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
@@ -1329,7 +1329,37 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("A")))))
         XCTAssertEqual(try topicList(), ["A", "_", "B", "C", "D"], "D does not move up")
         _ = try change(inPlay.handle(EnvironmentRequest(.unpin, target: .topic(.named("A")))))
-        XCTAssertEqual(try topicList(), ["_", "B", "C", "A", "D"], "with in_play, Unpin puts the Topic at the top of the Bench")
+        XCTAssertEqual(try topicList(), ["_", "B", "C", "A", "D"], "Unpin puts the Topic at the end of the Guests and fills no Open Place")
+        XCTAssertEqual(try guests(), ["A", "C"])
+    }
+
+    func testPinAndUnpinOfABoardSessionByItsIdAndByItsSession() throws {
+        let inPlay = service(inPlay: 2)
+        for name in ["notes", "scratch"] {
+            try server.run(["new-session", "-d", "-s", name, "-c", sessionPath.folder.path])
+            _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName(name))))
+            if name == "notes" { _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.up), target: .sessionName(name)))) }
+        }
+        XCTAssertEqual(try topicList(), ["session:notes", "session:scratch"], "notes in place 1 and scratch a Guest")
+        let notes = try XCTUnwrap(TopicStore(paths: paths).read().boardSessions.first { $0.name == "notes" }).id
+
+        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .boardSession(notes))))
+        XCTAssertEqual(try topicList(), ["session:notes", "_", "session:scratch"], "Pin from a place leaves an Open Place")
+        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .sessionName("scratch"))))
+        XCTAssertEqual(try topicList(), ["session:notes", "session:scratch", "_"], "a Guest goes last among the Pinned cards")
+        var boardSessions = try TopicStore(paths: paths).read().boardSessions
+        XCTAssertEqual(boardSessions.filter(\.isPinned).count, 2)
+        XCTAssertTrue(boardSessions.allSatisfy { !$0.isGuest }, "Pin ends the Guest mark")
+        XCTAssertEqual(try failure(inPlay.handle(EnvironmentRequest(.benchTopic, target: .boardSession(notes)))).phase, .nothingChanged,
+                       "a Pinned card is not In Play, so Bench does not take it")
+
+        _ = try change(inPlay.handle(EnvironmentRequest(.unpin, target: .boardSession(notes))))
+        XCTAssertEqual(try topicList(), ["session:scratch", "_", "session:notes"],
+                       "Unpin makes a Guest, with a place free, and fills no Open Place")
+        boardSessions = try TopicStore(paths: paths).read().boardSessions
+        XCTAssertEqual(boardSessions.first { $0.id == notes }.map { [$0.isPinned, $0.isGuest] }, [false, true])
+        _ = try change(inPlay.handle(EnvironmentRequest(.unpin, target: .boardSession(notes))))
+        XCTAssertEqual(try topicList(), ["session:scratch", "_", "session:notes"], "a second Unpin changes nothing")
     }
 
     func testTheUpgradeGatherPutsTheBoardSessionsAtTheEndOfInPlayAndASecondGatherWritesNothing() throws {

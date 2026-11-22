@@ -33,8 +33,8 @@ bytes.
 and its `order`, in the scale of the records' `order`.
 
 `board_sessions` holds one row for each Board Session: its `id`, its `order` in
-the scale of the records' `order`, its Guest mark in `guest`, 1 or 0 as in
-`topics`, and its Remembered Session in `session`, JSON text in the shape of one
+the scale of the records' `order`, its Pin in `pinned` and its Guest mark in
+`guest`, each 1 or 0 as in `topics`, and its Remembered Session in `session`, JSON text in the shape of one
 entry of a record's `sessions`. See [Board Sessions](#board-sessions).
 
 `sessions` and `tags` are JSON, and Muxify writes each one whole. A remembered
@@ -268,13 +268,13 @@ Board: a row of the `board_sessions` table. The live Session points at its row
 with the tmux Session option `@muxify_session_id`, whose value is the row's `id`:
 
 ```sh
-sqlite3 ~/.local/state/muxify/muxify.db 'SELECT id, "order", guest, session FROM board_sessions'
+sqlite3 ~/.local/state/muxify/muxify.db 'SELECT id, "order", pinned, guest, session FROM board_sessions'
 ```
 
 Only a No Topic Session can be a Board Session: a Session whose `@muxify_topic`
 names an open Topic is not one, whatever its `@muxify_session_id`. A Board
-Session is never Pinned and never on the Bench. With `guest` 0, its card holds
-an In Play place. With `guest` 1, its card is a Guest. A Board Session past the
+Session is never on the Bench. With `pinned` 1, its card is Pinned, as a Pinned
+Topic's is. With `guest` 0, its card holds an In Play place. With `guest` 1, its card is a Guest. A Board Session past the
 last place, after the Config made `topics.in_play` smaller, also shows among
 the Guests. A new row goes to the end of the Guests, with `guest` 1. Its `id` is
 the Session's `@muxify_session_id`, or an id that tmux gives the Session when it

@@ -12,7 +12,9 @@ final class ProtocolWireTests: XCTestCase {
     /// This release's messages, in the order of the newest fixtures folder: the Board Sessions that a tmux restart keeps
     /// (`board`). The Mac declares the capability, gets the Board Sessions, one among the Guests and one in an In Play
     /// place, Reopens a Dormant one by its id and drops a card next to it; the phone gets each Dormant one as a
-    /// `dormant_session` card in its section; Start Fresh takes the same `board_session` target.
+    /// `dormant_session` card in its section; Start Fresh takes the same `board_session` target. Two Pinned ones, a live
+    /// one and a Dormant one, have `pinned` in their rows and their cards in the `pinned` section, and Pin and Unpin
+    /// take a `board_session` target.
     private func thisReleasesFrames() throws -> [Data] {
         func remembered(_ id: String, _ name: String) -> JSONValue {
             .object(["id": .string(id), "name": .string(name), "base_name": .string(name), "directory": .string("/work/" + name),
@@ -20,14 +22,18 @@ final class ProtocolWireTests: XCTestCase {
         }
         let guest = BoardSession(id: "s1", order: 3, isGuest: true, session: remembered("s1", "notes"))
         let placed = BoardSession(id: "s2", order: 1, isGuest: false, session: remembered("s2", "scratch"))
-        let shown = EnvironmentShown(contents: TopicContents(records: [], boardSessions: [guest, placed]),
-                                     tmux: TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true), config: Config())
+        let pinnedLive = BoardSession(id: "s3", order: 0, isPinned: true, isGuest: false, session: remembered("s3", "docs"))
+        let pinnedDormant = BoardSession(id: "s4", order: 1, isPinned: true, isGuest: false, session: remembered("s4", "logs"))
+        let boardSessions = [guest, placed, pinnedLive, pinnedDormant]
+        let docs = TmuxWindow.fixture(id: "@6", sessionID: "$6", sessionName: "docs", savedSessionID: "s3")
+        let shown = EnvironmentShown(contents: TopicContents(records: [], boardSessions: boardSessions),
+                                     tmux: TmuxSnapshot(windows: [docs], clients: [], panes: [], serverRunning: true), config: Config())
         return [
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: HostProtocol.capabilities)),
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, build: Self.build, capabilities: HostProtocol.macCapabilities,
                                                  nonce: "0a1b2c3d")),
             try ProtocolLine.request(id: 1, HostRequest.subscribe(.environment)),
-            try ProtocolLine.item(id: 1, EnvironmentItem(changes: [.boardSessions([guest, placed])])),
+            try ProtocolLine.item(id: 1, EnvironmentItem(changes: [.boardSessions(boardSessions)])),
             try ProtocolLine.request(id: 2, HostRequest.environment(EnvironmentRequest(.reopen, target: .boardSession("s1")))),
             try ProtocolLine.ok(id: 2, EnvironmentResponse.changed(TopicChange(topicID: nil, session: SessionID(rawValue: "$4"), sessionName: "notes"))),
             try ProtocolLine.request(id: 3, HostRequest.environment(EnvironmentRequest(.moveCard(.after(.boardSession("s1"))),
@@ -37,6 +43,10 @@ final class ProtocolWireTests: XCTestCase {
             try ProtocolLine.item(id: 4, shown),
             try ProtocolLine.request(id: 5, HostRequest.environment(EnvironmentRequest(.startFresh, target: .boardSession("s1")))),
             try ProtocolLine.ok(id: 5, EnvironmentResponse.changed(TopicChange(topicID: nil, session: SessionID(rawValue: "$5"), sessionName: "notes"))),
+            try ProtocolLine.request(id: 6, HostRequest.environment(EnvironmentRequest(.pin, target: .boardSession("s2")))),
+            try ProtocolLine.ok(id: 6, EnvironmentResponse.changed(TopicChange(topicID: nil))),
+            try ProtocolLine.request(id: 7, HostRequest.environment(EnvironmentRequest(.unpin, target: .boardSession("s3")))),
+            try ProtocolLine.ok(id: 7, EnvironmentResponse.changed(TopicChange(topicID: nil, session: SessionID(rawValue: "$6")))),
         ]
     }
 
