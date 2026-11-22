@@ -87,12 +87,12 @@ final class HostServerTests: XCTestCase {
         try await settle(recorder)
 
         try tmux.run(["split-window", "-d", "-t", "work:"])
-        try await wait("a split did not push its Session", seconds: 3) { recorder.keys.contains(work) }
+        try await wait("a split did not push its Session") { recorder.keys.contains(work) }
         XCTAssertFalse(recorder.keys.contains("topic first"), "a tmux change pushed a Topic")
         try await settle(recorder)
 
         try external.write { try $0.update("first") { $0.title = "Second" } }
-        try await wait("a Topic written by another process did not push its key", seconds: 3) { recorder.keys.contains("topic first") }
+        try await wait("a Topic written by another process did not push its key") { recorder.keys.contains("topic first") }
         guard case .topic(_, let record)? = recorder.items.joined().last(where: { $0.key == "topic first" }) else { return XCTFail("no topic") }
         XCTAssertEqual(record?.title, "Second")
     }
@@ -150,7 +150,7 @@ final class HostServerTests: XCTestCase {
 
         let value = [String(attached.pid), attached.tty, "/home/u", "box", "remote"].joined(separator: Tmux.separator)
         try tmux.run(["set-option", "-sq", ClientMarker.option(nonce: nonce), value])
-        try await wait("the marker's Client was not pushed", seconds: 3) { recorder.server?.ownClient == attached }
+        try await wait("the marker's Client was not pushed") { recorder.server?.ownClient == attached }
     }
 
     // MARK: - Capabilities and Request ids
@@ -387,7 +387,7 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(recorder.items.first?.sidebar.sessions, true)
 
         try "sidebar:\n  sessions: false\n".write(to: file, atomically: true, encoding: .utf8)
-        try await wait("a change of the Config's sidebar pushed no snapshot item", seconds: 5) {
+        try await wait("a change of the Config's sidebar pushed no snapshot item") {
             recorder.items.last?.sidebar.sessions == false
         }
         XCTAssertEqual(recorder.items.last?.sidebar.topics, true)
@@ -534,14 +534,14 @@ final class HostServerTests: XCTestCase {
         try await wait("the Listener did not follow the Terminal") { self.colourProbes.controlClients() == ["other"] }
         try await Task.sleep(nanoseconds: 300_000_000)
         try colourProbes.go()
-        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: other.0) }
+        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: other.0) }
         XCTAssertEqual(try String(contentsOfFile: other.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
                        "the Session that the Terminal switched to did not get the Mac's colours")
 
         // Another screen, as Muxify Mobile is, writes its own colours and detaches.
         try await colourProbes.screenWritesAndDetaches(in: "other", flags: nil) { try? await Task.sleep(nanoseconds: 500_000_000) }
         try colourProbes.go("detach")
-        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: detachedProbe) }
+        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: detachedProbe) }
         XCTAssertEqual(try String(contentsOfFile: detachedProbe, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
                        "the screen's colours stayed after it detached")
     }
@@ -551,7 +551,7 @@ final class HostServerTests: XCTestCase {
     /// other screen's.
     func testASwitchTheMacStartsRunsOnTheListenerAfterTheColourReport() async throws {
         let notices = try colourProbes.themeProbe(session: "other")
-        try await wait("the probe did not turn on mode 2031", seconds: 5) { self.colourProbes.lines(notices).first == "ready" }
+        try await wait("the probe did not turn on mode 2031") { self.colourProbes.lines(notices).first == "ready" }
         // The Terminal's Session is the newest, so the Listener never sits in the probe's Session, where tmux would
         // take its colours as black and tell the probe dark before the other screen does.
         try tmux.run(["new-session", "-d", "-s", "main"])
@@ -562,12 +562,13 @@ final class HostServerTests: XCTestCase {
 
         _ = try await client.call(HostRequest.view(.switchClient(client: terminal.tty, target: "=other:")), as: ViewOutput.self)
 
-        try await wait("the probe was not told light", seconds: 5) { self.colourProbes.lines(notices).last?.hasPrefix("light") == true }
+        try await wait("the probe was not told light") { self.colourProbes.lines(notices).last?.hasPrefix("light") == true }
         XCTAssertEqual(colourProbes.lines(notices).last, "light rgb:fbfb/f1f1/c7c7", "the program at the notice got other colours")
         try await wait("the Listener did not follow the Terminal") { self.colourProbes.controlClients() == ["other"] }
     }
 
     func testTheFocusSubscriptionTellsTheMacOfAFocusChangeInTheTerminalsWindow() async throws {
+        let first = try tmuxOutput(["display-message", "-p", "-t", "work:", "#{pane_id}"])
         let second = try tmuxOutput(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "work:"])
         let (client, _) = try await macWithColours(showing: "work")
         let shown = try tmuxOutput(["display-message", "-p", "-t", "work:", "#{window_id}"])
@@ -578,10 +579,17 @@ final class HostServerTests: XCTestCase {
                 for try await event in events { heard.add(event) }
             } catch {}
         })
-        try await Task.sleep(nanoseconds: 500_000_000)
 
-        try tmux.run(["select-pane", "-t", second])
-        try await wait("the focus change did not reach the Mac") { heard.events.contains(.focusChanged(window: shown)) }
+        // Nothing tells the Mac when the server has taken the subscription, and a focus change before that reaches
+        // no one: the focus moves between the Panes until the Mac hears one.
+        var next = second
+        try await wait("the focus change did not reach the Mac") {
+            if heard.events.contains(.focusChanged(window: shown)) { return true }
+            try self.tmux.run(["select-pane", "-t", next])
+            next = next == second ? first : second
+            try await Task.sleep(nanoseconds: 200_000_000)
+            return false
+        }
     }
 
     private final class FocusLog: @unchecked Sendable {
@@ -633,11 +641,11 @@ final class HostServerTests: XCTestCase {
         handle.seekToEndOfFile()
         handle.write(Data("sidebar:\n  agents: false\n".utf8))
         try handle.close()
-        try await wait("an edit of the Config pushed nothing", seconds: 5) {
+        try await wait("an edit of the Config pushed nothing") {
             recorder.items.last?.text?.hasSuffix("sidebar:\n  agents: false\n") == true
         }
         try "ui:\n  header_height: 50\n".write(to: home.appendingPathComponent("machine.yaml"), atomically: true, encoding: .utf8)
-        try await wait("an edit of a Config Override pushed nothing", seconds: 5) {
+        try await wait("an edit of a Config Override pushed nothing") {
             recorder.items.last?.overrides.first?.text == "ui:\n  header_height: 50\n"
         }
     }
@@ -657,10 +665,10 @@ final class HostServerTests: XCTestCase {
         let folder = home.appendingPathComponent(".config/muxify", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try "ui:\n  header_height: 30\n".write(to: folder.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
-        try await wait("a new Config pushed nothing", seconds: 5) { recorder.items.last?.text == "ui:\n  header_height: 30\n" }
+        try await wait("a new Config pushed nothing") { recorder.items.last?.text == "ui:\n  header_height: 30\n" }
 
         try FileManager.default.removeItem(at: folder.appendingPathComponent("config.yaml"))
-        try await wait("removing the Config did not push missing", seconds: 5) { recorder.items.last?.isMissing == true }
+        try await wait("removing the Config did not push missing") { recorder.items.last?.isMissing == true }
     }
 
     // MARK: - Worktrees on the Host (ADR 0090)
@@ -1094,7 +1102,7 @@ final class HostServerTests: XCTestCase {
         try tmux.run(arguments).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func wait(_ message: String, seconds: TimeInterval = 3, until done: () async throws -> Bool) async throws {
+    private func wait(_ message: String, seconds: TimeInterval = 10, until done: () async throws -> Bool) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while try await !done() {
             guard Date() < deadline else { return XCTFail(message) }

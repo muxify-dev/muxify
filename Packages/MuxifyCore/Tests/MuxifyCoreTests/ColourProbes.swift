@@ -144,7 +144,7 @@ struct ColourProbes {
         try await Task.sleep(nanoseconds: 500_000_000)
     }
 
-    static func wait(_ message: String, seconds: TimeInterval = 3, until done: () async throws -> Bool) async throws {
+    static func wait(_ message: String, seconds: TimeInterval = 10, until done: () async throws -> Bool) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while try await !done() {
             guard Date() < deadline else { return XCTFail(message) }

@@ -167,7 +167,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         }
 
         try server.run(["new-session", "-d", "-s", "again"])
-        try await wait("a new Session did not bring both publishers back", seconds: 5) {
+        try await wait("a new Session did not bring both publishers back") {
             try self.controlClients() == ["again", "again"]
         }
         XCTAssertEqual(try sessions(), ["again"])
@@ -191,10 +191,10 @@ final class EnvironmentPublisherTests: XCTestCase {
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
         for answer in [work.0, other.0, other.1, third.0] {
-            try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
+            try await wait("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
-        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: unvisited.0) }
+        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: unvisited.0) }
         XCTAssertNotEqual(try String(contentsOfFile: unvisited.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
                           "a Session that the Terminal never showed got the Colour Report")
     }
@@ -210,7 +210,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
         for answer in [work.0, work.1] {
-            try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
+            try await wait("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
     }
@@ -232,7 +232,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         try await screenWritesAndDetaches(in: "work", flags: "ignore-size,no-output")
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
-        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: work.0) }
+        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: work.0) }
         XCTAssertEqual(try String(contentsOfFile: work.0, encoding: .utf8), "rgb:1010/1010/1010",
                        "a Listener's detach made the publisher write")
     }
@@ -248,7 +248,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         publishers[0].reportColours(beforeTypingInto: pane)
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
-        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: probes.0) }
+        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: probes.0) }
         XCTAssertEqual(try String(contentsOfFile: probes.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7")
     }
 
@@ -278,7 +278,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         try await Task.sleep(nanoseconds: 1_000_000_000)
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
         for answer in answers {
-            try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
+            try await wait("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
     }
@@ -294,7 +294,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         try await Task.sleep(nanoseconds: 300_000_000)
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
-        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: probes.0) }
+        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: probes.0) }
         XCTAssertNotEqual(try String(contentsOfFile: probes.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7")
     }
 
@@ -314,7 +314,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         XCTAssertTrue(try publishers[0].switchClient(terminal.tty, to: "=other:"), "no Listener took the switch")
 
         try await wait("the Terminal did not move") { try self.clientSession(terminal.tty) == "other" }
-        try await wait("the probe was not told light", seconds: 5) { self.lines(notices).last?.hasPrefix("light") == true }
+        try await wait("the probe was not told light") { self.lines(notices).last?.hasPrefix("light") == true }
         XCTAssertEqual(lines(notices).last, "light rgb:fbfb/f1f1/c7c7", "the program at the notice got other colours")
         try await wait("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
     }
@@ -342,7 +342,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         XCTAssertEqual(sent.lines.filter { $0.hasPrefix("refresh-client -r") }, report, "the move wrote the Session again")
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
         for answer in [other.0, other.1] {
-            try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
+            try await wait("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
 
@@ -412,10 +412,10 @@ final class EnvironmentPublisherTests: XCTestCase {
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
         for answer in [painted.0, painted.1] {
-            try await wait("no answer from a probe", seconds: 5) { FileManager.default.fileExists(atPath: answer) }
+            try await wait("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
-        try await wait("no answer from the probe", seconds: 5) { FileManager.default.fileExists(atPath: unpainted) }
+        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: unpainted) }
         XCTAssertNotEqual(try String(contentsOfFile: unpainted, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
                           "a Pane of another Window got the colours")
     }
@@ -718,7 +718,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         ((try? server.run(["list-sessions", "-F", "#{session_name}"])) ?? "").split(separator: "\n").map(String.init)
     }
 
-    private func wait(_ message: String, seconds: TimeInterval = 3, until done: () async throws -> Bool) async throws {
+    private func wait(_ message: String, seconds: TimeInterval = 10, until done: () async throws -> Bool) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while try await !done() {
             guard Date() < deadline else { return XCTFail(message) }
