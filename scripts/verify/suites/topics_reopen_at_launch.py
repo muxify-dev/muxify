@@ -65,8 +65,9 @@ class ReopenAtLaunchOn(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.s = launch(cls)
-        wait(lambda: {'work/pinned', 'work/alpha', 'notes'} <= set(sessions(cls.s)),
-             lambda: 'the Dormant Topics and Guest Session were not Reopened: %s' % sessions(cls.s), seconds=30)
+        # Reopen makes each Session first and its other Windows with later tmux commands, so wait for the Windows too.
+        wait(lambda: all(sessions(cls.s).get(name) == 2 for name in ('work/pinned', 'work/alpha', 'notes')),
+             lambda: 'the Dormant Topics and Guest Session were not Reopened with their Windows: %s' % sessions(cls.s), seconds=30)
 
     def test_a_launch_reopens_every_dormant_topic_with_its_windows(self):
         found = sessions(self.s)
