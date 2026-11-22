@@ -82,6 +82,46 @@ Docker, so `MUXIFY_TEST_TIME_SCALE=3 make test` waits as CI waits. A bound on
 elapsed time that a test keeps, where speed is the behaviour under test, goes
 through `scaled(_:)` too.
 
+## Stress a flaky test
+
+A test that passes on a Mac and fails in CI often depends on what CI changes: a
+slower, busier machine and another number of test workers. A stress run makes
+those differences on purpose, so the test fails on your machine instead of on
+master.
+
+`make test-stress` runs `make test`'s `xcodebuild test`, without the lints and
+the Python unittests, with:
+
+- the time scale 3, as CI sets it;
+- a CPU hog that keeps every core busy for the whole run
+  (`scripts/with-cpu-hog.sh`), stopped by PID when the run ends, also when it
+  fails or is interrupted;
+- twice as many parallel test workers as the Mac has cores;
+- 5 iterations that stop at the first failure (`-run-tests-until-failure`).
+
+It never retries, so a pass means no test failed. A failed run prints each
+failure's message and line, as `make test` does, and exits with the test run's
+status. `STRESS_ITERATIONS` sets the number of iterations, and `STRESS_ONLY`
+names one test target, class or test, as `-only-testing` takes it:
+
+```sh
+make test-stress STRESS_ONLY=MuxifyCoreTests/EventuallyTests STRESS_ITERATIONS=50
+```
+
+`make test-linux STRESS=1` is the same stress run on Linux: the time scale 3,
+the CPU hog inside the container, and `STRESS_ITERATIONS` runs of `swift test`
+that stop at the first failure. `STRESS_FILTER` passes `swift test --filter`,
+and `STRESS_PACKAGE` chooses `core` (MuxifyCore), `cli` or `both` (the
+default):
+
+```sh
+make test-linux STRESS=1 STRESS_PACKAGE=core STRESS_FILTER=EventuallyTests STRESS_ITERATIONS=50
+```
+
+A fix to a flaky test is proven by 50 iterations of its class under stress, on
+the platform where it failed. A single pass of `make test` proves nothing about
+a flaky test.
+
 ## Live SSH test
 
 The live tests (`LiveSSHTests` and `LiveHostCLITests`) skip unless
