@@ -199,7 +199,7 @@ final class GuestTests: XCTestCase {
 
         var guest = transaction("payments auth-bug docs + infra(G) ~scratch(G) | release")
         try guest.bench(.topic("infra"), inPlay: limit)
-        XCTAssertEqual(sidebar(guest), "payments auth-bug docs + ~scratch(G) | infra release", "as Bench of a Guest Session")
+        XCTAssertEqual(sidebar(guest), "payments auth-bug docs + ~scratch(G) | infra release", "as Bench of a Board Session")
 
         var benched = transaction("payments auth-bug docs + | release")
         XCTAssertThrowsError(try benched.bench(.topic("release"), inPlay: limit), "a Benched Topic is not In Play")

@@ -1,4 +1,4 @@
-"""Topics in the Sidebar: the "N more below" pill under a Topics list that does not fit.
+"""Topics in the Sidebar: the "N more below" pill under a Board that does not fit.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_overflow_sidebar
@@ -29,7 +29,7 @@ class TopicsOverflowSidebar(TopicsSidebar):
         return int(found.group(1)) if found else None
 
     def cards_below_list(self, rs):
-        """The cards that end below the Topics list or in the band of the "more below" pill, which covers them, in list
+        """The cards that end below the Board or in the band of the "more below" pill, which covers them, in list
         order."""
         edge, _ = frame(self.s.row('topics-list', rs))
         cards = [key for key in self.s.ids(rs)
@@ -43,7 +43,7 @@ class TopicsOverflowSidebar(TopicsSidebar):
             self.write_topic(topic_id, 'Overflow ' + topic_id[-2:])
         # A check before this one may leave its Topics until the app reads their removal, so wait for these alone.
         rs = s.wait_rows(lambda rs: self.topic_rows(rs) == ['topic-' + i for i in ids] and (self.more_below(rs) or 0) > 0,
-                         lambda: 'a Topics list of only the %d Overflow Topics shows no "more below" pill: %s'
+                         lambda: 'a Board of only the %d Overflow Topics shows no "more below" pill: %s'
                                  % (COUNT, self.topic_rows(s.rows())))
         hidden = self.cards_below_list(rs)
         self.assertEqual(self.more_below(rs), len(hidden),
@@ -61,7 +61,7 @@ class TopicsOverflowSidebar(TopicsSidebar):
         end = s.wait_rows(lambda rs: not s.has('topics-more-below', rs),
                           'the "more below" pill stays when the list is scrolled to its end')
         self.assertEqual(frame(s.row('topics-list', end)), frame(s.row('topics-list', rs)),
-                         'the Topics list changed its size when the line went away, so its cards moved')
+                         'the Board changed its size when the line went away, so its cards moved')
 
     def test_more_below_pill_slides_out_with_the_end_of_the_list(self):
         s = self.s
@@ -70,7 +70,7 @@ class TopicsOverflowSidebar(TopicsSidebar):
         # The check before may leave the list at its end, where the line does not show, so wait for the cards, not
         # the line, and then scroll.
         s.wait_rows(lambda rs: all(s.has('topic-slide-%02d' % i, rs) for i in range(COUNT)),
-                    'the Topics list does not show the %d Slide Topics' % COUNT)
+                    'the Board does not show the %d Slide Topics' % COUNT)
 
         def line_drop(rs):
             """How far the line is below its place at the bottom of the list."""

@@ -17,7 +17,7 @@ CONFIG = '''ui:
   pulse: %s
 sidebar:
   agents_scope:
-    topics: all
+    board: all
     sessions: all
 '''
 AGENTS = 4

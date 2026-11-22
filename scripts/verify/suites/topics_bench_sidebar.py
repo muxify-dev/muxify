@@ -698,7 +698,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         before = self.top(c, rs)
         # A swipe up past the end, which bounces a list that bounces.
         swiped = s.act('scroll', 'topics-list', wheel=True, by=200, steps=10, watch=[c, 'topics-more-above'], watch_seconds=1)
-        self.assertTrue(swiped['pressed'], 'the swipe found no scroll view under the Topics list')
+        self.assertTrue(swiped['pressed'], 'the swipe found no scroll view under the Board')
         tops = [y + height for _, y, _, height in swiped['frames'][c]]
         self.assertTrue(all(abs(top - before) <= 1 for top in tops),
                         'a drawn frame showed %s away from its place under the line: %s, before %s' % (c, tops, before))

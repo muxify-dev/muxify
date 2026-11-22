@@ -35,7 +35,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
         ceiling = frame(self.s.row('topics-list', rs))[0]
         bottom, top = frame(self.s.row('settled-topics', rs))
         self.assertTrue(floor <= bottom and top <= ceiling,
-                        '%s: the Settled row %s is not between the Topics list and the Agents section (%s..%s)'
+                        '%s: the Settled row %s is not between the Board and the Agents section (%s..%s)'
                         % (when, (bottom, top), floor, ceiling))
 
     def test_an_open_group_keeps_its_row_in_view(self):
@@ -85,7 +85,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
                          'Go to… a Settled Topic did not open the Settled group')
         self.select_window(sid + ':')
         s.wait_rows(lambda rs: not self.expanded('settled-topics', rs),
-                    'going to a Topic in the Topics list did not close the Settled group')
+                    'going to a Topic on the Board did not close the Settled group')
 
     def test_settled_group_lists_settled_topic_with_remembered_windows_and_its_reopen_link_rebuilds_it_at_once(self):
         self.write_topic('group-settled', 'Group settled', settled_at='2031-01-01T10:00:00Z',
@@ -111,7 +111,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.assertFalse(self.s.has('reopen-choice-reopen'), 'the Reopen link showed the Reopen choice')
         latency, rs = self.rows_until(lambda rs: self.s.has('topic-group-settled', rs)
                                       and not self.grouped('topic-group-settled', 'settled-topics', rs))
-        self.assertIsNotNone(latency, 'Reopen did not return the Topic to the Topics list; Topic rows %s' % self.topic_rows(rs))
+        self.assertIsNotNone(latency, 'Reopen did not return the Topic to the Board; Topic rows %s' % self.topic_rows(rs))
         self.assertIsNone(self.records()['group-settled'].get('settled_at'), 'Reopen kept the settle date in the record')
 
     def test_a_topic_settled_now_shows_today_above_its_reopen_choice(self):

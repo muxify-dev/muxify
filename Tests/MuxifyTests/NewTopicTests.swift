@@ -85,7 +85,7 @@ final class NewTopicTests: XCTestCase {
         let shown = BoardModel(records: [], boardSessions: [lock], windows: [], config: Config(), selection: TopicSelection(),
                                 location: .emptyTopic(.session("g1")))
         XCTAssertEqual(shown.activeTopic, .session("g1"))
-        XCTAssertEqual(shown.emptyTopic?.id, .session("g1"), "the page shows the Dormant Guest Session's Reopen choice")
+        XCTAssertEqual(shown.emptyTopic?.id, .session("g1"), "the page shows the Dormant Board Session's Reopen choice")
         XCTAssertEqual(shown.emptyTopic?.state, .dormant)
     }
 }

@@ -32,7 +32,7 @@ class AgentFormatsSidebar(unittest.TestCase):
         self.s.tmux('set-option', '-t', self.session, '@muxify_topic', 'formats')
         self.s.tmux('select-pane', '-t', self.pane, '-T', 'Agent task')
         self.s.tmux('select-pane', '-t', self.pane)
-        self.s.show_sidebar_mode('topics')
+        self.s.show_sidebar_mode('board')
         self.wait_text('Agent task, Format Topic')
 
     def text(self, rows):
@@ -49,11 +49,11 @@ class AgentFormatsSidebar(unittest.TestCase):
   formats:
     agent:
       title:
-        topics: '#{topic_title}'
+        board: '#{topic_title}'
         sessions: '#{window_name}'
       summary: '#{session_name} / #{agent_status}'
 """)
-        for mode, title in [('topics', 'Format Topic'), ('sessions', 'stable-window')]:
+        for mode, title in [('board', 'Format Topic'), ('sessions', 'stable-window')]:
             self.s.show_sidebar_mode(mode)
             self.wait_text(title + ', format-session / working')
         self.config.write_text("""sidebar:
@@ -77,7 +77,7 @@ class AgentFormatsSidebar(unittest.TestCase):
       summary: '#{pane_label} / #{pane_active_flag}'
 """)
         index = self.s.tmux('display-message', '-p', '-t', self.window, '#{window_index}')
-        for mode in ['topics', 'sessions']:
+        for mode in ['board', 'sessions']:
             self.s.show_sidebar_mode(mode)
             for selected, active in [(self.pane, '1'), (self.other, '0')]:
                 title = 'Changed task ' + mode + ' ' + active

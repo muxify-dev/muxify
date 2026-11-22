@@ -21,7 +21,7 @@ final class ReopenAtLaunchTests: XCTestCase {
          topic("settled", settled: true), topic("empty", remembers: false), topic("live", order: 4)]
     }
 
-    /// Two Guest Sessions: `scratch` is live, `notes` is Dormant.
+    /// Two Board Sessions: `scratch` is live, `notes` is Dormant.
     private var contents: TopicContents {
         TopicContents(records: records, boardSessions: [BoardSession(id: "notes", order: 9, isGuest: true), BoardSession(id: "scratch", order: 10, isGuest: true)])
     }
@@ -51,7 +51,7 @@ final class ReopenAtLaunchTests: XCTestCase {
     func testEachEnvironmentGetsOneAnswerPerLaunchSoATmuxRestartReopensNothing() {
         var reopen = ReopenAtLaunch()
         XCTAssertEqual(reopen.cards(in: "Local", enabled: true, contents: contents, windows: windows).count, 6)
-        // The tmux server restarted while Muxify ran: every open Topic and Guest Session is Dormant again.
+        // The tmux server restarted while Muxify ran: every open Topic and Board Session is Dormant again.
         XCTAssertEqual(reopen.cards(in: "Local", enabled: true, contents: contents, windows: []), [])
         XCTAssertEqual(reopen.cards(in: "devbox", enabled: true, contents: contents, windows: windows).count, 6)
         XCTAssertEqual(reopen.cards(in: "devbox", enabled: true, contents: contents, windows: windows), [])

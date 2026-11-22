@@ -407,7 +407,7 @@ final class HostServerTests: XCTestCase {
         try await wait("no first items") { !boardSessions.items.isEmpty && !plain.items.isEmpty && !shown.items.isEmpty && !olderShown.items.isEmpty }
 
         XCTAssertTrue(boardSessions.keys.contains("board_sessions"))
-        XCTAssertFalse(plain.keys.contains("board_sessions"), "an older Mac shows a Guest Session as a No Topic Session")
+        XCTAssertFalse(plain.keys.contains("board_sessions"), "an older Mac shows a Board Session as a No Topic Session")
         XCTAssertEqual(shown.items.last?.snapshot.cards, [.dormantSession(id: "gone", name: "notes")])
         XCTAssertEqual(olderShown.items.last?.snapshot.cards, [], "an older phone gets no card that it does not know")
 
@@ -423,7 +423,7 @@ final class HostServerTests: XCTestCase {
         let work = try sessionID("work")
         let older = subscribeLockOrders(try await connect())
         let newer = subscribeLockOrders(try await connect(capabilities: ["board"]))
-        try await wait("the older Mac got no lock_order for the Guest Session") { older.lastOrder(of: work) == order }
+        try await wait("the older Mac got no lock_order for the Board Session") { older.lastOrder(of: work) == order }
         try await wait("the newer Mac got no first item") { newer.events(of: work) > 0 }
 
         try TopicStore(paths: paths).write { $0.boardSessions[0].order = order + 5 }

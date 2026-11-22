@@ -61,7 +61,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         def shown(rs):
             return [row for row in self.s.ids(rs) if row in expected]
         self.s.wait_rows(lambda rs: shown(rs) == expected and 'Guest' in self.s.row(key, rs).get('accessibilityValue', ''),
-                         lambda: 'the new Topic is not a Guest under the Guest Session: %s' % shown(self.s.rows()))
+                         lambda: 'the new Topic is not a Guest under the Board Session: %s' % shown(self.s.rows()))
 
     def test_window_moved_to_topic_keeps_its_panes_agent_and_browser(self):
         s = self.s
@@ -404,7 +404,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_go_to_session_on_a_session_card_goes_to_the_sessions_active_window(self):
         s = self.s
-        self.addCleanup(self.s.show_sidebar_mode, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'board')
         sid = self.new_session('card-session', self.beta)
         first, second = self.windows(sid, 2)
         s.tmux('select-window', '-t', second)
@@ -420,7 +420,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_a_click_on_another_session_card_goes_to_the_sessions_active_window(self):
         s = self.s
-        self.addCleanup(self.s.show_sidebar_mode, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'board')
         sid = self.new_session('card-session-click', self.beta)
         first, second = self.windows(sid, 2)
         s.tmux('select-window', '-t', second)

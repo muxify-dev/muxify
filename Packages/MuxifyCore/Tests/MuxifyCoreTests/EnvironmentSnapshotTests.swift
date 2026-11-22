@@ -123,7 +123,7 @@ final class EnvironmentSnapshotTests: XCTestCase {
                              windows: [window("$1", topic: "a"), window("$3", guest: true), window("$4")])
         XCTAssertEqual(sections(shown)?.places, ["topic:a", "topic:b"])
         XCTAssertEqual(sections(shown)?.guests, ["session:$3"])
-        XCTAssertEqual(shown.noTopic, ["$4"], "a Locked Session has a card, so it is not in no_topic")
+        XCTAssertEqual(shown.noTopic, ["$4"], "a Board Session has a card, so it is not in no_topic")
     }
 
     func testADormantGuestSessionIsADormantSessionCardAtItsPlaceAmongTheGuests() throws {
@@ -166,7 +166,7 @@ final class EnvironmentSnapshotTests: XCTestCase {
                              windows: [window("$5", guest: true)], inPlay: 1)
         XCTAssertEqual(sections(shown)?.places, ["topic:a"])
         XCTAssertEqual(sections(shown)?.guests, ["topic:g", "session:$5"])
-        XCTAssertEqual(sections(shown)?.bench, ["topic:b"], "a Locked Session is never Benched")
+        XCTAssertEqual(sections(shown)?.bench, ["topic:b"], "a Board Session is never Benched")
     }
 
     func testAPinnedTopicIsPinnedAndHoldsNoPlace() {
@@ -229,7 +229,7 @@ final class EnvironmentSnapshotTests: XCTestCase {
             XCTAssertEqual(topicCard("a", in: shown)?.mark, card, context)
             XCTAssertEqual(shown.sessions.first { $0.id == "$1" }?.mark, session.map(CardMark.agent), "a Session shows its Agent mark: " + context)
             guard case .inPlay(_, _, let guests, _) = shown.unpinned, case .session(_, let locked)? = guests.last else { return XCTFail("no Locked card") }
-            XCTAssertEqual(locked, session.map(CardMark.agent), "a Locked Session's card has no Unread of its own: " + context)
+            XCTAssertEqual(locked, session.map(CardMark.agent), "a Board Session's card has no Unread of its own: " + context)
         }
     }
 

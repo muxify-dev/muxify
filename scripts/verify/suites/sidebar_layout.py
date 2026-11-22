@@ -1,8 +1,8 @@
-"""Where the Sidebar puts its parts: the Settled group at the bottom of the panel, under the Topics list,
+"""Where the Sidebar puts its parts: the Settled group at the bottom of the panel, under the Board,
 the Agents section, Pane rows, card title lines and open Session cards that the Config can decide, and the accessibility elements of the
 card lists.
 
-This suite has its own sandbox with few Topics, so the Topics list is shorter than the Sidebar. In the
+This suite has its own sandbox with few Topics, so the Board is shorter than the Sidebar. In the
 topics_*_sidebar suites the list grows with every check, and a position would depend on the order of the checks.
 
 Run from the repo root after `make build`:
@@ -48,13 +48,13 @@ class SidebarLayout(unittest.TestCase):
 
     def test_settled_group_sits_at_the_bottom_of_the_panel(self):
         rs = self.s.wait_rows(lambda rs: all(self.s.has(key, rs) for key in ['topics-list', 'topic-layout-open', 'settled-topics']),
-                              'the Topics list does not show the open Topic and the Settled group')
+                              'the Board does not show the open Topic and the Settled group')
         list_bottom, list_top = frame(self.s.row('topics-list', rs))
         topic_bottom, topic_top = frame(self.s.row('topic-layout-open', rs))
         _, settled_top = frame(self.s.row('settled-topics', rs))
         self.assertLess(list_top - topic_top, 40, 'the open Topic is not at the top of the list')
         self.assertLess(abs(list_bottom - settled_top), 12,
-                        'Settled starts %.0f points away from the end of the Topics list' % (list_bottom - settled_top))
+                        'Settled starts %.0f points away from the end of the Board' % (list_bottom - settled_top))
         self.assertGreater(topic_bottom - settled_top, 100,
                            'the group follows the Topics instead of the bottom of the panel')
 
@@ -71,13 +71,13 @@ class SidebarLayout(unittest.TestCase):
 
     def test_custom_window_and_pane_lines_follow_the_sidebar_mode(self):
         self.addCleanup(self.write_config, '')
-        self.addCleanup(self.s.show_sidebar_mode, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'board')
         self.write_config("""sidebar:
   panes: true
   formats:
     window:
       title:
-        topics: 'Window Topics #{window_index}'
+        board: 'Window Board #{window_index}'
         sessions: 'Window Sessions #{window_index}'
       summary: 'Window Summary'
     pane:
@@ -85,11 +85,11 @@ class SidebarLayout(unittest.TestCase):
       summary: 'Pane Summary'
 """)
         window = self.s.tmux('display-message', '-p', '-t', self.sessions[1] + ':', '#{window_id}')
-        for mode in ['topics', 'sessions']:
+        for mode in ['board', 'sessions']:
             self.s.show_sidebar_mode(mode)
-            cards = (['topic-layout-open', 'topic-layout-other'] if mode == 'topics'
+            cards = (['topic-layout-open', 'topic-layout-other'] if mode == 'board'
                      else ['session-' + sid for sid in self.sessions])
-            window_key = ('topic-window-' if mode == 'topics' else 'session-window-') + window
+            window_key = ('topic-window-' if mode == 'board' else 'session-window-') + window
             checks = [(cards[1], window_key, 'Window ' + mode.title(), 'Window Summary'),
                       (cards[0], 'pane-' + self.panes[0], 'Pane Format', 'Pane Summary')]
             for card, row_key, title, summary in checks:
@@ -149,7 +149,7 @@ class SidebarLayout(unittest.TestCase):
     def test_session_cards_one_keeps_only_the_location_card_open(self):
         self.addCleanup(self.move_client, self.sessions[0])
         self.addCleanup(self.write_config, '')
-        self.addCleanup(self.s.show_sidebar_mode, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'board')
         self.s.show_sidebar_mode('sessions')
         first, second = ['session-' + sid for sid in self.sessions]
         def expanded(key, rs):
@@ -210,7 +210,7 @@ class SidebarLayout(unittest.TestCase):
 
     def test_no_element_in_the_sessions_list_covers_two_session_cards(self):
         self.s.show_sidebar_mode('sessions')
-        self.addCleanup(self.s.show_sidebar_mode, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'board')
         self.assert_no_element_spans_two_cards('sessions-list', ['session-' + sid for sid in self.sessions])
 
     def test_a_click_tool_clicks_a_closed_topic_card_on_its_title_line(self):

@@ -107,7 +107,7 @@ final class TopicGroupsTests: XCTestCase {
 
         state.toggle(.settled)
         follow(window: "@1")
-        XCTAssertNil(state.open, "going to a Topic in the Topics list closes the open group")
+        XCTAssertNil(state.open, "going to a Topic on the Board closes the open group")
         state.toggle(.settled)
         follow(window: "@3")
         XCTAssertNil(state.open, "going to No Topic closes the open group")

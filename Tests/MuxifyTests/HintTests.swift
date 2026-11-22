@@ -258,10 +258,10 @@ final class HintTests: XCTestCase {
                        [.topic("pinned"), .topic("first"), .topic("last"), .boardSession("$1")],
                        "a Lock that an older Muxify kept among the Topics is a Guest too")
         XCTAssertEqual(topics.activeTopic, .session("$1"))
-        XCTAssertEqual(topics.rows.first { $0.id == .session("$1") }?.isExpanded, true, "going into a Locked Session opens its card")
+        XCTAssertEqual(topics.rows.first { $0.id == .session("$1") }?.isExpanded, true, "going into a Board Session opens its card")
         XCTAssertEqual(topics.rows.first { $0.id == .session("$1") }?.sessions.map(\.id.session), ["$1"])
-        XCTAssertNil(topics.openedNoTopicSession, "a Locked Session has its own card, not the No Topic card")
-        XCTAssertEqual(topics.nextTopic(after: .topic("last")), .session("$1"), "a Guest Session can be the Next Topic")
+        XCTAssertNil(topics.openedNoTopicSession, "a Board Session has its own card, not the No Topic card")
+        XCTAssertEqual(topics.nextTopic(after: .topic("last")), .session("$1"), "a Board Session can be the Next Topic")
     }
 
     func testStepWrapsAndStartsAtAnEndWithoutACurrentTarget() {
@@ -306,7 +306,7 @@ final class HintTests: XCTestCase {
         let rows: [QuickSwitchTarget] = [.topic("pinned"), .topic("work"), .topic("dormant"), .boardSession("$4")]
 
         let inWork = targets(selecting: "@1")
-        XCTAssertEqual(inWork.topics, rows, "Pinned first, the Guest Session after the In Play places, no No Topic")
+        XCTAssertEqual(inWork.topics, rows, "Pinned first, the Board Session after the In Play places, no No Topic")
         XCTAssertEqual(Set(inWork.sessions), [.session("$1"), .session("$3")], "only the Active Topic's Sessions")
         XCTAssertEqual(inWork.step(.topic, .next, from: .topic("dormant")), .boardSession("$4"))
         XCTAssertEqual(inWork.step(.topic, .next, from: .boardSession("$4")), .topic("pinned"))
@@ -315,12 +315,12 @@ final class HintTests: XCTestCase {
         XCTAssertEqual(inNoTopic.sessions, [.session("$2"), .session("$6")], "No Topic Sessions without the Locked one")
         XCTAssertEqual(inNoTopic.topics, rows)
 
-        XCTAssertEqual(targets(selecting: "@4").sessions, [.session("$4")], "a Locked Session steps only to itself")
+        XCTAssertEqual(targets(selecting: "@4").sessions, [.session("$4")], "a Board Session steps only to itself")
         XCTAssertEqual(targets(selecting: nil).sessions, [])
 
         let sessionMode = targets(selecting: "@1", mode: .sessions)
         XCTAssertEqual(sessionMode.sessions, sessions.map { .session($0.id) }, "every Session in Sessions mode")
-        XCTAssertEqual(sessionMode.topics, rows, "the Topics list order in Sessions mode too")
+        XCTAssertEqual(sessionMode.topics, rows, "the Board order in Sessions mode too")
     }
 
     func testTopicWindowStepGoesThroughEveryWindowOfTheActiveTopic() {

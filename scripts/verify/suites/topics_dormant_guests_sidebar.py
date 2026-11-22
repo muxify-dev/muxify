@@ -1,13 +1,13 @@
-"""A Guest Session after a tmux restart: its Lock in the state database keeps its card at its place among the Guests,
-Dormant, and a press on the card creates its Session again with its Windows. Its page offers Start Fresh, which
-creates the Session with one shell Window.
+"""A Board Session after a tmux restart: its row in the state database keeps its card at its place, among the Guests
+or in an In Play place, Dormant, and a press on the card creates its Session again with its Windows. Its page offers
+Start Fresh, which creates the Session with one shell Window.
 
-A restart ends every Session of the fixture, so these checks have a suite of their own. GuestSessionLockTests and
-EnvironmentPublisherTests prove the rules: a restart keeps the Lock, and an end on the same server ends it.
+A restart ends every Session of the fixture, so these checks have a suite of their own. BoardSessionTests and
+EnvironmentPublisherTests prove the rules: a restart keeps the row, and an end on the same server ends it.
 
-The card of a Guest Session gives "Make a Guest" on the Session card and its default action on its own header
-(UI/SidebarView.swift), so the checks reach them without a context menu. The page shows when the Dormant Guest
-Session is the Next Topic after a Settle, as a Dormant Topic's page does.
+The Session card gives "Make a Guest", and the card of a Board Session gives "Move Up" and its default action on its
+own header (UI/SidebarView.swift), so the checks reach them without a context menu. The page shows when the Dormant
+Board Session is the Next Topic after a Settle, as a Dormant Topic's page does.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_dormant_guests_sidebar
@@ -26,7 +26,7 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
         return self.s.has(upper, rs) and self.s.has(lower, rs) and frame(self.s.row(upper, rs))[1] > frame(self.s.row(lower, rs))[1]
 
     def make_guest(self, name, windows):
-        """A No Topic Session with `windows` Windows, made a Guest from its Session card; returns its Lock id."""
+        """A No Topic Session with `windows` Windows, made a Guest from its Session card; returns its Board Session id."""
         s = self.s
         sid = self.new_session(name, self.beta)
         for index in range(1, windows):
@@ -71,12 +71,12 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
         later = self.make_guest('dormant-later', windows=1)
         key, later_key = 'locked-' + notes, 'locked-' + later
         s.wait_rows(lambda rs: self.above('topics-guests-line', key, rs) and self.above(key, later_key, rs),
-                    'the two Guest Sessions are not in the Guests in the order they were made')
+                    'the two Board Sessions are not in the Guests in the order they were made')
 
         self.restart_tmux()
         self.addCleanup(s.tmux_ok, 'kill-session', '-t', '=dormant-notes')
         rs = s.wait_rows(lambda rs: s.has(key, rs) and 'Dormant' in s.row(key, rs).get('accessibilityValue', ''),
-                         'the Guest Session has no Dormant card after the tmux restart', seconds=15)
+                         'the Board Session has no Dormant card after the tmux restart', seconds=15)
         self.assertIn('Guest', s.row(key, rs).get('accessibilityValue', ''), self.describe(key, rs))
         self.assertIn('dormant-notes', s.row(key, rs).get('accessibilityLabel', ''), self.describe(key, rs))
         self.assertEqual(s.row(key, rs).get('accessibilityHelp'), '2 Windows',
@@ -94,6 +94,33 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
         s.wait_rows(lambda rs: s.has(key, rs) and 'Dormant' not in s.row(key, rs).get('accessibilityValue', '')
                     and self.above(key, later_key, rs), 'the card is not live again at its place', seconds=15)
 
+    def test_a_board_session_in_a_place_comes_back_dormant_at_its_place_and_a_press_reopens_it_there(self):
+        s = self.s
+        notes = self.make_guest('place-notes', windows=2)
+        key = 'locked-' + notes
+        self.move_into_a_place(key)
+        wait(lambda: next((b for b in self.store.board_sessions() if b['id'] == notes), {}).get('guest') is False,
+             'the row of the Board Session keeps the Guest mark after the move')
+
+        self.restart_tmux()
+        self.addCleanup(s.tmux_ok, 'kill-session', '-t', '=place-notes')
+        rs = s.wait_rows(lambda rs: s.has(key, rs) and 'Dormant' in s.row(key, rs).get('accessibilityValue', ''),
+                         'the Board Session has no Dormant card after the tmux restart', seconds=15)
+        value = s.row(key, rs).get('accessibilityValue', '')
+        self.assertNotIn('Guest', value, 'the Dormant card left its In Play place: ' + self.describe(key, rs))
+        self.assertIn('Board Session', value, self.describe(key, rs))
+        if s.has('topics-guests-line', rs):
+            self.assertTrue(self.above(key, 'topics-guests-line', rs), 'the Dormant card is not above the Guests line')
+
+        s.act('press', key)
+        def reopened():
+            found = s.tmux_ok('list-windows', '-t', '=place-notes:', '-F', '#{window_id}')
+            return found.returncode == 0 and len(found.stdout.split()) == 2
+        wait(reopened, 'a press on the Dormant card did not create its Session with its 2 Windows', seconds=15)
+        s.wait_rows(lambda rs: s.has(key, rs) and 'Dormant' not in s.row(key, rs).get('accessibilityValue', '')
+                    and 'Guest' not in s.row(key, rs).get('accessibilityValue', ''),
+                    'the card is not live again in its In Play place', seconds=15)
+
     def test_the_page_of_a_dormant_guest_session_offers_start_fresh_which_makes_one_window_at_its_place(self):
         s = self.s
         self.write_topic('fresh-upper', 'Fresh upper', order=0)
@@ -104,7 +131,7 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
         self.restart_tmux()
         self.addCleanup(s.tmux_ok, 'kill-session', '-t', '=fresh-notes')
         s.wait_rows(lambda rs: s.has(key, rs) and 'Dormant' in s.row(key, rs).get('accessibilityValue', ''),
-                    'the Guest Session has no Dormant card after the tmux restart', seconds=15)
+                    'the Board Session has no Dormant card after the tmux restart', seconds=15)
 
         sid = self.new_session('beta/fresh-upper', self.beta, topic='fresh-upper')
         upper = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
@@ -119,11 +146,11 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
             found, _ = self.rows_until(lambda rs: s.has('palette-note', rs) and 'Then opens: fresh-notes' in self.describe('palette-note', rs),
                                        seconds=3)
             return found is not None
-        wait(settle_names_the_dormant_card, 'Settle of the Topic above does not name the Dormant Guest Session as the Next Topic',
+        wait(settle_names_the_dormant_card, 'Settle of the Topic above does not name the Dormant Board Session as the Next Topic',
              seconds=20)
         s.act('press', 'palette-accept')
         rs = s.wait_rows(lambda rs: s.has('reopen-choice-start-fresh', rs),
-                         "Next Topic did not show the Dormant Guest Session's Reopen choice", seconds=15)
+                         "Next Topic did not show the Dormant Board Session's Reopen choice", seconds=15)
         self.assertIn('w1', self.describe('reopen-session-fresh-notes', rs), 'the Reopen column does not list the remembered Windows')
         fresh = self.describe('start-fresh-session-fresh-notes', rs)
         self.assertIn('shell', fresh, 'the Start Fresh column does not list its shell Window')

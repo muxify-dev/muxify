@@ -3,7 +3,7 @@ import XCTest
 import MuxifyTestSupport
 
 /// A Lock in the state database: what each read of the server changes in it, and what Reopen and Start Fresh of a
-/// Dormant Guest Session create.
+/// Dormant Board Session create.
 final class BoardSessionTests: XCTestCase {
     private func window(_ n: Int, session: String = "$1", name: String = "notes", lock: String = "g1", topic: String? = nil) -> TmuxWindow {
         .fixture(id: "@\(n)", sessionID: session, sessionName: name, index: n, name: "w\(n)", path: "/work/notes/\(n)", topicID: topic,
@@ -41,7 +41,7 @@ final class BoardSessionTests: XCTestCase {
         let moved = snapshot([window(1, topic: "t")])
         XCTAssertTrue(lock.windows(in: moved.windows, open: ["t"]).isEmpty)
         XCTAssertEqual(lock.remembering(moved, open: ["t"], previously: [window(1)]), .ended)
-        XCTAssertEqual(lock.windows(in: moved.windows, open: []).map(\.id), ["@1"], "a Settled Topic's Session can be a Guest Session")
+        XCTAssertEqual(lock.windows(in: moved.windows, open: []).map(\.id), ["@1"], "a Settled Topic's Session can be a Board Session")
     }
 
     func testReopenCreatesTheSessionWithItsWindowsAndPointsItAtTheLock() throws {
@@ -55,14 +55,14 @@ final class BoardSessionTests: XCTestCase {
         XCTAssertTrue(edit.commands.contains(.tmux(["set-option", "-t", "=notes:", "@muxify_session_id", "g1"])))
         XCTAssertTrue(edit.commands.contains(.tmux(["new-window", "-d", "-a", "-t", "=notes:$", "-c", "/work/notes/2", "-n", "w2"])))
         XCTAssertFalse(edit.commands.contains { if case .tmux(let arguments) = $0 { arguments.contains("@muxify_topic") } else { false } },
-                       "a Guest Session is in no Topic")
+                       "a Board Session is in no Topic")
         XCTAssertNil(edit.record)
 
         let taken = try BoardSessionReopenPlan(lock: dormant, records: [], windows: [window(9, session: "$9", lock: "")]).edit
         XCTAssertEqual(taken.selection, .sessionName("notes+2"), "a name that a live Session has gets +2")
 
         let shown = try BoardSessionReopenPlan(lock: dormant, records: [], windows: [window(1)]).edit
-        XCTAssertEqual(shown.commands, [], "a live Guest Session is only shown")
+        XCTAssertEqual(shown.commands, [], "a live Board Session is only shown")
         XCTAssertEqual(shown.selection, .sessionID("$1"))
     }
 
@@ -85,7 +85,7 @@ final class BoardSessionTests: XCTestCase {
         XCTAssertTrue(edit.commands.contains(.tmux(StoredBrowser().setOptionArgs(windowID: "=notes+2:$"))), "no Tab comes back")
 
         XCTAssertThrowsError(try BoardSessionReopenPlan(lock: dormant, records: [], windows: [window(1)], choice: .startFresh),
-                             "Start Fresh of a live Guest Session fails, as for a live Topic") { error in
+                             "Start Fresh of a live Board Session fails, as for a live Topic") { error in
             XCTAssertEqual(String(describing: error), TopicRequestError.boardSessionLive("g1").description)
         }
     }

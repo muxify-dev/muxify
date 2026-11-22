@@ -1,6 +1,6 @@
 """A long shown Bench scrolls smoothly: a scroll draws no Benched card again.
 
-The driver's `scroll` with `by` and `steps` moves the Topics list down in steps, one each tick, as a wheel does, and
+The driver's `scroll` with `by` and `steps` moves the Board down in steps, one each tick, as a wheel does, and
 `counts` reads how often each counted view's body ran since the last reset (`BodyCount` in App/BodyCount.swift).
 
 Run from the repo root after `make build`:
@@ -48,7 +48,7 @@ class TopicsBenchScrollSidebar(TopicsSidebar):
             topic = '%s-t%02d' % (prefix, order)
             self.write_topic(topic, topic.capitalize(), order=order)
             bench.append('topic-' + topic)
-        s.wait_rows(lambda rs: s.has(LINE, rs) and s.has('topic-%s-a' % prefix, rs), 'the Topics list has no Bench line')
+        s.wait_rows(lambda rs: s.has(LINE, rs) and s.has('topic-%s-a' % prefix, rs), 'the Board has no Bench line')
         if s.row(LINE).get('accessibilityLabel') == 'Bench':
             s.act('press', LINE)
         s.wait_rows(lambda rs: s.row(LINE, rs).get('accessibilityLabel') == 'Hide Bench', 'the Bench did not show')
@@ -61,7 +61,7 @@ class TopicsBenchScrollSidebar(TopicsSidebar):
         return bench
 
     def wait_at_rest(self):
-        """Waits until the Topics list runs no body for REST seconds. Under load, the fixture's last changes reach the
+        """Waits until the Board runs no body for REST seconds. Under load, the fixture's last changes reach the
         list late, and a whole-list pass that they cause during the scroll is not the scroll's."""
         s = self.s
         deadline = time.monotonic() + REST_LIMIT
@@ -72,7 +72,7 @@ class TopicsBenchScrollSidebar(TopicsSidebar):
             if not counts:
                 return
             if time.monotonic() > deadline:
-                self.fail('the Topics list did not come to rest in %d s; bodies in the last %.1f s: %s' % (REST_LIMIT, REST, counts))
+                self.fail('the Board did not come to rest in %d s; bodies in the last %.1f s: %s' % (REST_LIMIT, REST, counts))
 
     def test_a_scroll_of_the_bench_draws_no_benched_card_again(self):
         s = self.s

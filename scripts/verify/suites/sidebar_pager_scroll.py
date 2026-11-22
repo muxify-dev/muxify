@@ -59,7 +59,7 @@ class SidebarPagerScroll(unittest.TestCase):
         return [line for line in self.log_text().splitlines() if ' animation #' in line]
 
     def test_the_hidden_sessions_list_scrolls_to_its_session_and_comes_to_rest(self):
-        rs = self.s.wait_rows(lambda rs: self.s.row('sidebar-view-topics', rs).get('accessibilityValue') == 'selected',
+        rs = self.s.wait_rows(lambda rs: self.s.row('sidebar-view-board', rs).get('accessibilityValue') == 'selected',
                               'the Sidebar does not show Topics')
         self.assertFalse(self.s.has('sessions-list', rs), 'the Sessions list shows, so its page is not the hidden one')
 

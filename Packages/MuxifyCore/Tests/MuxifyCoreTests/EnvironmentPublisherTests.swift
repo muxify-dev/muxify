@@ -595,7 +595,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         colourProbes.probeCommand(answer)
     }
 
-    // MARK: - Guest Sessions
+    // MARK: - Board Sessions
 
     func testAGuestSessionThatEndsOnTheSameServerEndsItsLockAndATmuxRestartKeepsItDormant() async throws {
         for name in ["work", "notes", "scratch"] { try server.run(["new-session", "-d", "-s", name]) }
@@ -610,7 +610,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         let first = try XCTUnwrap(recorder.server?.serverID)
 
         try server.run(["kill-session", "-t", "=notes"])
-        try await wait("the Lock of a Guest Session that ended on the same server stayed", seconds: 10) {
+        try await wait("the Lock of a Board Session that ended on the same server stayed", seconds: 10) {
             try store.read().boardSessions.map(\.name) == ["scratch"]
         }
 

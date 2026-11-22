@@ -57,7 +57,7 @@ class CommandPalette(unittest.TestCase):
 
     def setUp(self):
         self.close_palette()
-        self.s.show_sidebar_mode('topics')
+        self.s.show_sidebar_mode('board')
 
     def new_session(self, name, directory, topic=None, command=SHELL):
         sid = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(directory), command)
@@ -274,8 +274,8 @@ class CommandPalette(unittest.TestCase):
         config = self.s.root/'config/muxify/config.yaml'
         text = config.read_text()
         self.addCleanup(config.write_text, text)
-        config.write_text(text + 'sidebar:\n  topics: false\n')
-        self.s.wait_rows(lambda rs: not self.s.has('sidebar-view-topics', rs), 'the Sidebar still offers Topics mode')
+        config.write_text(text + 'sidebar:\n  board: false\n')
+        self.s.wait_rows(lambda rs: not self.s.has('sidebar-view-board', rs), 'the Sidebar still offers Topics mode')
 
         def refused():
             # The menu follows the Sidebar about a second later; a press that still lands opens Move.
@@ -286,7 +286,7 @@ class CommandPalette(unittest.TestCase):
         wait(refused, 'the menu item stays enabled with Topics off', seconds=10)
         self.assertIsNone(self.rows_until(lambda rs: self.s.has('palette-search', rs), seconds=2)[0], 'Move opened')
         config.write_text(text)
-        self.s.wait_rows(lambda rs: self.s.has('sidebar-view-topics', rs), 'the Sidebar did not offer Topics mode again')
+        self.s.wait_rows(lambda rs: self.s.has('sidebar-view-board', rs), 'the Sidebar did not offer Topics mode again')
         self.s.press_menu_item('Move Session…')
         self.close_palette()
 
@@ -376,7 +376,7 @@ class CommandPalette(unittest.TestCase):
 
         self.assertEqual(order(), ['palette-row-topic-sw-second', 'palette-row-topic-sw-first'], 'the Topic visited last is not first')
         self.s.restart_app(LAUNCH_ARGS)
-        self.s.show_sidebar_mode('topics')
+        self.s.show_sidebar_mode('board')
         self.assertEqual(order(), ['palette-row-topic-sw-second', 'palette-row-topic-sw-first'], 'the restart lost the visit order')
 
 

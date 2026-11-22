@@ -62,7 +62,7 @@ class WindowOrderSidebar(unittest.TestCase):
     def test_a_drag_on_a_window_row_moves_it_up_within_its_session_in_a_topic_card(self):
         s = self.s
         sid, windows = self.three_windows('order-topic', topic='window-order')
-        self.s.show_sidebar_mode('topics')
+        self.s.show_sidebar_mode('board')
         # The drag takes the rows' frames from one dump. The rows move when the app shows the Window, and show waits
         # for that.
         self.s.show(windows[0])
@@ -78,7 +78,7 @@ class WindowOrderSidebar(unittest.TestCase):
     def test_a_drag_on_a_window_row_moves_it_down_within_its_session_in_a_session_card(self):
         s = self.s
         sid, windows = self.three_windows('order-session')
-        self.addCleanup(self.s.show_sidebar_mode, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'board')
         self.s.show_sidebar_mode('sessions')
         self.s.show(windows[1])
         s.wait_rows(lambda rs: self.row_order('session-window-', windows, rs) == windows,
@@ -93,7 +93,7 @@ class WindowOrderSidebar(unittest.TestCase):
     def test_a_click_on_a_window_row_selects_the_window_and_moves_nothing(self):
         s = self.s
         sid, windows = self.three_windows('order-click', topic='window-click')
-        self.s.show_sidebar_mode('topics')
+        self.s.show_sidebar_mode('board')
         self.s.show(windows[0])
         # The app can list the Session before its Topic record, under No Topic, and move it into the Topic card a
         # moment later. The Window rows move with it, and a click that lands while they move is lost or hits the

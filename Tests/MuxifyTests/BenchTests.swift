@@ -61,7 +61,7 @@ final class BenchTests: XCTestCase {
                        "with only a Pinned Topic left, no Topic")
         XCTAssertEqual(model(inPlay: 2, at: "@1", windows: [.fixture(savedSessionID: "$1")], boardSessions: [BoardSession(id: "$1", order: 5, isGuest: true)])
                         .nextTopic(after: .session("$1")), .topic("a"),
-                       "a Guest Session, the last card that shows, goes to the first In Play card")
+                       "a Board Session, the last card that shows, goes to the first In Play card")
         let onlyInPlay = model(inPlay: 1, at: "a")
         XCTAssertEqual(onlyInPlay.nextTopic(after: .topic("a")), .topic("b"), "with no other card In Play, a Benched card")
         XCTAssertFalse(onlyInPlay.shows(.topic("b")), "which Bench does not open, because the Bench hides it")
@@ -216,7 +216,7 @@ final class BenchTests: XCTestCase {
                            boardSessions: [BoardSession(id: "$2", order: 4, isGuest: true)])
         XCTAssertEqual(locked.dragSlots(around: "locked-$2"),
                        [.item(.topic("a")), .item(.topic("b")), .fixed("guests-line"), .item(.session("$2")), .fixed("bench-line")],
-                       "a Locked Session is a Guest, so it is In Play, also when its order is after the Bench")
+                       "a Board Session is a Guest, so it is In Play, also when its order is after the Bench")
     }
 
     func testUnderTheShownLineTheBenchedCardsReorderAmongEachOtherAroundTheLocationsCard() {

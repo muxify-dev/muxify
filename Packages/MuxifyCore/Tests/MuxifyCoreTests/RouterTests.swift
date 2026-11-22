@@ -191,8 +191,8 @@ final class RouterTests: XCTestCase {
         var router = Router()
         let dormant = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"), boardSessions: ["g1"])
         _ = router.handle(.settled(next: .session("g1")), dormant)
-        XCTAssertEqual(router.handle(.read(1), dormant), [.visit(page)], "Next Topic shows the Dormant Guest Session's own page")
-        XCTAssertTrue(router.handle(.read(2), dormant).isEmpty, "the page stays while the Guest Session is Dormant")
+        XCTAssertEqual(router.handle(.read(1), dormant), [.visit(page)], "Next Topic shows the Dormant Board Session's own page")
+        XCTAssertTrue(router.handle(.read(2), dormant).isEmpty, "the page stays while the Board Session is Dormant")
 
         var reopened = dormant
         reopened.windows.append(window("@2"))
@@ -203,7 +203,7 @@ final class RouterTests: XCTestCase {
         _ = router.handle(.go(page), dormant)
         var benched = dormant
         benched.boardSessions = []
-        XCTAssertEqual(router.handle(.topicsChanged, benched), [.visit(.window(id("@1")))], "Bench of the Guest Session ends its page")
+        XCTAssertEqual(router.handle(.topicsChanged, benched), [.visit(.window(id("@1")))], "Bench of the Board Session ends its page")
     }
 
     func testAClosedLocationFollowsTheWindowTmuxMovedTheClientToWithoutASwitch() {

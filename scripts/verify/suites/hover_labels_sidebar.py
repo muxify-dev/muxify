@@ -54,18 +54,18 @@ class HoverLabelsSidebar(unittest.TestCase):
 
     def setUp(self):
         self.rest_off_rows()
-        self.show_mode('topics')
+        self.show_mode('board')
         self.config.write_text(self.default_config)
         self.wait_config('default')
         self.addCleanup(self.config.write_text, self.default_config)
 
     def show_mode(self, mode):
         self.s.show_sidebar_mode(mode)
-        card = 'topic-hover' if mode == 'topics' else 'session-' + self.session
+        card = 'topic-hover' if mode == 'board' else 'session-' + self.session
         self.s.wait_rows(lambda rs: self.s.has(card, rs), 'no card in ' + mode)
         if 'expanded' not in self.s.row(card).get('accessibilityValue', ''):
             self.s.act('press', card)
-        self.prefix = 'topic-window-' if mode == 'topics' else 'session-window-'
+        self.prefix = 'topic-window-' if mode == 'board' else 'session-window-'
         self.s.wait_rows(lambda rs: self.s.has(self.prefix + self.short, rs), 'no Window rows in ' + mode)
 
     def wait_config(self, value):
@@ -160,14 +160,14 @@ class HoverLabelsSidebar(unittest.TestCase):
     def test_off_suppresses_even_a_cut_off_title_in_both_sidebar_modes(self):
         # The cut-off title is the strictest case: its label opens under every other policy.
         self.set_tooltips('off')
-        for mode in ['topics', 'sessions']:
+        for mode in ['board', 'sessions']:
             with self.subTest(mode=mode):
                 self.show_mode(mode)
                 self.assert_no_label_after_rest(self.prefix + self.long)
 
     def test_truncated_shows_only_cut_off_formatted_titles_in_both_sidebar_modes(self):
         self.set_tooltips('truncated')
-        for mode in ['topics', 'sessions']:
+        for mode in ['board', 'sessions']:
             with self.subTest(mode=mode):
                 self.show_mode(mode)
                 self.assert_no_label_after_rest(self.prefix + self.short)

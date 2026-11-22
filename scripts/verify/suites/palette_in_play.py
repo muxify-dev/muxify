@@ -31,7 +31,7 @@ class PaletteInPlay(PaletteFixture):
                 self.store.remove_board_session(lock['id'])
 
     def order(self, prefix):
-        """The ids of the check's Topics in the order of the Topics list."""
+        """The ids of the check's Topics in the order of the Board."""
         records = [r for r in self.records() if r['id'].startswith(prefix) and not r.get('settled_at')]
         return [r['id'] for r in sorted(records, key=lambda r: r.get('order', 0))]
 
@@ -67,10 +67,10 @@ class PaletteInPlay(PaletteFixture):
         s.act('action', 'palette-search', 'Space')
         rs = s.wait_rows(lambda rs: checked(rs) == [key('b'), key('c'), key('d')],
                          'Space in the empty field did not uncheck the first row: %s' % checked(s.rows()))
-        self.assertIn('3 checked for 2 In Play places. The last 1 go to the top of the Bench, and a Guest of them stays a Guest.', self.text('palette-note', rs))
+        self.assertIn('3 checked for 2 In Play places. The last 1 go to the top of the Bench; a Guest of them stays a Guest, and a Board Session leaves the Board.', self.text('palette-note', rs))
         s.act('press', key('a'))
         rs = s.wait_rows(lambda rs: len(checked(rs)) == 4, 'a click did not check the row: %s' % checked(s.rows()))
-        self.assertIn('4 checked for 2 In Play places. The last 2 go to the top of the Bench, and a Guest of them stays a Guest.', self.text('palette-note', rs))
+        self.assertIn('4 checked for 2 In Play places. The last 2 go to the top of the Bench; a Guest of them stays a Guest, and a Board Session leaves the Board.', self.text('palette-note', rs))
 
         s.act('action', 'palette-search', 'Accept')
         place = lambda name: 'palette-row-place-topic-cip-' + name
@@ -196,7 +196,7 @@ class PaletteInPlay(PaletteFixture):
         self.press_key('⌥⌘↑')
         wait(self.base_lock, 'the first press did not Lock the No Topic Session, which makes it a Guest')
         wait(lambda: self.base_lock()['order'] < self.record('fns-g')['order'],
-             lambda: 'the second press, made while the Lock ran, did not move the Locked Session above the Guest fns-g: '
+             lambda: 'the second press, made while the Lock ran, did not move the Board Session above the Guest fns-g: '
              'Lock %s, Guest order %s' % (self.base_lock(), self.record('fns-g')['order']))
         self.assertEqual(self.order('fns-'), ['fns-a', 'fns-b', 'fns-g'], 'a press moved a card that is not the Session')
 

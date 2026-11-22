@@ -42,7 +42,7 @@ class PaletteFixture(unittest.TestCase):
     def setUp(self):
         if self.s.has('palette-search'):
             self.s.act('action', 'palette-search', 'Close')
-        self.s.show_sidebar_mode('topics')
+        self.s.show_sidebar_mode('board')
         self.select(self.base)
 
     def select(self, window):

@@ -463,7 +463,7 @@ class Sandbox:
         return wait(lambda: (lambda rs: rs if predicate(rs) else None)(self.rows()), message, seconds)
 
     def show_sidebar_mode(self, mode):
-        """Shows the Sidebar mode, `topics` or `sessions`, with its button, and waits until the button is selected."""
+        """Shows the Sidebar view, `board` or `sessions`, with its button, and waits until the button is selected."""
         key = 'sidebar-view-' + mode
         rs = self.wait_rows(lambda rs: self.has(key, rs), 'no Sidebar mode button ' + key)
         if self.row(key, rs).get('accessibilityValue') != 'selected':

@@ -2510,7 +2510,7 @@ private final class TopicSandbox {
         try TopicStore(paths: paths).read().records
     }
 
-    /// The Locks of the Guest Sessions in the state database, in id order.
+    /// The Locks of the Board Sessions in the state database, in id order.
     func boardSessions() throws -> [BoardSession] {
         try TopicStore(paths: paths).read().boardSessions
     }

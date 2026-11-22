@@ -37,7 +37,7 @@ class PaletteNextTopic(unittest.TestCase):
             windows[name] = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
             self.addCleanup(s.tmux_ok, 'kill-session', '-t', sid)
         self.addCleanup(self.s.show, self.base)
-        s.show_sidebar_mode('topics')
+        s.show_sidebar_mode('board')
         rs = s.wait_rows(lambda rs: all(s.has('topic-' + name, rs) for name in names), 'The Topic cards did not show')
         order = sorted(names, key=lambda name: -frame(s.row('topic-' + name, rs))[1])
         current = order[-1] if placement == 'last' else order[0]
