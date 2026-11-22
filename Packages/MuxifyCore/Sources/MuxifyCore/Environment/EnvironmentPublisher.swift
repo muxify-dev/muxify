@@ -344,8 +344,14 @@ public final class EnvironmentPublisher: @unchecked Sendable {
                 guard handler != nil, let session = terminalSession, Self.isSessionID(session) else { return }
                 hideStatusLine(in: session)
             } else {
-                guard let listed = try? run(TmuxStatusLine.listing) else { return }
-                for arguments in TmuxStatusLine.showing(listed: listed) { _ = try? run(arguments) }
+                let listed = (try? run(TmuxStatusLine.listing)) ?? ""
+                let showing = TmuxStatusLine.showing(listed: listed,
+                                                     terminalSession: terminalSession.flatMap { Self.isSessionID($0) ? $0 : nil })
+                // Behind any hide still on its way to tmux on the Listener's connection, which a command of its own
+                // could overtake.
+                if !listener.send(showing.map(TmuxStatusLine.line)) {
+                    for arguments in showing { _ = try? run(arguments) }
+                }
             }
         }
     }

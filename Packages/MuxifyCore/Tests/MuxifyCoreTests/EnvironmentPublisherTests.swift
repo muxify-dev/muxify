@@ -522,6 +522,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         try server.run(["set-option", "-t", "=other:", "status", "2"])
         _ = try startTerminal(in: "work", colours: nil, hidingStatusLine: true)
         try await wait("the Terminal's Session kept its status line") { try self.sessionStatus("work") == "off" }
+        try await waitForTheHooks()
 
         let screen = try attachClient(to: "other")
         try server.run(["switch-client", "-c", screen.tty, "-t", "=work"])
@@ -536,16 +537,26 @@ final class EnvironmentPublisherTests: XCTestCase {
         try server.run(["set-option", "-t", "=other:", "status", "2"])
         let terminal = try startTerminal(in: "work", colours: nil, hidingStatusLine: true)
         try await wait("the Terminal's Session kept its status line") { try self.sessionStatus("work") == "off" }
-        XCTAssertTrue(try server.run(["show-hooks", "-g"]).contains("client-attached[77]"), "no hook gives the status line back")
+        try await waitForTheHooks()
 
         publishers[0].hideStatusLine(false)
         try await wait("the Terminal's Session did not get its status line back") { try self.sessionStatus("work") == nil }
+        try await wait("Muxify's hooks stayed") { try !self.server.run(["show-hooks", "-g"]).contains("[77]") }
+        XCTAssertEqual(try sessionStatus("work"), nil, "a hide on its way to tmux hid the status line again")
         XCTAssertEqual(try sessionStatus("other"), "2", "a status line that Muxify did not hide changed")
-        XCTAssertFalse(try server.run(["show-hooks", "-g"]).contains("[77]"), "Muxify's hooks stayed")
 
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
         try await Task.sleep(nanoseconds: 500_000_000)
         XCTAssertEqual(try sessionStatus("other"), "2", "a move hid the status line while the header does not show the Session")
+    }
+
+    /// Muxify's hooks come after `status off` on the Listener's connection, so a Session can lose its status line
+    /// before they are set.
+    private func waitForTheHooks() async throws {
+        try await wait("no hook gives the status line back") {
+            let hooks = try self.server.run(["show-hooks", "-g"])
+            return hooks.contains("client-attached[77]") && hooks.contains("client-session-changed[77]")
+        }
     }
 
     private static let light = ColourProbes.light

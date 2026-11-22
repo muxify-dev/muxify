@@ -26,14 +26,19 @@ public enum TmuxStatusLine {
             + hooks.map { ["set-hook", "-g", "\($0)[\(hookIndex)]", hookCommand] }
     }
 
-    /// Gives the status line back to every Session that `listing` printed as marked, and removes the hooks.
-    public static func showing(listed: String) -> [[String]] {
+    /// Gives the status line back to every Session that `listing` printed as marked and to `terminalSession`, a Session
+    /// id, and removes the hooks. Each Session's command checks the mark when tmux runs it, so on the Listener's
+    /// connection it also undoes a hide sent there before it that tmux had not run when `listing` did.
+    public static func showing(listed: String, terminalSession: String?) -> [[String]] {
         let marked = listed.split(separator: "\n").compactMap { line -> String? in
             let fields = line.split(separator: " ", maxSplits: 1)
             return fields.count == 2 && fields[1] == "1" ? String(fields[0]) : nil
         }
-        return marked.flatMap { [["set-option", "-u", "-t", $0, "status"], ["set-option", "-u", "-t", $0, marker]] }
-            + hooks.map { ["set-hook", "-gu", "\($0)[\(hookIndex)]"] }
+        let sessions = marked + (terminalSession.map { marked.contains($0) ? [] : [$0] } ?? [])
+        return sessions.map { session in
+            ["if-shell", "-F", "-t", session, "#{\(marker)}",
+             "set-option -u -t '\(session)' status ; set-option -u -t '\(session)' \(marker)"]
+        } + hooks.map { ["set-hook", "-gu", "\($0)[\(hookIndex)]"] }
     }
 
     /// The `list-sessions` that `showing` reads.
