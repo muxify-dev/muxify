@@ -69,9 +69,28 @@ extension EnvironmentSession: Codable {
 
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(windows, forKey: .windows)
+        if let lockOrder {
+            try values.encode(windows.map { LockedWindow(window: $0, lockOrder: lockOrder) }, forKey: .windows)
+        } else {
+            try values.encode(windows, forKey: .windows)
+        }
         try values.encode(panes, forKey: .panes)
         try values.encode(commandLines, forKey: .commandLines)
+    }
+}
+
+/// A Window of a live Guest Session as an older Mac reads it: its keys, and `lock_order`, its Lock's order. The second
+/// keyed container of one encoder writes into the same object as the first.
+private struct LockedWindow: Encodable {
+    let window: TmuxWindow
+    let lockOrder: Double
+
+    private enum CodingKeys: String, CodingKey { case lockOrder = "lock_order" }
+
+    func encode(to encoder: Encoder) throws {
+        try window.encode(to: encoder)
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(lockOrder, forKey: .lockOrder)
     }
 }
 
@@ -210,8 +229,8 @@ extension TmuxPane: Codable {
 
 /// The fields that tmux and the Topic options give a Window. The Mac's own (`homeDirectory`, `hostName`,
 /// `isRemote`, `sourceID`) stay off the wire: it stamps them from the `server` event. The Host imports a Lock that an
-/// older Muxify kept in `@muxify_lock` itself, so the option stays off the wire too, and an older Host's `lock_order`
-/// is a key that the Mac does not read.
+/// older Muxify kept in `@muxify_lock` itself, so the option stays off the wire too. `lock_order` goes only to an older
+/// Mac (`LockedWindow`), and the Mac reads the Locks from the `guest_sessions` event, never from `lock_order`.
 extension TmuxWindow: Codable {
     private enum CodingKeys: String, CodingKey {
         case id

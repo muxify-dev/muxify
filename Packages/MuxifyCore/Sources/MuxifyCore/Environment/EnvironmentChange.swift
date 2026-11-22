@@ -31,11 +31,16 @@ public struct EnvironmentSession: Equatable {
     public var windows: [TmuxWindow]
     public var panes: [TmuxPane]
     public var commandLines: PaneCommandLines
+    /// The order of the Lock whose live Guest Session this is, set only on an event for a client that did not declare
+    /// `guest-sessions` (`EnvironmentState.olderClientChanges`). Each Window goes out with it as `lock_order`, where
+    /// an older Mac finds its Locks. No decoder sets it.
+    public var lockOrder: Double?
 
-    public init(windows: [TmuxWindow], panes: [TmuxPane], commandLines: PaneCommandLines = PaneCommandLines()) {
+    public init(windows: [TmuxWindow], panes: [TmuxPane], commandLines: PaneCommandLines = PaneCommandLines(), lockOrder: Double? = nil) {
         self.windows = windows
         self.panes = panes
         self.commandLines = commandLines
+        self.lockOrder = lockOrder
     }
 }
 
@@ -86,13 +91,17 @@ public struct EnvironmentState: Equatable {
         TopicContents(records: topics.values.sorted { $0.id < $1.id }, openPlaces: openPlaces, locks: locks)
     }
 
-    /// The server as these events show it, in tmux's order: Sessions by name, each with its Windows and Panes in
-    /// the order they came. Nil before a `server` event.
-    public var snapshot: TmuxSnapshot? {
-        guard let server else { return nil }
-        let ordered = sessions.values.sorted {
+    /// The Sessions in tmux's order: by name, each with its Windows and Panes in the order they came.
+    private var orderedSessions: [EnvironmentSession] {
+        sessions.values.sorted {
             ($0.windows.first?.sessionName ?? "", $0.windows.first?.sessionID ?? "") < ($1.windows.first?.sessionName ?? "", $1.windows.first?.sessionID ?? "")
         }
+    }
+
+    /// The server as these events show it, in tmux's order. Nil before a `server` event.
+    public var snapshot: TmuxSnapshot? {
+        guard let server else { return nil }
+        let ordered = orderedSessions
         var snapshot = TmuxSnapshot(windows: ordered.flatMap(\.windows), clients: server.clients, panes: ordered.flatMap(\.panes),
                                     lastWindowID: server.lastWindowID, serverRunning: server.isRunning, serverID: server.serverID,
                                     ownClientTTY: server.ownClient?.tty, homeDirectory: server.home)
@@ -156,6 +165,43 @@ public struct EnvironmentState: Equatable {
         if all || openPlaces != contents.openPlaces { changes.append(.openPlaces(contents.openPlaces)) }
         if all || locks != contents.locks { changes.append(.locks(contents.locks)) }
         return changes
+    }
+
+    /// The order of each live Guest Session's Lock, by the Session's tmux id.
+    public var lockOrders: [String: Double] {
+        let windows = orderedSessions.flatMap(\.windows)
+        let open = Array(topics.values).openTopicIDs
+        var orders: [String: Double] = [:]
+        for lock in locks {
+            if let session = lock.windows(in: windows, open: open).first?.sessionID { orders[session] = lock.order }
+        }
+        return orders
+    }
+
+    /// `changes`, which this state applied last, as a client that did not declare `guest-sessions` reads them, so an
+    /// older Mac still shows each live Guest Session (ADR 0086: no key leaves a protocol). It gets no `guest_sessions`
+    /// event, and each Window of a live Guest Session has its Lock's order as `lock_order`, as an older Host sent the
+    /// Session's `@muxify_lock`. A Session whose Lock order differs from `before`, the `lockOrders` before `changes`,
+    /// goes out again, so a move, a new Lock and an ended one reach that client too.
+    public func olderClientChanges(_ changes: [EnvironmentChange], lockOrdersBefore before: [String: Double]) -> [EnvironmentChange] {
+        let orders = lockOrders
+        var sent: Set<String> = []
+        var older = changes.compactMap { change -> EnvironmentChange? in
+            switch change {
+            case .locks: return nil
+            case .session(let id, var session):
+                sent.insert(id)
+                session?.lockOrder = orders[id]
+                return .session(id, session)
+            case .topic, .openPlaces, .server: return change
+            }
+        }
+        for id in Set(before.keys).union(orders.keys).sorted() where !sent.contains(id) && before[id] != orders[id] {
+            guard var session = sessions[id] else { continue }
+            session.lockOrder = orders[id]
+            older.append(.session(id, session))
+        }
+        return older
     }
 
     /// The snapshot's Sessions by id. A Pane belongs to the Session of the first Window line that names its Window.

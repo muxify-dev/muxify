@@ -325,11 +325,12 @@ final class HostEnvironment: @unchecked Sendable {
     /// The `environment` and `snapshot` subscribers whose client declared `guest-sessions`.
     private var guestSessionSubscribers: Set<Int> = []
     /// The `snapshot` subscribers, the Config their items are computed with once it was read, and the JSON of the
-    /// last item computed, so an item goes out only when it differs.
+    /// last item computed of each view, keyed by whether the client declared `guest-sessions`, so an item goes out
+    /// only when the view that its client gets differs.
     private var snapshotSubscribers: [Int: ProtocolIncomingRequest] = [:]
     private var snapshotConfig: Config?
     private var observesConfig = false
-    private var lastShown: Data?
+    private var lastShown: [Bool: Data] = [:]
     /// The `focus` subscribers, which get what the Listener heard of the focus in the Terminal's Window.
     private var focusSubscribers: [Int: ProtocolIncomingRequest] = [:]
     /// The `repository` subscriptions by request; `lock` guards it.
@@ -457,7 +458,9 @@ final class HostEnvironment: @unchecked Sendable {
                 subscribers[id] = request
                 if guestSessions { guestSessionSubscribers.insert(id) }
                 // Before the publisher's first item, the subscriber gets that item whole.
-                if hasState { send(state.all, to: id, first: true) }
+                if hasState {
+                    send(guestSessions ? state.all : state.olderClientChanges(state.all, lockOrdersBefore: state.lockOrders), to: id, first: true)
+                }
             }
             request.onCancel { self.delivery.async { self.subscribers[id] = nil; self.guestSessionSubscribers.remove(id) } }
             start(publisher)
@@ -520,6 +523,7 @@ final class HostEnvironment: @unchecked Sendable {
     /// On `delivery`: the first item of the publisher holds every key, and goes whole to each subscriber; each later
     /// change goes as an event of its own key, which replaces an unsent one.
     private func receive(_ changes: [EnvironmentChange]) {
+        let lockOrders = state.lockOrders
         state.apply(changes)
         let first = !hasState
         hasState = true
@@ -527,19 +531,19 @@ final class HostEnvironment: @unchecked Sendable {
             let socket = socket
             DispatchQueue.global(qos: .utility).async { socket.noteOption(server.browserSocket, serverRunning: server.isRunning) }
         }
+        let sent = first ? state.all : changes
+        let older = state.olderClientChanges(sent, lockOrdersBefore: lockOrders)
         for id in subscribers.keys.sorted() {
-            if first { send(state.all, to: id, first: true) } else { send(changes, to: id, first: false) }
+            send(guestSessionSubscribers.contains(id) ? sent : older, to: id, first: first)
         }
         details.changed()
         if !snapshotSubscribers.isEmpty { sendSnapshot() }
     }
 
-    /// A client that did not declare `guest-sessions` gets no `guest_sessions` event: it shows a Guest Session as a
-    /// No Topic Session, as an older Muxify did.
+    /// `changes` as the subscriber's client reads them: a client that did not declare `guest-sessions` gets them as
+    /// `EnvironmentState.olderClientChanges` gives them.
     private func send(_ changes: [EnvironmentChange], to id: Int, first: Bool) {
         guard let request = subscribers[id] else { return }
-        let changes = guestSessionSubscribers.contains(id) ? changes : changes.filter { if case .locks = $0 { false } else { true } }
-        guard first || !changes.isEmpty else { return }
         let sent = first
             ? request.sendEvent(EnvironmentItem(changes: changes), key: "all")
             : changes.allSatisfy { request.sendEvent(EnvironmentItem(changes: [$0]), key: $0.key) }
@@ -633,21 +637,27 @@ final class HostEnvironment: @unchecked Sendable {
         sendSnapshot()
     }
 
-    /// On `delivery`: computes the view once the state and the Config are there, and sends it to every subscriber when
-    /// it differs from the last one, and to the subscriber `first` in any case. A newer item replaces an unsent one. A
-    /// client that did not declare `guest-sessions` gets the view without its Dormant Guest Sessions.
+    /// On `delivery`: computes the view once the state and the Config are there, and sends it to every subscriber whose
+    /// view differs from the last one, and to the subscriber `first` in any case. A newer item replaces an unsent one.
+    /// A client that did not declare `guest-sessions` gets the view without its Dormant Guest Sessions, so a change
+    /// of only those sends it nothing.
     private func sendSnapshot(first: Int? = nil) {
         guard hasState, let config = snapshotConfig, let tmux = state.snapshot else { return }
-        var shown = EnvironmentShown(contents: state.topicContents, tmux: tmux, config: config)
+        let whole = EnvironmentShown(contents: state.topicContents, tmux: tmux, config: config)
+        var older = whole
+        older.snapshot = whole.snapshot.withoutDormantSessions
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(shown) else { return }
-        let changed = data != lastShown
-        lastShown = data
-        let older = shown.snapshot.withoutDormantSessions
-        for (id, request) in snapshotSubscribers where changed || id == first {
-            shown.snapshot = guestSessionSubscribers.contains(id) ? shown.snapshot : older
-            if !request.sendEvent(shown, key: "snapshot") { snapshotSubscribers[id] = nil }
+        var changed: [Bool: Bool] = [:]
+        for (guestSessions, shown) in [(true, whole), (false, older)] {
+            guard let data = try? encoder.encode(shown) else { return }
+            changed[guestSessions] = data != lastShown[guestSessions]
+            lastShown[guestSessions] = data
+        }
+        for (id, request) in snapshotSubscribers {
+            let guestSessions = guestSessionSubscribers.contains(id)
+            guard changed[guestSessions] == true || id == first else { continue }
+            if !request.sendEvent(guestSessions ? whole : older, key: "snapshot") { snapshotSubscribers[id] = nil }
         }
     }
 

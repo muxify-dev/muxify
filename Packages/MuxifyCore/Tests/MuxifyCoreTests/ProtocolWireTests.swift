@@ -354,6 +354,18 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertEqual(decoded.changes[6], changes[6])
     }
 
+    func testAnOlderMacGetsTheLockOrderOnEachWindowOfALiveGuestSessionAndTheMacReadsTheSameSession() throws {
+        let windows = [TmuxWindow.fixture(id: "@2", sessionID: "$1"), .fixture(id: "@3", sessionID: "$1", index: 1)]
+        let plain = try JSONEncoder().encode(EnvironmentChange.session("$1", EnvironmentSession(windows: windows, panes: [])))
+        let older = try JSONEncoder().encode(EnvironmentChange.session("$1", EnvironmentSession(windows: windows, panes: [], lockOrder: 2.5)))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: older) as? [String: Any])
+        let sent = (object["value"] as? [String: Any])?["windows"] as? [[String: Any]]
+        XCTAssertEqual(sent?.map { $0["lock_order"] as? Double }, [2.5, 2.5])
+        XCTAssertEqual(sent?.map { $0["id"] as? String }, ["@2", "@3"], "each Window keeps its own keys beside lock_order")
+        XCTAssertEqual(try JSONDecoder().decode(EnvironmentChange.self, from: older), try JSONDecoder().decode(EnvironmentChange.self, from: plain),
+                       "a Mac that reads the Locks decodes the same Session")
+    }
+
     func testAWindowFromAnOlderHostWithALockOrderStillDecodes() throws {
         let line = #"{"session":"$1","value":{"windows":[{"id":"@2","session_id":"$1","lock_order":1.5}],"panes":[]}}"#
         let change = try JSONDecoder().decode(EnvironmentChange.self, from: Data(line.utf8))

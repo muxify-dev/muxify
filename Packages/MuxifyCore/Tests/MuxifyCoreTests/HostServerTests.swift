@@ -416,6 +416,45 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(snapshot.cards, [])
     }
 
+    func testAnOlderMacGetsTheLockOrderOnTheWindowsOfALiveGuestSessionAndAgainWhenTheLockChanges() async throws {
+        try tmux.run(["set-option", "-t", "=work:", "@muxify_session_id", "g1"])
+        try TopicStore(paths: paths).write { $0.lock(SessionLock(id: "g1", order: 0)) }
+        let order = try XCTUnwrap(TopicStore(paths: paths).read().locks.first).order
+        let work = try sessionID("work")
+        let older = subscribeLockOrders(try await connect())
+        let newer = subscribeLockOrders(try await connect(capabilities: ["guest-sessions"]))
+        try await wait("the older Mac got no lock_order for the Guest Session") { older.lastOrder(of: work) == order }
+        try await wait("the newer Mac got no first item") { newer.events(of: work) > 0 }
+
+        try TopicStore(paths: paths).write { $0.locks[0].order = order + 5 }
+        try await wait("a move of the Lock sent the older Mac no new lock_order", seconds: 5) { older.lastOrder(of: work) == order + 5 }
+        let moved = older.events(of: work)
+        try TopicStore(paths: paths).write { $0.unlock("g1") }
+        try await wait("an ended Lock left the older Mac its lock_order", seconds: 5) {
+            older.events(of: work) > moved && older.lastOrder(of: work) == nil
+        }
+        XCTAssertEqual(newer.orders(of: work), [], "a Mac that declared guest-sessions reads the Locks, never lock_order")
+    }
+
+    func testAnOlderPhoneGetsNoSnapshotItemForAChangeOfOnlyTheDormantGuestSessions() async throws {
+        let older = subscribeSnapshot(try await connect(capabilities: ["snapshot"]))
+        let newer = subscribeSnapshot(try await connect(capabilities: ["snapshot", "guest-sessions"]))
+        try await wait("no first items") { !older.items.isEmpty && !newer.items.isEmpty }
+
+        let dormant = SessionLock(id: "gone", order: 0, session: .object(["name": .string("notes")]))
+        try TopicStore(paths: paths).write { $0.lock(dormant) }
+        try await wait("the newer phone got no Dormant card", seconds: 5) {
+            newer.items.last?.snapshot.cards.contains(.dormantSession(id: "gone", name: "notes")) == true
+        }
+        // A change that both views show, so the older phone's last item comes after any that the Dormant card sent it.
+        try TopicStore(paths: paths).write { try $0.create(TopicRecord(id: "made", title: "Made")) }
+        try await wait("the older phone got no item for a new Topic", seconds: 5) {
+            older.items.last?.snapshot.cards.contains { if case .topic(let topic, _, _) = $0 { topic.id == "made" } else { false } } == true
+        }
+        let items = older.items
+        XCTAssertFalse(zip(items, items.dropFirst()).contains { $0 == $1 }, "the older phone got an item that it already had")
+    }
+
     func testAClientThatDidNotDeclareSnapshotGetsUnsupportedForTheSubscription() async throws {
         let client = try await connect()
         do {
@@ -908,6 +947,49 @@ final class HostServerTests: XCTestCase {
         var keys: Set<String> { Set(items.joined().map(\.key)) }
         var server: EnvironmentServer? { lock.lock(); defer { lock.unlock() }; return state.server }
         func clear() { lock.lock(); log = []; lock.unlock() }
+    }
+
+    /// An `environment` item as an older Mac decodes it, for the `lock_order` of each Session's Windows.
+    private struct OlderItem: Decodable {
+        struct Change: Decodable {
+            let session: String?
+            let value: Value?
+        }
+        struct Value: Decodable { let windows: [Window]? }
+        struct Window: Decodable {
+            let lockOrder: Double?
+            private enum CodingKeys: String, CodingKey { case lockOrder = "lock_order" }
+        }
+        let changes: [Change]
+    }
+
+    /// The `lock_order` of the first Window in each `session` event, by Session, in the order the events came.
+    private final class LockOrderRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [String: [Double?]] = [:]
+
+        func add(_ item: OlderItem) {
+            lock.lock()
+            for change in item.changes {
+                if let session = change.session, let windows = change.value?.windows { log[session, default: []].append(windows.first?.lockOrder) }
+            }
+            lock.unlock()
+        }
+
+        func orders(of session: String) -> [Double] { lock.lock(); defer { lock.unlock() }; return (log[session] ?? []).compactMap { $0 } }
+        func events(of session: String) -> Int { lock.lock(); defer { lock.unlock() }; return log[session]?.count ?? 0 }
+        func lastOrder(of session: String) -> Double? { lock.lock(); defer { lock.unlock() }; return log[session]?.last ?? nil }
+    }
+
+    private func subscribeLockOrders(_ client: ProtocolClient) -> LockOrderRecorder {
+        let recorder = LockOrderRecorder()
+        let events = client.subscribe(HostRequest.subscribe(.environment), as: OlderItem.self)
+        consumers.append(Task {
+            do {
+                for try await item in events { recorder.add(item) }
+            } catch {}
+        })
+        return recorder
     }
 
     private final class TopicRecorder: @unchecked Sendable {
