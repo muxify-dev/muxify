@@ -10,7 +10,7 @@ final class SidebarCardsTests: XCTestCase {
                  savedSessionID: guest ? session : "")
     }
 
-    private let boardSessions = [BoardSession(id: "$4", order: 4)]
+    private let boardSessions = [BoardSession(id: "$4", order: 4, isGuest: true)]
 
     private func agent(in session: String, _ status: AgentStatus, unread: Bool = false) -> TmuxPane {
         TmuxPane(id: "%" + session.dropFirst() + status.rawValue, windowID: "@" + session.dropFirst(), command: "claude", agent: "claude",

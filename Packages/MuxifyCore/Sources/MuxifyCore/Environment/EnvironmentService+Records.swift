@@ -1,7 +1,7 @@
 import Foundation
 
-// The records lane: commands that need no plan. Each writes keys of Topic records and Locks, Agent options in tmux, or
-// both.
+// The records lane: commands that need no plan. Each writes keys of Topic records and Board Sessions, Agent options in
+// tmux, or both.
 extension EnvironmentService {
     func changeRecords(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         switch request.command {
@@ -21,7 +21,7 @@ extension EnvironmentService {
         }
     }
 
-    /// Pin and Unpin move the card among the Topics, with the Guest Sessions in the same order.
+    /// Pin and Unpin move the card among the Topics, with the Board Sessions in the same order.
     private func pin(_ request: EnvironmentRequest, _ pinned: Bool, client: String?) -> EnvironmentResponse {
         do {
             let records = try store.read().records
@@ -34,7 +34,7 @@ extension EnvironmentService {
         }
     }
 
-    /// A card move writes the order of the Topics list. Up on a No Topic Session that is not a Guest makes it one.
+    /// A card move writes the order of the Board. Up on a No Topic Session that has no card makes it a Board Session.
     func moveCard(_ request: EnvironmentRequest, _ move: CardMove, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
@@ -49,20 +49,20 @@ extension EnvironmentService {
                 let cards = TopicCards.order(records: contents.records, boardSessions: contents.boardSessions, openPlaces: contents.openPlaces)
                 let step: TopicCards.Step = move == .up ? .up : .down
                 var outcome = TopicCards.step(card.id, step, in: cards, inPlay: topics.inPlay)
-                // The No Topic Session that is not a Guest has no card, which `card` let through for this step.
-                if outcome == .hidden, card.unlocked != nil { outcome = TopicCards.stepSessionWithoutCard(step) }
+                // The No Topic Session has no card, which `card` let through for this step.
+                if outcome == .hidden, card.withoutCard != nil { outcome = TopicCards.stepSessionWithoutCard(step) }
                 switch outcome {
                 case .atEnd: throw TopicRequestError.cardAtEnd(card: card.label, up: move == .up, pinned: card.pinned)
                 case .hidden:
-                    if let window = card.unlocked { throw TopicRequestError.cardHidden(Self.makeGuestFirst(window)) }
-                    throw TopicRequestError.cardHidden("\(card.label) has no card in the Topics list.")
+                    if let window = card.withoutCard { throw TopicRequestError.cardHidden(Self.makeGuestFirst(window)) }
+                    throw TopicRequestError.cardHidden("\(card.label) has no card on the Board.")
                 case .makeGuest:
-                    if let window = card.unlocked {
+                    if let window = card.withoutCard {
                         try makeGuest(window, snapshot: snapshot, client: client, phase: &phase)
                         return .changed(card.change)
                     }
                     change = { try $0.apply(outcome, to: card.id) }
-                case .reorder, .toGuests, .fill, .trade, .takePlace, .bench, .refused:
+                case .reorder, .toGuests, .fill, .trade, .takePlace, .bench:
                     change = { try $0.apply(outcome, to: card.id) }
                 }
             case .before(let ref):
@@ -82,7 +82,7 @@ extension EnvironmentService {
         }
     }
 
-    /// Choose In Play writes the order of the Topics list, as a card move does.
+    /// Choose In Play writes the order of the Board, as a card move does.
     private func chooseInPlay(_ cards: [BoardCardRef], client: String?) -> EnvironmentResponse {
         do {
             let snapshot = try serverSnapshot()
@@ -95,7 +95,7 @@ extension EnvironmentService {
         }
     }
 
-    /// Replace from Bench writes the order of the Topics list, as a card move does.
+    /// Replace from Bench writes the order of the Board, as a card move does.
     private func replaceFromBench(_ request: EnvironmentRequest, with ref: BoardCardRef, client: String?) -> EnvironmentResponse {
         do {
             let snapshot = try serverSnapshot()
@@ -109,8 +109,8 @@ extension EnvironmentService {
         }
     }
 
-    /// Make a Guest writes the order of the Topics list and the Topic's Guest mark. A No Topic Session becomes a Guest
-    /// through its new Lock. A Guest does not change.
+    /// Make a Guest writes the order of the Board and the card's Guest mark. A No Topic Session that has no card becomes
+    /// a Board Session among the Guests. A Guest does not change.
     private func guest(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
@@ -118,9 +118,10 @@ extension EnvironmentService {
             let contents = try store.read()
             let card = try self.card(request.target, caller: request.caller, contents: contents, snapshot: snapshot, client: client,
                                      allowSessionWithoutCard: true)
-            if let window = card.unlocked {
+            let cards = TopicCards.order(records: contents.records, boardSessions: contents.boardSessions, openPlaces: contents.openPlaces)
+            if let window = card.withoutCard {
                 try makeGuest(window, snapshot: snapshot, client: client, phase: &phase)
-            } else if case .topic(let id) = card.id, let topic = contents.records.first(where: { $0.id == id }), topic.isGuest, !topic.isPinned {
+            } else if cards.first(where: { $0.id == card.id })?.isGuest == true {
                 return .changed(card.change)
             } else {
                 try store.write { try $0.apply(.makeGuest, to: card.id) }
@@ -131,20 +132,21 @@ extension EnvironmentService {
         }
     }
 
-    /// Make a Guest of the No Topic Session of `window`: the Session gets its new Lock's id in `@muxify_session_id`
-    /// first, so a live Session never shows its own Lock as Dormant, then the Lock goes to the end of the Guests.
+    /// Make a Guest of the No Topic Session of `window`: the Session gets its new Board Session's id in
+    /// `@muxify_session_id` first, so a live Session never shows its own card as Dormant, then the Board Session goes to
+    /// the end of the Guests.
     private func makeGuest(_ window: TmuxWindow, snapshot: TmuxSnapshot, client: String?, phase: inout TopicFailure.Phase) throws {
-        let lock = BoardSession(session: window, order: .nan, snapshot: snapshot)
-        try executor.run([.tmux(["set-option", "-t", window.sessionID, "@muxify_session_id", lock.id])], client: client)
+        let boardSession = BoardSession(session: window, order: .nan, isGuest: true, snapshot: snapshot)
+        try executor.run([.tmux(["set-option", "-t", window.sessionID, "@muxify_session_id", boardSession.id])], client: client)
         phase = .changesStarted
-        try store.write { $0.addToBoard(lock) }
+        try store.write { $0.addToBoard(boardSession) }
     }
 
-    /// Bench writes the order of the Topics list, the Topic's Guest mark and the Open Places. Bench of a Guest Session,
-    /// live or Dormant, ends its Lock, and a No Topic Session that is not a Guest does not change.
+    /// Bench writes the order of the Board, the Topic's Guest mark and the Open Places. Bench of a Board Session, live
+    /// or Dormant, takes its card off the Board, and a No Topic Session that has no card does not change.
     private func bench(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         cardChange(request, client: client, allowSessionWithoutCard: true) { card in
-            card.unlocked != nil ? nil : { try $0.apply(.bench, to: card.id) }
+            card.withoutCard != nil ? nil : { try $0.apply(.bench, to: card.id) }
         }
     }
 
@@ -152,17 +154,16 @@ extension EnvironmentService {
         let inPlay = topics.inPlay
         return cardChange(request, client: client) { card in
             { transaction in
-                guard case .topic(let topic) = card.id else { throw TopicOrder.Failure.boardSession }
                 let places = TopicOrder.cut(transaction.entries, inPlay: inPlay).places
                 guard places.indices.contains(place - 1), case .openPlace(let open) = places[place - 1] else {
                     throw TopicOrder.Failure.notOpenPlace
                 }
-                try transaction.fillOpenPlace(open.id, with: topic, inPlay: inPlay)
+                try transaction.fillOpenPlace(open.id, with: card.id, inPlay: inPlay)
             }
         }
     }
 
-    /// A change of the target's card: one write of the Topics list. `change` gives nil when the card is already as the
+    /// A change of the target's card: one write of the Board. `change` gives nil when the card is already as the
     /// request asks.
     private func cardChange(_ request: EnvironmentRequest, client: String?, allowSessionWithoutCard: Bool = false,
                             _ change: (RequestCard) -> ((inout TopicTransaction) throws -> Void)?) -> EnvironmentResponse {
@@ -179,7 +180,7 @@ extension EnvironmentService {
         }
     }
 
-    /// Gathers each Guest Session that an older Muxify kept among the Topics into the Guests. The host calls it at
+    /// Gathers each Board Session that an older Muxify kept among the Topics into the Guests. The host calls it at
     /// launch. A list that is already in the three sections does not change. Nil when it succeeded.
     public func gatherGuests(client: String? = nil) -> TopicFailure? {
         do {
@@ -240,8 +241,8 @@ extension EnvironmentService {
         }
     }
 
-    /// A card on the wire as the Topics list names it. A live Guest Session named by its tmux id is its Lock's card; a
-    /// Session that has no Lock names no card, and the change that takes it fails as for a card that is gone.
+    /// A card on the wire as the Board names it. A live Board Session named by its tmux id is that card; a Session that
+    /// has no card names none, and the change that takes it fails as for a card that is gone.
     private func listID(_ ref: BoardCardRef, contents: TopicContents, snapshot: TmuxSnapshot) throws -> BoardCardID {
         switch ref {
         case .topic(let topic): return .topic(try topic.resolve(in: contents.records).id)
@@ -252,58 +253,58 @@ extension EnvironmentService {
     }
 
     private static func makeGuestFirst(_ session: TmuxWindow) -> String {
-        "The Session \(session.sessionName) has no card in the Topics list. Make it a Guest first: muxify topic make-guest --session \(session.sessionID)."
+        "The Session \(session.sessionName) has no card on the Board. Make it a Guest first: muxify topic make-guest --session \(session.sessionID)."
     }
 
-    /// The card that a request acts on. `unlocked` is set when the target is a No Topic Session that is not a Guest and
-    /// the request may make it one: it has no card yet, and `id` is the id that its Lock would get.
+    /// The card that a request acts on. `withoutCard` is set when the target is a No Topic Session that has no card and
+    /// the request may give it one: `id` is the id that its Board Session would get.
     struct RequestCard {
         let id: BoardCardID
         let label: String
         let pinned: Bool
-        /// A Guest Session's live Session, if any.
+        /// A Board Session's live Session, if any.
         let session: String?
-        let unlocked: TmuxWindow?
+        let withoutCard: TmuxWindow?
 
-        /// What a request that changed this card changed: its Topic, or its Guest Session.
+        /// What a request that changed this card changed: its Topic, or its Board Session.
         var change: TopicChange {
             if case .topic(let id) = self.id { return TopicChange(topicID: id) }
             return TopicChange(topicID: nil, session: session.flatMap(SessionID.init(rawValue:)))
         }
     }
 
-    /// The card that a request moves: the target's open Topic, else the target's Guest Session, live or Dormant. With
-    /// `allowSessionWithoutCard`, a No Topic Session that is not a Guest answers as the card its Lock would have, for the
-    /// change that makes it a Guest.
+    /// The card that a request moves: the target's open Topic, else the target's Board Session, live or Dormant. With
+    /// `allowSessionWithoutCard`, a No Topic Session that has no card answers as the card its Board Session would be,
+    /// for the change that makes it one.
     private func card(_ target: EnvironmentTarget?, caller: TopicCaller?, contents: TopicContents, snapshot: TmuxSnapshot,
                       client: String?, allowSessionWithoutCard: Bool = false) throws -> RequestCard {
         let records = contents.records
         if case .topic(let ref)? = target {
             let topic = try ref.resolve(in: records)
             return RequestCard(id: .topic(topic.id), label: "The Topic " + TopicLabels(records).label(of: topic), pinned: topic.isPinned,
-                               session: nil, unlocked: nil)
+                               session: nil, withoutCard: nil)
         }
         if case .boardSession(let id)? = target {
-            let lock = try boardSessionRow(id, in: contents)
-            let live = lock.windows(in: snapshot.windows, open: records.openTopicIDs).first
-            return RequestCard(id: .session(id), label: "The Guest Session " + (live?.sessionName ?? lock.name), pinned: false,
-                               session: live?.sessionID, unlocked: nil)
+            let boardSession = try boardSessionRow(id, in: contents)
+            let live = boardSession.windows(in: snapshot.windows, open: records.openTopicIDs).first
+            return RequestCard(id: .session(id), label: "The Board Session " + (live?.sessionName ?? boardSession.name), pinned: false,
+                               session: live?.sessionID, withoutCard: nil)
         }
         let window = try sessionWindow(target, caller: caller, snapshot: snapshot, client: client)
         if let topic = records.first(where: { $0.id == window.topicID && $0.settledAt == nil }) {
             return RequestCard(id: .topic(topic.id), label: "The Topic " + TopicLabels(records).label(of: topic), pinned: topic.isPinned,
-                               session: nil, unlocked: nil)
+                               session: nil, withoutCard: nil)
         }
-        guard let lock = liveBoardSession(of: window.sessionID, contents: contents, snapshot: snapshot) else {
+        guard let boardSession = liveBoardSession(of: window.sessionID, contents: contents, snapshot: snapshot) else {
             guard allowSessionWithoutCard else { throw TopicRequestError.cardHidden(Self.makeGuestFirst(window)) }
             return RequestCard(id: .session(window.sessionRecordID), label: "The Session " + window.sessionName, pinned: false,
-                               session: window.sessionID, unlocked: window)
+                               session: window.sessionID, withoutCard: window)
         }
-        return RequestCard(id: .session(lock.id), label: "The Guest Session " + window.sessionName, pinned: false, session: window.sessionID,
-                           unlocked: nil)
+        return RequestCard(id: .session(boardSession.id), label: "The Board Session " + window.sessionName, pinned: false,
+                           session: window.sessionID, withoutCard: nil)
     }
 
-    /// The Lock of the live Session `session`, when that Session is a Guest Session.
+    /// The Board Session of the live Session `session`, when that Session has a card on the Board.
     private func liveBoardSession(of session: String, contents: TopicContents, snapshot: TmuxSnapshot) -> BoardSession? {
         contents.boardSessions.bySession(in: snapshot.windows, open: contents.records.openTopicIDs)[session]
     }
@@ -341,7 +342,7 @@ extension EnvironmentService {
 }
 
 private extension BoardCardID {
-    /// What a request that moved this card changed: its Topic, or its Guest Session's live Session.
+    /// What a request that moved this card changed: its Topic, or its Board Session's live Session.
     func change(in contents: TopicContents, snapshot: TmuxSnapshot) -> TopicChange {
         switch self {
         case .topic(let id): return TopicChange(topicID: id)

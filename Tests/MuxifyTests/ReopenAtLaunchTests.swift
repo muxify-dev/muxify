@@ -23,7 +23,7 @@ final class ReopenAtLaunchTests: XCTestCase {
 
     /// Two Guest Sessions: `scratch` is live, `notes` is Dormant.
     private var contents: TopicContents {
-        TopicContents(records: records, boardSessions: [BoardSession(id: "notes", order: 9), BoardSession(id: "scratch", order: 10)])
+        TopicContents(records: records, boardSessions: [BoardSession(id: "notes", order: 9, isGuest: true), BoardSession(id: "scratch", order: 10, isGuest: true)])
     }
 
     private var windows: [TmuxWindow] {

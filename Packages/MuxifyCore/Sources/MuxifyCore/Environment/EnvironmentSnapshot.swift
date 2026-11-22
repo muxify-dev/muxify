@@ -61,13 +61,13 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
         private enum CodingKeys: String, CodingKey { case id, label, note, tags, state }
     }
 
-    /// One card of the Topics list. Each card has `sessions`: the Topic's own Session order, the one live Guest
-    /// Session, or none for a Dormant Guest Session and an Open Place.
+    /// One card of the Board. Each card has `sessions`: the Topic's own Session order, the one live Board Session, or
+    /// none for a Dormant Board Session and an Open Place.
     public enum Card: Codable, Hashable, Sendable {
         case topic(Topic, mark: CardMark?, sessions: [String])
-        /// A live Guest Session.
+        /// A live Board Session.
         case session(String, mark: CardMark?)
-        /// A Dormant Guest Session: its Lock id, which Reopen takes as its target, and the name its Session had. It is a
+        /// A Dormant Board Session: its id, which Reopen takes as its target, and the name its Session had. It is a
         /// kind of its own, not a `session` with no Session, so a reader that knows only the other kinds can draw it
         /// as a card it does not know.
         case dormantSession(id: String, name: String)
@@ -159,7 +159,7 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
     /// The Pinned Topics, in the order the user gave.
     public var pinned: [Card]
     public var unpinned: Unpinned
-    /// The Sessions in no open Topic and not a Guest Session, in tmux order. They have no card in the Sidebar.
+    /// The Sessions in no open Topic and not a Board Session, in tmux order. They have no card in the Sidebar.
     public var noTopic: [String]
 
     /// Every card in list order: the Pinned cards, then the others.
@@ -201,14 +201,19 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
 }
 
 extension EnvironmentSnapshot {
-    /// The view for a reader that does not know the `dormant_session` card: the same, without the Dormant Guest Sessions.
+    /// The view for a reader that does not know the `dormant_session` card: the same, without the Dormant Board
+    /// Sessions. In an In Play place, an Open Place card with the Board Session's id stands for one, so each place keeps
+    /// its number; a fill of that place fails, because it is not open.
     public var withoutDormantSessions: EnvironmentSnapshot {
         func live(_ cards: [Card]) -> [Card] { cards.filter { if case .dormantSession = $0 { false } else { true } } }
+        func held(_ places: [Card]) -> [Card] {
+            places.map { if case .dormantSession(let id, _) = $0 { .openPlace(id: id) } else { $0 } }
+        }
         var older = self
         older.pinned = live(pinned)
         switch unpinned {
         case .inPlay(let limit, let places, let guests, let bench):
-            older.unpinned = .inPlay(limit: limit, places: live(places), guests: live(guests), bench: live(bench))
+            older.unpinned = .inPlay(limit: limit, places: held(places), guests: live(guests), bench: live(bench))
         }
         return older
     }
@@ -224,8 +229,8 @@ extension EnvironmentSnapshot.Card {
 
     init(_ card: Board.Card) {
         switch card.subject {
-        case .session(let lock):
-            self = card.sessions.first.map { .session($0, mark: card.mark) } ?? .dormantSession(id: lock.id, name: card.label)
+        case .session(let boardSession):
+            self = card.sessions.first.map { .session($0, mark: card.mark) } ?? .dormantSession(id: boardSession.id, name: card.label)
         case .topic(let record):
             let topic = EnvironmentSnapshot.Topic(id: record.id, label: card.label, note: record.note, tags: card.tags.map(\.tag),
                                                   state: card.state)

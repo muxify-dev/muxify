@@ -1,7 +1,7 @@
 import Foundation
 
-/// The Topic records, the Open Places and the Locks in the state database: the `topics`, `open_places` and
-/// `guest_sessions` tables, how a record maps to a row, and the one-time import of `topics.json`.
+/// The Topic records, the Open Places and the Board Sessions in the state database: the `topics`, `open_places` and
+/// `board_sessions` tables, how a record maps to a row, and the one-time import of `topics.json`.
 enum TopicTable {
     /// One row for each Topic, keyed by its id. Each scalar field has a column; `sessions` and `tags` are JSON text,
     /// written whole. The slug is not UNIQUE: two Topics made at the same moment may share one. No build writes
@@ -33,13 +33,14 @@ enum TopicTable {
         """
     )
 
-    /// One row for each Lock, keyed by its id, which the live Session has in `@muxify_session_id`. `session` is its
-    /// Remembered Session as JSON text, written whole.
+    /// One row for each Board Session, keyed by its id, which the live Session has in `@muxify_session_id`. `guest`
+    /// is its Guest mark, as in `topics`, and `session` its Remembered Session as JSON text, written whole.
     static let boardSessionsMigration = StateDatabase.Migration(
         """
-        CREATE TABLE guest_sessions (
+        CREATE TABLE board_sessions (
             id TEXT PRIMARY KEY NOT NULL,
             "order" REAL NOT NULL,
+            guest INTEGER NOT NULL DEFAULT 0,
             session TEXT NOT NULL DEFAULT '{}'
         )
         """
@@ -101,8 +102,8 @@ enum TopicTable {
 
     // MARK: - Reads and writes
 
-    /// Every record in id order, by bytes, the Open Places in the order they were added, and the Locks in id order. A
-    /// Lock's `session` that is not JSON reads as an empty object.
+    /// Every record in id order, by bytes, the Open Places in the order they were added, and the Board Sessions in id
+    /// order. A Board Session's `session` that is not JSON reads as an empty object.
     static func contents(_ connection: SQLiteConnection) throws -> TopicContents {
         let records = try connection.query("SELECT id, \(quoted.joined(separator: ", ")) FROM topics ORDER BY id") { row in
             record(id: row.text(0) ?? "", Dictionary(uniqueKeysWithValues: columns.enumerated().map { ($1, row.value(Int32($0 + 1))) }))
@@ -110,8 +111,9 @@ enum TopicTable {
         let openPlaces = try connection.query(#"SELECT id, "order" FROM open_places ORDER BY rowid"#) { row in
             OpenPlace(id: row.text(0) ?? "", order: row.double(1))
         }
-        let boardSessions = try connection.query(#"SELECT id, "order", session FROM guest_sessions ORDER BY id"#) { row in
-            BoardSession(id: row.text(0) ?? "", order: row.double(1), session: decoded(JSONValue.self, row.value(2)) ?? .object([:]))
+        let boardSessions = try connection.query(#"SELECT id, "order", guest, session FROM board_sessions ORDER BY id"#) { row in
+            BoardSession(id: row.text(0) ?? "", order: row.double(1), isGuest: row.value(2).isTrue,
+                         session: decoded(JSONValue.self, row.value(3)) ?? .object([:]))
         }
         return TopicContents(records: records, openPlaces: openPlaces, boardSessions: boardSessions)
     }
@@ -124,8 +126,9 @@ enum TopicTable {
         while try statement.step() {}
     }
 
-    /// Writes what changed from `start` to `end`: new records, Open Places and Locks are inserted, removed ones deleted,
-    /// and a changed record or Lock updates only the columns whose values differ. Nothing changed writes nothing.
+    /// Writes what changed from `start` to `end`: new records, Open Places and Board Sessions are inserted, removed ones
+    /// deleted, and a changed record or Board Session updates only the columns whose values differ. Nothing changed
+    /// writes nothing.
     static func save(from start: TopicContents, to end: TopicContents, _ connection: SQLiteConnection) throws {
         let before = Dictionary(start.records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let after = Set(end.records.map(\.id))
@@ -160,17 +163,22 @@ enum TopicTable {
         let boardSessions = Dictionary(start.boardSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let boardSessionIDs = Set(end.boardSessions.map(\.id))
         for id in boardSessions.keys.sorted() where !boardSessionIDs.contains(id) {
-            try connection.execute("DELETE FROM guest_sessions WHERE id = ?", id)
+            try connection.execute("DELETE FROM board_sessions WHERE id = ?", id)
         }
-        for lock in end.boardSessions {
-            guard let old = boardSessions[lock.id] else {
-                try connection.execute(#"INSERT INTO guest_sessions (id, "order", session) VALUES (?, ?, ?)"#, lock.id, lock.order,
-                                       json(lock.session))
+        for boardSession in end.boardSessions {
+            guard let old = boardSessions[boardSession.id] else {
+                try connection.execute(#"INSERT INTO board_sessions (id, "order", guest, session) VALUES (?, ?, ?, ?)"#, boardSession.id,
+                                       boardSession.order, boardSession.isGuest, json(boardSession.session))
                 continue
             }
-            if old.order != lock.order { try connection.execute(#"UPDATE guest_sessions SET "order" = ? WHERE id = ?"#, lock.order, lock.id) }
-            if old.session != lock.session {
-                try connection.execute("UPDATE guest_sessions SET session = ? WHERE id = ?", json(lock.session), lock.id)
+            if old.order != boardSession.order {
+                try connection.execute(#"UPDATE board_sessions SET "order" = ? WHERE id = ?"#, boardSession.order, boardSession.id)
+            }
+            if old.isGuest != boardSession.isGuest {
+                try connection.execute("UPDATE board_sessions SET guest = ? WHERE id = ?", boardSession.isGuest, boardSession.id)
+            }
+            if old.session != boardSession.session {
+                try connection.execute("UPDATE board_sessions SET session = ? WHERE id = ?", json(boardSession.session), boardSession.id)
             }
         }
     }

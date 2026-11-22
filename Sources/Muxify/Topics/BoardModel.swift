@@ -86,7 +86,7 @@ struct CardSteps: Equatable {
     func canMove(_ step: TopicCards.Step) -> Bool {
         switch outcome(step) {
         case .reorder, .toGuests, .fill, .trade, .takePlace, .bench, .makeGuest: return true
-        case .refused, .atEnd, .hidden: return false
+        case .atEnd, .hidden: return false
         }
     }
 }

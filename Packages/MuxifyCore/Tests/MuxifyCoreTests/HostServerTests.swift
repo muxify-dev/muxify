@@ -395,7 +395,7 @@ final class HostServerTests: XCTestCase {
     }
 
     func testOnlyAClientThatDeclaredGuestSessionsGetsTheLocksAndTheDormantCards() async throws {
-        let dormant = BoardSession(id: "gone", order: 0, session: .object(["name": .string("notes"), "directory": .string("/tmp")]))
+        let dormant = BoardSession(id: "gone", order: 0, isGuest: true, session: .object(["name": .string("notes"), "directory": .string("/tmp")]))
         try TopicStore(paths: paths).write { $0.addToBoard(dormant) }
 
         let newer = try await connect(capabilities: ["snapshot", "guest-sessions"])
@@ -418,7 +418,7 @@ final class HostServerTests: XCTestCase {
 
     func testAnOlderMacGetsTheLockOrderOnTheWindowsOfALiveGuestSessionAndAgainWhenTheLockChanges() async throws {
         try tmux.run(["set-option", "-t", "=work:", "@muxify_session_id", "g1"])
-        try TopicStore(paths: paths).write { $0.addToBoard(BoardSession(id: "g1", order: 0)) }
+        try TopicStore(paths: paths).write { $0.addToBoard(BoardSession(id: "g1", order: 0, isGuest: true)) }
         let order = try XCTUnwrap(TopicStore(paths: paths).read().boardSessions.first).order
         let work = try sessionID("work")
         let older = subscribeLockOrders(try await connect())
@@ -441,7 +441,7 @@ final class HostServerTests: XCTestCase {
         let newer = subscribeSnapshot(try await connect(capabilities: ["snapshot", "guest-sessions"]))
         try await wait("no first items") { !older.items.isEmpty && !newer.items.isEmpty }
 
-        let dormant = BoardSession(id: "gone", order: 0, session: .object(["name": .string("notes")]))
+        let dormant = BoardSession(id: "gone", order: 0, isGuest: true, session: .object(["name": .string("notes")]))
         try TopicStore(paths: paths).write { $0.addToBoard(dormant) }
         try await wait("the newer phone got no Dormant card", seconds: 5) {
             newer.items.last?.snapshot.cards.contains(.dormantSession(id: "gone", name: "notes")) == true

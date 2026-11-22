@@ -251,7 +251,7 @@ final class HintTests: XCTestCase {
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
         var selection = TopicSelection()
         selection.windowID = "@1"
-        let topics = BoardModel(records: [last, first, pinned], boardSessions: [BoardSession(id: "$1", order: 1)], windows: windows, config: Config(),
+        let topics = BoardModel(records: [last, first, pinned], boardSessions: [BoardSession(id: "$1", order: 1, isGuest: true)], windows: windows, config: Config(),
                                  selection: selection,
                         location: selection.windowLocation)
         XCTAssertEqual(QuickSwitchTargets(model: topics, sessions: sessions, windows: windows, tabIDs: []).cards,
@@ -298,7 +298,7 @@ final class HintTests: XCTestCase {
         func targets(selecting windowID: String?, mode: SidebarMode = .topics) -> QuickSwitchTargets {
             var selection = TopicSelection()
             selection.windowID = windowID
-            let model = BoardModel(records: [dormant, work, pinned], boardSessions: [BoardSession(id: "$4", order: 3)], windows: windows, config: Config(),
+            let model = BoardModel(records: [dormant, work, pinned], boardSessions: [BoardSession(id: "$4", order: 3, isGuest: true)], windows: windows, config: Config(),
                                     selection: selection,
                                                     location: selection.windowLocation, mode: mode)
             return QuickSwitchTargets(model: model, sessions: sessions, windows: [], tabIDs: [])

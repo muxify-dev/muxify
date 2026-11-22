@@ -64,7 +64,7 @@ final class NotificationsTests: XCTestCase {
         second.savedSessionID = "$1"
         var selection = TopicSelection()
         selection.select(windowID: "@1", activeTopic: .session("$1"))
-        let model = BoardModel(records: [], boardSessions: [BoardSession(id: "$1", order: 1)], windows: [locked, second], config: Config(), selection: selection,
+        let model = BoardModel(records: [], boardSessions: [BoardSession(id: "$1", order: 1, isGuest: true)], windows: [locked, second], config: Config(), selection: selection,
                                 location: .window(WindowID(rawValue: "@1")!),
                                 agents: [agent(.done), agent(.blocked, id: "%2", window: "@2", unread: false)])
         let row = model.rows.first { $0.id == .session("$1") }

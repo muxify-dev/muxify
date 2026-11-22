@@ -11,8 +11,8 @@ final class EnvironmentSnapshotTests: XCTestCase {
                  sessionCreated: created)
     }
 
-    private func lock(_ session: String, order: Double) -> BoardSession {
-        BoardSession(id: "lock" + session, order: order, session: .object(["name": .string("s" + session.dropFirst())]))
+    private func lock(_ session: String, order: Double, isGuest: Bool = true) -> BoardSession {
+        BoardSession(id: "lock" + session, order: order, isGuest: isGuest, session: .object(["name": .string("s" + session.dropFirst())]))
     }
 
     private func topic(_ id: String, order: Double, title: String? = nil) -> TopicRecord {
@@ -140,6 +140,16 @@ final class EnvironmentSnapshotTests: XCTestCase {
         let text = String(decoding: try encoder.encode(shown), as: UTF8.self)
         XCTAssertTrue(text.contains(#"{"id":"lock$3","kind":"dormant_session","name":"s3","sessions":[]}"#), text)
         XCTAssertEqual(try JSONDecoder().decode(EnvironmentSnapshot.self, from: Data(text.utf8)), shown)
+    }
+
+    func testABoardSessionInAPlaceIsACardOfThePlacesAndAnOlderReaderSeesAnOpenPlaceForADormantOne() {
+        let shown = snapshot([topic("a", order: 0), topic("b", order: 3)],
+                             boardSessions: [lock("$2", order: 1, isGuest: false), lock("$3", order: 2, isGuest: false)],
+                             windows: [window("$1", topic: "a"), window("$2", guest: true)], inPlay: 3)
+        XCTAssertEqual(sections(shown)?.places, ["topic:a", "session:$2", "dormant:lock$3"])
+        XCTAssertEqual(sections(shown)?.bench, ["topic:b"], "the Bench holds only Topics")
+        XCTAssertEqual(sections(shown.withoutDormantSessions)?.places, ["topic:a", "session:$2", "open:lock$3"],
+                       "each place keeps its number for a reader that does not know a Dormant Board Session")
     }
 
     func testAnOpenPlaceKeepsItsPlaceAndThePlacesAfterIt() {

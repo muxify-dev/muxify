@@ -32,7 +32,7 @@ final class SidebarFormatContextTests: XCTestCase {
 
     func testADormantGuestSessionShowsTheSessionThatItsLockRemembers() throws {
         let windows: [JSONValue] = [.object(["name": .string("shell")]), .object(["name": .string("logs")])]
-        let lock = BoardSession(id: "g1", order: 0, session: .object(["name": .string("notes"), "base_name": .string("notes"),
+        let lock = BoardSession(id: "g1", order: 0, isGuest: true, session: .object(["name": .string("notes"), "base_name": .string("notes"),
                                                                      "windows": .array(windows)]))
         let model = BoardModel(records: [], boardSessions: [lock], windows: [], config: Config(), selection: TopicSelection())
         let contexts = SidebarFormatContexts(model: model, windows: [], panes: [], agents: [], branches: TopicBranches(), records: [],

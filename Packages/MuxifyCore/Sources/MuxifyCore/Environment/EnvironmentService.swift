@@ -307,7 +307,6 @@ public struct EnvironmentService: Sendable {
             case .notBenched: return .cardNotBenched
             case .pinned: return .cardPinned
             case .chosenTwice: return .unsupported
-            case .boardSession: return .cardGuest
             case .notOpenPlace: return .placeNotOpen
             case .cannotFill: return .cardCannotFill
             case .notInPlayTopic: return .cardNotInPlay

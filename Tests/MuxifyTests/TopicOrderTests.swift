@@ -372,9 +372,9 @@ final class TopicOrderTests: XCTestCase {
         var pinned = record("p", order: 9)
         pinned.isPinned = true
         let entries = [pinned, record("a", order: 0), record("b", order: 1)].map(BoardCard.topic)
-            + [.session(BoardSession(id: "$1", order: 0.5))]
+            + [.session(BoardSession(id: "$1", order: 0.5, isGuest: true))]
         XCTAssertEqual(shown(entries), ["p", "a", "lock:$1", "b"])
-        let locked = applying(TopicOrder.appendingBoardSession(BoardSession(id: "$2", order: 0), inPlay: 5, in: entries), to: entries)
+        let locked = applying(TopicOrder.appendingBoardSession(BoardSession(id: "$2", order: 0, isGuest: true), inPlay: 5, in: entries), to: entries)
         XCTAssertEqual(shown(locked), ["p", "a", "b", "lock:$1", "lock:$2"], "the Lock that was among the Topics goes to the Guests too")
         let moved = applying(try TopicOrder.moving(.session("$2"), to: .before(.topic("p")), in: locked), to: locked)
         XCTAssertEqual(shown(moved), ["p", "lock:$2", "a", "b", "lock:$1"], "a Lock is never Pinned, so it stays below the Pinned Topics")
@@ -384,7 +384,7 @@ final class TopicOrderTests: XCTestCase {
 
     func testARenumberGivesTheLocksTheirNewOrderToo() throws {
         let entries = [record("a", order: 0), record("b", order: Double(0).nextUp)].map(BoardCard.topic)
-            + [.session(BoardSession(id: "$1", order: 2))]
+            + [.session(BoardSession(id: "$1", order: 2, isGuest: true))]
         let edits = try TopicOrder.moving(.session("$1"), to: .before(.topic("b")), in: entries)
         XCTAssertEqual(shown(applying(edits, to: entries)), ["a", "lock:$1", "b"])
         XCTAssertEqual(edits.boardSessions.map(\.id), ["$1"])

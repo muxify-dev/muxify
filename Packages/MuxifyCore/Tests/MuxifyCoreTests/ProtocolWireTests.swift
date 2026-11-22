@@ -14,7 +14,7 @@ final class ProtocolWireTests: XCTestCase {
     /// id and drops a card next to it; the phone gets the Dormant one as a `dormant_session` card; Start Fresh takes the
     /// same `guest_session` target.
     private func thisReleasesFrames() throws -> [Data] {
-        let lock = BoardSession(id: "s1", order: 3, session: .object(["id": .string("s1"), "name": .string("notes"), "base_name": .string("notes"),
+        let lock = BoardSession(id: "s1", order: 3, isGuest: true, session: .object(["id": .string("s1"), "name": .string("notes"), "base_name": .string("notes"),
                                                                      "directory": .string("/work/notes"), "windows": .array([])]))
         let shown = EnvironmentShown(contents: TopicContents(records: [], boardSessions: [lock]),
                                      tmux: TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true), config: Config())
@@ -339,7 +339,7 @@ final class ProtocolWireTests: XCTestCase {
         let changes: [EnvironmentChange] = [
             .session("$1", EnvironmentSession(windows: [window], panes: [pane])), .session("$9", nil),
             .topic("t1", record), .topic("t2", nil), .openPlaces([]),
-            .boardSessions([BoardSession(id: "s1", order: 2, session: .object(["name": .string("work"), "directory": .string("/w")]))]),
+            .boardSessions([BoardSession(id: "s1", order: 2, isGuest: true, session: .object(["name": .string("work"), "directory": .string("/w")]))]),
             .server(EnvironmentServer(isRunning: false, home: "/home/u", hostName: "box")),
         ]
         let line = try ProtocolLine.item(id: 1, EnvironmentItem(changes: changes))

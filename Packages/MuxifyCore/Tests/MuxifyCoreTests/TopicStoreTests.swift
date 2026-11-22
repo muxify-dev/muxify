@@ -316,7 +316,7 @@ final class TopicStoreTests: XCTestCase {
             var pinned = record("p", order: 0)
             pinned.isPinned = true
             var transaction = TopicTransaction(records: [pinned, record("a", order: edge)])
-            transaction.boardSessions = [BoardSession(id: "guest", order: edge)]
+            transaction.boardSessions = [BoardSession(id: "guest", order: edge, isGuest: true)]
             try transaction.create(record("new", order: nil))
             let shown = TopicOrder.sorted(transaction.entries)
             XCTAssertEqual(shown.records.map(\.id), ["p", "a", "new"])

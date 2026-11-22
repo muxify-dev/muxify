@@ -14,7 +14,7 @@ final class BoardSessionTests: XCTestCase {
         TmuxSnapshot(windows: windows, clients: [], panes: [], serverRunning: running, serverID: server)
     }
 
-    private let lock = BoardSession(id: "g1", order: 4)
+    private let lock = BoardSession(id: "g1", order: 4, isGuest: true)
 
     func testALiveGuestSessionIsRememberedWithEachOfItsWindows() throws {
         let live = snapshot([window(1), window(2), window(3, session: "$2", name: "other", lock: "")])
@@ -24,7 +24,7 @@ final class BoardSessionTests: XCTestCase {
         XCTAssertEqual(session["directory"], .string("/work/notes"))
         XCTAssertEqual(session["windows"]?.array?.compactMap { $0["name"]?.string }, ["w1", "w2"], "only the Windows of its own Session")
 
-        let saved = BoardSession(id: "g1", order: 4, session: session)
+        let saved = BoardSession(id: "g1", order: 4, isGuest: true, session: session)
         XCTAssertNil(saved.remembering(live, open: []), "a layout that did not change writes nothing")
     }
 
@@ -47,7 +47,7 @@ final class BoardSessionTests: XCTestCase {
     func testReopenCreatesTheSessionWithItsWindowsAndPointsItAtTheLock() throws {
         let live = snapshot([window(1), window(2)])
         guard case .remembered(let session)? = lock.remembering(live, open: []) else { return XCTFail("nothing remembered") }
-        let dormant = BoardSession(id: "g1", order: 4, session: session)
+        let dormant = BoardSession(id: "g1", order: 4, isGuest: true, session: session)
 
         let edit = try BoardSessionReopenPlan(lock: dormant, records: [], windows: [window(9, session: "$9", name: "main", lock: "")]).edit
         XCTAssertEqual(edit.selection, .sessionName("notes"))
@@ -69,7 +69,7 @@ final class BoardSessionTests: XCTestCase {
     func testStartFreshCreatesTheSessionWithOneShellWindowAndPointsItAtTheLock() throws {
         let agent: JSONValue = .object(["name": .string("agent"), "directory": .string("/work/notes"), "agent": .string("claude"),
                                         "agent_conversation": .string("c1"), "browser_tabs": .array([.string("https://example.com")])])
-        let dormant = BoardSession(id: "g1", order: 4, session: .object([
+        let dormant = BoardSession(id: "g1", order: 4, isGuest: true, session: .object([
             "id": .string("g1"), "name": .string("notes"), "directory": .string("/work/notes"),
             "windows": .array([.object(["name": .string("edit"), "directory": .string("/work/notes/1")]), agent]),
         ]))

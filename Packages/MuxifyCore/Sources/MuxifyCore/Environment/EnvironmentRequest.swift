@@ -601,6 +601,7 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let cardNotInPlay = Kind(rawValue: "card_not_in_play")
         public static let cardNotBenched = Kind(rawValue: "card_not_benched")
         public static let cardPinned = Kind(rawValue: "card_pinned")
+        /// An older Host refused to give a Guest Session an In Play place. No Muxify sends it now; a reader still decodes it.
         public static let cardGuest = Kind(rawValue: "card_guest")
         public static let placeNotOpen = Kind(rawValue: "place_not_open")
         public static let cardCannotFill = Kind(rawValue: "card_cannot_fill")

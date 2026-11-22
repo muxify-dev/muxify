@@ -90,13 +90,14 @@ extension TopicRecord {
 }
 
 extension BoardSession {
-    /// A new Lock for the live No Topic Session of `window`, at `order`. Its id is the Session's `sessionRecordID`, so
-    /// two Make a Guest of one Session make one Lock, and it remembers the Session as `snapshot` shows it.
-    public init(session window: TmuxWindow, order: Double, snapshot: TmuxSnapshot) {
+    /// A new Board Session for the live No Topic Session of `window`, at `order`. Its id is the Session's
+    /// `sessionRecordID`, so two Make a Guest of one Session make one Board Session, and it remembers the Session as
+    /// `snapshot` shows it.
+    public init(session window: TmuxWindow, order: Double, isGuest: Bool, snapshot: TmuxSnapshot) {
         let members = snapshot.windows.filter { $0.sessionID == window.sessionID }
         var fields = TopicRecord.remembered([:], id: window.sessionRecordID, members: members, snapshot: snapshot)
         fields["base_name"] = .string(window.sessionName)
-        self.init(id: window.sessionRecordID, order: order, session: .object(fields))
+        self.init(id: window.sessionRecordID, order: order, isGuest: isGuest, session: .object(fields))
     }
 
     /// What a read of the server changes in a Lock.

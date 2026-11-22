@@ -81,7 +81,7 @@ final class NewTopicTests: XCTestCase {
     }
 
     func testADormantGuestSessionsPageShowsItsCardAsTheActiveTopic() {
-        let lock = BoardSession(id: "g1", order: 0, session: .object(["name": .string("notes"), "directory": .string("/work/notes")]))
+        let lock = BoardSession(id: "g1", order: 0, isGuest: true, session: .object(["name": .string("notes"), "directory": .string("/work/notes")]))
         let shown = BoardModel(records: [], boardSessions: [lock], windows: [], config: Config(), selection: TopicSelection(),
                                 location: .emptyTopic(.session("g1")))
         XCTAssertEqual(shown.activeTopic, .session("g1"))

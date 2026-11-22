@@ -31,7 +31,7 @@ final class OpenPlaceChoicesTests: XCTestCase {
             .fixture(id: "@1", sessionID: "$1", sessionName: "deploy-scripts", topicID: "d"),
             .fixture(id: "@2", sessionID: "$2", sessionName: "scratch", savedSessionID: "$2"),
         ]
-        return BoardModel(records: records, openPlaces: [OpenPlace(id: "open", order: 1)], boardSessions: [BoardSession(id: "$2", order: 2.5)],
+        return BoardModel(records: records, openPlaces: [OpenPlace(id: "open", order: 1)], boardSessions: [BoardSession(id: "$2", order: 2.5, isGuest: true)],
                            windows: windows, config: config,
                            selection: TopicSelection(), location: .openPlace("open"))
     }
