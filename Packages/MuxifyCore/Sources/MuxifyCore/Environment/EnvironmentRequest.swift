@@ -63,8 +63,8 @@ public enum EnvironmentTarget: Codable, Hashable, Sendable {
     case sessionName(String)
     case window(WindowID)
     case pane(PaneID)
-    /// A Guest Session, live or Dormant, by its Lock id: Reopen, Bench and the card moves take it, also when tmux has no
-    /// Session for it.
+    /// A Guest Session, live or Dormant, by its Lock id: Reopen, Start Fresh, Bench and the card moves take it, also when
+    /// tmux has no Session for it.
     case guestSession(String)
 
     private enum CodingKeys: String, CodingKey {
@@ -319,7 +319,9 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// Creates the remembered Sessions, Windows, Tabs and Agents of a Dormant or Settled Topic again. With a
     /// `guest_session` target, it creates the Session of a Dormant Guest Session again, and shows a live one.
     case reopen
-    /// Creates one Session with one shell Window in each SessionPath that a Dormant or Settled Topic remembers.
+    /// Creates one Session with one shell Window in each SessionPath that a Dormant or Settled Topic remembers. With a
+    /// `guest_session` target, it creates the Session of a Dormant Guest Session again with one shell Window; a live
+    /// one fails, as a live Topic does.
     case startFresh
     /// Puts the target Session before or after another Session of its Topic, or one place up or down. From then on
     /// the Topic keeps its Sessions in the order the user gave them. `up` and `down` on a Guest Session, which is in

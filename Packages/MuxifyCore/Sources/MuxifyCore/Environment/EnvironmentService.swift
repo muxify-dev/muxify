@@ -284,6 +284,8 @@ public struct EnvironmentService: Sendable {
             case .cardHidden: return .cardHidden
             case .windowNotInSession: return .windowNotInSession
             case .guestSessionUnavailable, .guestSessionDormant: return .sourceUnavailable
+            // As Start Fresh of a live Topic fails.
+            case .guestSessionLive: return .topicUnavailable
             }
         case let error as TopicEditFailure:
             switch error {
@@ -521,6 +523,8 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case guestSessionUnavailable(String)
     /// The Guest Session with this Lock id has no live Session, so a command that needs one cannot run.
     case guestSessionDormant(String)
+    /// The Guest Session with this Lock id has a live Session, so Start Fresh, which needs a Dormant one, cannot run.
+    case guestSessionLive(String)
     /// An old form of a request that now fails, with the message that names the new form.
     case removedForm(String)
 
@@ -557,6 +561,8 @@ public enum TopicRequestError: Error, CustomStringConvertible {
         case .guestSessionUnavailable(let id): return "No Guest Session has the id \(id)."
         case .guestSessionDormant(let id):
             return "The Guest Session \(id) is Dormant: it has no live Session. Reopen it first: muxify topic reopen --guest-session \(id)."
+        case .guestSessionLive(let id):
+            return "The Guest Session \(id) has a live Session. Start Fresh makes only a Dormant Guest Session again."
         case .sessionNameInvalid(let name): return "\(name) cannot name a tmux Session: it is empty, or it has a period, a colon or a control character."
         case .sessionNameTaken(let name): return "A tmux Session that is not in the Topic has the name \(name)."
         case .branchUnavailable(let branch, let worktree): return "No local branch \(branch) is in the repository of \(worktree)."

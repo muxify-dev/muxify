@@ -283,7 +283,10 @@ Remembered Sessions.
 When tmux has no Session for a Lock, as after a tmux restart, the Guest Session
 is Dormant: its card stays at its place, dimmed. Going to it Reopens it: Muxify
 creates the Session again in its folder, with its Windows, Panes, Tabs and
-Agents, and sets `@muxify_session_id` on it. The Lock ends when the user Benches
+Agents, and sets `@muxify_session_id` on it. Start Fresh creates the Session in
+its folder with one shell Window, and sets the same option, so the card also
+keeps its place. When the Session is live, `session` remembers it in place of
+the old Windows. The Lock ends when the user Benches
 the Guest Session, live or Dormant, when Muxify kills it, when it goes into a
 Topic, and when it ends on the same tmux server while Muxify watches. A tmux
 restart and a Muxify launch do not end it. A Topic that the user makes from a
@@ -291,9 +294,10 @@ Guest Session takes the Lock's `order`, and the Guest mark.
 
 `muxify topic make-guest --session <name>` and `muxify topic bench --session
 <name>` write and end a Lock through the Topic service. `muxify topic reopen
---guest-session <id>` and `muxify topic bench --guest-session <id>` take a
-Guest Session by its Lock id, also a Dormant one, which `muxify environment
-show` gives on its `dormant session` line. `muxify session lock`, `muxify
+--guest-session <id>`, `muxify topic start-fresh --guest-session <id>` and
+`muxify topic bench --guest-session <id>` take a Guest Session by its Lock id,
+also a Dormant one, which `muxify environment show` gives on its `dormant
+session` line. `muxify session lock`, `muxify
 session unlock` and the URLs `muxify://topic/lock` and `muxify://topic/unlock`
 are gone.
 

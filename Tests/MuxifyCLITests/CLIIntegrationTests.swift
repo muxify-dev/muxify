@@ -2023,7 +2023,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(try sandbox.sessions(), ["api/ship", "game/ship", "main"])
     }
 
-    func testADormantGuestSessionIsListedReopenedAndBenchedByItsLockID() async throws {
+    func testADormantGuestSessionIsListedReopenedStartedFreshAndBenchedByItsLockID() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
         let environment = sandbox.cliEnvironment(pane: nil)
@@ -2045,6 +2045,18 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(windows.count, 2, "Reopen creates both Windows")
         XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "=notes:", "@muxify_session_id"]).trimmingCharacters(in: .whitespacesAndNewlines),
                        lock.id)
+
+        try sandbox.tmux(["kill-session", "-t", "=notes"])
+        let fresh = try await run(cli, arguments: ["topic", "start-fresh", "--guest-session", lock.id], environment: environment)
+        XCTAssertEqual(fresh.status, 0, fresh.output)
+        XCTAssertEqual(try sandbox.tmux(["list-windows", "-t", "=notes:", "-F", "#{window_id}"]).split(separator: "\n").count, 1,
+                       "Start Fresh creates one shell Window")
+        XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "=notes:", "@muxify_session_id"]).trimmingCharacters(in: .whitespacesAndNewlines),
+                       lock.id)
+        let live = try await run(cli, arguments: ["topic", "start-fresh", "--guest-session", lock.id], environment: environment)
+        XCTAssertEqual(live.status, 1, live.output)
+        XCTAssertEqual(live.stderr, "muxify: The Guest Session \(lock.id) has a live Session. Start Fresh makes only a Dormant Guest Session again. "
+                       + "No changes were made.\n")
 
         let benched = try await run(cli, arguments: ["topic", "bench", "--guest-session", lock.id], environment: environment)
         XCTAssertEqual(benched.status, 0, benched.output)

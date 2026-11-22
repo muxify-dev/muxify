@@ -657,12 +657,17 @@ enum CLIVerbs {
                 """) { parsed in
             .request(try RequestInvocation(try reopening(.reopen, parsed), parsed: parsed))
         },
-        topicVerb(.topicStartFresh, synopsis: "--topic <id|label> [--json]",
-                  help: """
-                  Makes one Session with one shell Window in each Session Path that a
-                  Dormant or Settled Topic remembers, as Start Topic Fresh does.
-                  """) { parsed in
-            try reopening(.startFresh, parsed)
+        CLIVerb(path: .topicStartFresh, synopsis: "(--topic <id|label> | --guest-session <id>) [--json]", options: [.flag("--json")],
+                targets: [.topic, .guestSession, .window, .pane],
+                help: """
+                Makes one Session with one shell Window in each Session Path that a
+                Dormant or Settled Topic remembers, as Start Topic Fresh does.
+                With --guest-session, it makes the Session of a Dormant Guest Session again,
+                with its name and folder and one shell Window, as Start Fresh on its card
+                does. Its card stays at its place among the Guests. A live Guest Session
+                does not change, and the command fails.
+                """) { parsed in
+            .request(try RequestInvocation(try reopening(.startFresh, parsed), parsed: parsed))
         },
         topicVerb(.topicPin, synopsis: "\(topicTarget) [--json]",
                   help: "Pins this Pane's Topic, as Pin Topic does: its card goes last among the Pinned Topics.") { parsed in
@@ -863,13 +868,13 @@ enum CLIVerbs {
         },
     ]
 
-    /// A Dormant or Settled Topic has no Pane, so Reopen and Start Fresh name it, and Reopen names a Dormant Guest
-    /// Session by its Lock id.
+    /// A Dormant or Settled Topic has no Pane, so Reopen and Start Fresh name it, or a Dormant Guest Session by its
+    /// Lock id.
     private static func reopening(_ command: RequestInvocation.Command, _ parsed: ParsedArguments) throws -> RequestInvocation.Command {
         guard parsed.operands.isEmpty else { throw CLIError.usage }
         guard parsed.targets.chosen != nil else {
-            let guest = command == .reopen ? ", or the Guest Session: --guest-session <id>" : ""
-            throw CLIError("\(command.phrase) takes the Topic: --topic <id|label>\(guest). A Dormant or Settled Topic has no Pane.", exitCode: 2)
+            throw CLIError("\(command.phrase) takes the Topic: --topic <id|label>, or the Guest Session: --guest-session <id>. "
+                           + "A Dormant or Settled Topic has no Pane.", exitCode: 2)
         }
         return command
     }

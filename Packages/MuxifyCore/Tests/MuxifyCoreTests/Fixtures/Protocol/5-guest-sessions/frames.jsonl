@@ -8,3 +8,5 @@
 {"end":{"ok":{"changed":{"created":false}}},"id":3,"kind":"end"}
 {"id":4,"kind":"request","request":{"subscribe":{"snapshot":{}}}}
 {"id":4,"item":{"no_topic":[],"pinned":[],"sessions":[],"sidebar":{"sessions":true,"topics":true},"tags":[],"unpinned":{"bench":[],"guests":[{"id":"s1","kind":"dormant_session","name":"notes","sessions":[]}],"kind":"in_play","limit":3,"places":[]}},"kind":"item"}
+{"id":5,"kind":"request","request":{"environment":{"command":{"start_fresh":{}},"target":{"guest_session":"s1"},"version":2}}}
+{"end":{"ok":{"changed":{"created":false,"session":"$5","session_name":"notes"}}},"id":5,"kind":"end"}

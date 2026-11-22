@@ -187,14 +187,21 @@ public struct TopicReopening: Hashable {
             let createsWorktree = session["worktree_path"]?.string.map { !existingDirectories.contains($0) } ?? false
             let branch = session["branch"]?.string.flatMap { $0.isEmpty ? nil : $0 }
             if createsWorktree, branch == nil { throw TopicEditFailure.invalidSessionPath }
-            let saved = session["windows"]?.array ?? []
-            let windows = choice == .startFresh || saved.isEmpty
-                ? [Window(name: "shell", directory: directory, browser: StoredBrowser(), layout: nil,
-                          panes: [Pane(directory: directory, isActive: true, start: .shell)])]
-                : saved.map { Self.window($0, directory: directory) }
             return Session(id: id, repositoryPath: session["repository_path"]?.string, baseName: SessionNaming.base(of: name, topic: topic), name: name, directory: directory, branch: branch,
-                           createsWorktree: createsWorktree, base: session[TopicWorktrees.baseKey]?.string, windows: windows)
+                           createsWorktree: createsWorktree, base: session[TopicWorktrees.baseKey]?.string,
+                           windows: Self.windows(of: session, directory: directory, choice: choice))
         }
+    }
+
+    /// The Windows that `choice` creates for one Remembered Session: its remembered ones for Reopen, one shell Window in
+    /// `directory` for Start Fresh or when it remembers none.
+    static func windows(of session: JSONValue, directory: String, choice: Choice) -> [Window] {
+        let saved = session["windows"]?.array ?? []
+        guard choice == .reopen, !saved.isEmpty else {
+            return [Window(name: "shell", directory: directory, browser: StoredBrowser(), layout: nil,
+                           panes: [Pane(directory: directory, isActive: true, start: .shell)])]
+        }
+        return saved.map { window($0, directory: directory) }
     }
 
     /// The remembered Worktrees that are still on disk, which Reopen uses as they are.
@@ -341,28 +348,35 @@ extension TopicReopenPlan {
     }
 }
 
-/// What Reopen creates for a Dormant Guest Session: its Session again, in its folder, with its remembered Windows,
-/// Panes, Tabs and Agents, pointing at its Lock with `@muxify_session_id`. A name that a live Session has gets +2. A
-/// Guest Session that is live already is only shown.
-struct GuestSessionReopenPlan {
-    let edit: TopicEdit
-
-    init(lock: SessionLock, records: [TopicRecord], windows: [TmuxWindow]) throws {
-        if let live = lock.windows(in: windows, open: records.openTopicIDs).first {
-            edit = TopicEdit(record: nil, commands: [], selection: .sessionID(live.sessionID))
-            return
-        }
+extension TopicReopening.Session {
+    /// The Session that Reopen or Start Fresh creates for a Dormant Guest Session, which the app shows before the user
+    /// chooses: its Lock's name, +2 when a live Session has it, in its folder, with the Windows that `choice` gives. A
+    /// Guest Session has no Topic, so it makes no Worktree again.
+    public init(guest lock: SessionLock, windows: [TmuxWindow], choice: TopicReopening.Choice) throws {
         guard let directory = lock.session["directory"]?.string, !directory.isEmpty else { throw TopicEditFailure.invalidSessionPath }
         try SessionNaming.validate(lock.name)
         let name = SessionNaming.available(lock.name, taken: Set(windows.map(\.sessionName)))
-        let saved = lock.session["windows"]?.array ?? []
-        let reopened = saved.isEmpty
-            ? [TopicReopening.Window(name: "shell", directory: directory, browser: StoredBrowser(), layout: nil,
-                                     panes: [TopicReopening.Pane(directory: directory, isActive: true, start: .shell)])]
-            : saved.map { TopicReopening.window($0, directory: directory) }
-        edit = TopicEdit(record: nil, commands: TopicReopenPlan.creating(name, in: directory, windows: reopened,
+        self.init(id: lock.id, repositoryPath: nil, baseName: name, name: name, directory: directory, branch: nil, createsWorktree: false,
+                  base: nil, windows: TopicReopening.windows(of: lock.session, directory: directory, choice: choice))
+    }
+}
+
+/// What Reopen or Start Fresh creates for a Dormant Guest Session: the Session of `TopicReopening.Session(guest:)`,
+/// pointing at its Lock with `@muxify_session_id`. Reopen of a live Guest Session only shows it. Start Fresh of a live
+/// one fails, as it does for a live Topic.
+struct GuestSessionReopenPlan {
+    let edit: TopicEdit
+
+    init(lock: SessionLock, records: [TopicRecord], windows: [TmuxWindow], choice: TopicReopening.Choice = .reopen) throws {
+        if let live = lock.windows(in: windows, open: records.openTopicIDs).first {
+            guard choice == .reopen else { throw TopicRequestError.guestSessionLive(lock.id) }
+            edit = TopicEdit(record: nil, commands: [], selection: .sessionID(live.sessionID))
+            return
+        }
+        let session = try TopicReopening.Session(guest: lock, windows: windows, choice: choice)
+        edit = TopicEdit(record: nil, commands: TopicReopenPlan.creating(session.name, in: session.directory, windows: session.windows,
                                                                          options: [("@muxify_session_id", lock.id)]),
-                         selection: .sessionName(name))
+                         selection: .sessionName(session.name))
     }
 }
 

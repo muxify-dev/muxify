@@ -1008,6 +1008,30 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         XCTAssertEqual(try failure(service().handle(EnvironmentRequest(.reopen, target: .guestSession(lock.id)))).kind, .sourceUnavailable)
     }
 
+    func testADormantGuestSessionStartsFreshWithOneWindowAtItsPlaceAndALiveOneDoesNotChange() throws {
+        try regularTopic("First", using: service())
+        for name in ["notes", "chores"] { try server.run(["new-session", "-d", "-s", name, "-c", sessionPath.folder.path]) }
+        try server.run(["new-window", "-d", "-t", "notes:", "-n", "logs", "-c", tools.folder.path])
+        for name in ["notes", "chores"] { _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName(name)))) }
+        let lock = try XCTUnwrap(try locks().first { $0.name == "notes" })
+        try server.run(["kill-session", "-t", "notes"])
+
+        let fresh = try change(service().handle(EnvironmentRequest(.startFresh, target: .guestSession(lock.id))))
+        let session = try XCTUnwrap(fresh.session?.rawValue)
+        let windows = try server.snapshot().windows.filter { $0.sessionID == session }
+        XCTAssertEqual(windows.count, 1, "Start Fresh creates one shell Window, not the remembered logs Window")
+        XCTAssertEqual(windows.first?.sessionName, "notes")
+        XCTAssertEqual(windows.first?.sessionPath, sessionPath.folder.path, "in the folder that the Guest Session remembers")
+        XCTAssertEqual(windows.first?.savedSessionID, lock.id, "the new Session points at the same Lock")
+        XCTAssertEqual(try topicList(), ["First", "lock:notes", "lock:chores"], "the card is live again, at its place")
+
+        let live = try failure(service().handle(EnvironmentRequest(.startFresh, target: .guestSession(lock.id))))
+        XCTAssertEqual(live.message, TopicRequestError.guestSessionLive(lock.id).description)
+        XCTAssertEqual(live.kind, .topicUnavailable, "as Start Fresh of a live Topic fails")
+        XCTAssertEqual(try server.snapshot().windows.filter { $0.savedSessionID == lock.id }.map(\.sessionID), [session],
+                       "the live Guest Session does not change")
+    }
+
     func testANewTopicFromTheLastWindowOrPaneOfAGuestSessionTakesItsPlace() throws {
         for name in ["notes", "chores", "misc"] { try server.run(["new-session", "-d", "-s", name, "-c", sessionPath.folder.path]) }
         try regularTopic("First", using: service())

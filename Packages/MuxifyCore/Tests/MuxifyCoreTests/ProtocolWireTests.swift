@@ -11,7 +11,8 @@ final class ProtocolWireTests: XCTestCase {
 
     /// This release's messages, in the order of the newest fixtures folder: the Guest Sessions that a tmux restart keeps
     /// (`guest-sessions`). The Mac declares the capability, gets the Locks, Reopens a Dormant Guest Session by its Lock
-    /// id and drops a card next to it; the phone gets the Dormant one as a `dormant_session` card.
+    /// id and drops a card next to it; the phone gets the Dormant one as a `dormant_session` card; Start Fresh takes the
+    /// same `guest_session` target.
     private func thisReleasesFrames() throws -> [Data] {
         let lock = SessionLock(id: "s1", order: 3, session: .object(["id": .string("s1"), "name": .string("notes"), "base_name": .string("notes"),
                                                                      "directory": .string("/work/notes"), "windows": .array([])]))
@@ -30,6 +31,8 @@ final class ProtocolWireTests: XCTestCase {
             try ProtocolLine.ok(id: 3, EnvironmentResponse.changed(TopicChange(topicID: nil))),
             try ProtocolLine.request(id: 4, HostRequest.subscribe(.snapshot)),
             try ProtocolLine.item(id: 4, shown),
+            try ProtocolLine.request(id: 5, HostRequest.environment(EnvironmentRequest(.startFresh, target: .guestSession("s1")))),
+            try ProtocolLine.ok(id: 5, EnvironmentResponse.changed(TopicChange(topicID: nil, session: SessionID(rawValue: "$5"), sessionName: "notes"))),
         ]
     }
 

@@ -32,8 +32,7 @@ struct RequestInvocation: Equatable {
         case diff(sessionPath: String?, stat: Bool)
         case tag(TopicTagChange)
         case rename(title: String)
-        /// A Dormant or Settled Topic has no Pane, so these take only `--topic`. Reopen also takes a Dormant Guest Session
-        /// by its Lock id.
+        /// A Dormant or Settled Topic has no Pane, so these take only `--topic`, or a Dormant Guest Session by its Lock id.
         case reopen
         case startFresh
         /// `topic` is an open Topic's id or label. `session` chooses its destination Session; `newSession` makes one.
@@ -102,8 +101,7 @@ struct RequestInvocation: Equatable {
             case .moveWholeSession: return [.session, .pane]
             case .replaceFromBench, .makeGuest: return [.topic, .session, .window, .pane]
             case .benchTopic: return [.topic, .session, .guestSession, .window, .pane]
-            case .reopen: return [.topic, .guestSession]
-            case .startFresh: return [.topic]
+            case .reopen, .startFresh: return [.topic, .guestSession]
             case .moveWindow, .moveToNewTopic, .removeWindowFromTopic: return [.window, .pane]
             case .moveToNewWindow: return [.pane]
             case .newWindow: return [.topic, .session, .window, .pane]

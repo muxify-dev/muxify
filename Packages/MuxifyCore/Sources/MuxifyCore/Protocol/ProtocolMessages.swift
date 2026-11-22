@@ -49,8 +49,9 @@ public enum HostCapability: String, CaseIterable, Sendable {
     case statusLine = "status-line"
     /// The Guest Sessions that a tmux restart keeps: the `guest_sessions` event of the `environment` subscription,
     /// `dormant_session` cards in `snapshot` items and `environment_show` answers, and the `guest_session` target and
-    /// card of an `environment` request. A client that did not declare it gets no `guest_sessions` event, and no card
-    /// for a Dormant Guest Session; it still gets a live one as a `session` card.
+    /// card of an `environment` request, which `reopen`, `start_fresh`, `bench_topic` and the card moves take. A client
+    /// that did not declare it gets no `guest_sessions` event, and no card for a Dormant Guest Session; it still gets a
+    /// live one as a `session` card.
     case guestSessions = "guest-sessions"
 }
 

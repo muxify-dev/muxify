@@ -320,15 +320,15 @@ extension EnvironmentService {
             return Planned(edit: TmuxObjectPlan.newSession(named: SessionNaming.available(base, taken: Set(snapshot.windows.map(\.sessionName))),
                                                            in: launch.folder.path))
         case .reopen, .startFresh:
-            if case .guestSession(let id)? = request.target, request.command == .reopen {
+            let choice: TopicReopening.Choice = request.command == .startFresh ? .startFresh : .reopen
+            if case .guestSession(let id)? = request.target {
                 let lock = try guestSessionLock(id, in: contents)
-                return Planned(edit: try GuestSessionReopenPlan(lock: lock, records: records, windows: snapshot.windows).edit)
+                return Planned(edit: try GuestSessionReopenPlan(lock: lock, records: records, windows: snapshot.windows, choice: choice).edit)
             }
             guard case .topic(let ref) = request.target else { throw TopicRequestError.noTarget }
             let topic = try ref.resolve(in: records, open: false)
             return Planned(edit: try TopicReopenPlan(topic: topic, records: records, windows: snapshot.windows, sessionPaths: sessionPaths,
-                                                     existingDirectories: TopicReopening.existingWorktrees(of: topic),
-                                                     choice: request.command == .startFresh ? .startFresh : .reopen).edit)
+                                                     existingDirectories: TopicReopening.existingWorktrees(of: topic), choice: choice).edit)
         }
     }
 
