@@ -45,7 +45,8 @@ public struct TmuxWindow: Identifiable, Hashable {
     /// tmux `#{window_zoomed_flag}`: one Pane of the Window is Zoomed.
     public var isZoomed = false
     /// tmux `#{window_last_flag}`: the Last Window of its Session, the one it showed before its current one, as
-    /// `last-window` means it. Muxify keeps no Last Window of its own.
+    /// `last-window` means it. Muxify keeps no Last Window of its own: `TmuxSnapshot.lastWindowID`
+    /// (`@muxify_last_window`) is the Window last selected in Muxify on the whole server, not this.
     public var isLastWindow = false
 
     /// The pane title is what shells and TUIs set via OSC 0/2 (fish sets it to
