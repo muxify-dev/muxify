@@ -47,12 +47,13 @@ test: project
 	python3 -m unittest scripts.verify.test_run
 	# xcodebuild gives a test only the variables named TEST_RUNNER_<name>, as <name>. Its parallel output names a failed
 	# test but not why, so a failed run prints each failure's message and line from the result bundle.
-	TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
+	TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" TEST_RUNNER_MUXIFY_TEST_TIME_SCALE="$$MUXIFY_TEST_TIME_SCALE" xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) $(XCODEBUILD_EXTRA_SETTINGS) test \
 		|| { status=$$?; ./scripts/print-test-failures.py; exit $$status; }
 
 # swift test for the CLI and MuxifyCore on Linux, in Docker (OrbStack on a Mac) with the Swift image of make host-cli,
 # tmux and git, and MUXIFY_REQUIRE_TMUX=1. TEST_LINUX_PLATFORM=linux/amd64 picks another architecture than the host's.
+# MUXIFY_TEST_TIME_SCALE reaches the tests as make test passes it.
 test-linux:
 	./scripts/test-linux.sh
 

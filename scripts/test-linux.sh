@@ -15,7 +15,8 @@
 # It uses the host's architecture; TEST_LINUX_PLATFORM=linux/amd64 (or
 # linux/arm64) picks another. TEST_LINUX_DOCKER_ARGS adds options to docker run,
 # such as --dns 1.1.1.1 when the host's resolver does not answer for the Ubuntu
-# mirrors that apt needs.
+# mirrors that apt needs. MUXIFY_TEST_TIME_SCALE, which stretches the tests'
+# waits (docs/testing.md), reaches the tests as it is set here.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,6 +39,7 @@ docker run --rm ${options[@]+"${options[@]}"} \
   -v "$ROOT:/src" -v "$CACHE_VOLUME:/cache" -w /src \
   -e TMUX_VERSION="$TMUX_VERSION" -e TMUX_SHA256="$TMUX_SHA256" \
   -e OWNER_UID="$(id -u)" -e OWNER_GID="$(id -g)" \
+  -e MUXIFY_TEST_TIME_SCALE="${MUXIFY_TEST_TIME_SCALE:-}" \
   "$HOST_CLI_SWIFT_IMAGE" bash -euo pipefail -c '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null
@@ -60,7 +62,7 @@ docker run --rm ${options[@]+"${options[@]}"} \
     mkdir -p /cache/home /cache/build
     chown "$OWNER_UID:$OWNER_GID" /cache/home /cache/build
 
-    runuser -u tester -- env HOME=/cache/home MUXIFY_REQUIRE_TMUX=1 bash -uo pipefail -c "
+    runuser -u tester -- env HOME=/cache/home MUXIFY_REQUIRE_TMUX=1 MUXIFY_TEST_TIME_SCALE="$MUXIFY_TEST_TIME_SCALE" bash -uo pipefail -c "
       build=/cache/build/\$(uname -m)
       status=0
       swift test --package-path Packages/MuxifyCore --scratch-path \$build/core || status=1
