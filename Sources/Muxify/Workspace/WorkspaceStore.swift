@@ -113,7 +113,7 @@ final class WorkspaceStore {
     /// offers Add a Session, a Dormant or Settled one offers Reopen and Start Fresh. Selecting a Window ends it.
     func showEmptyTopic(_ id: String) {
         route(.go(.emptyTopic(.topic(id))))
-        sidebarMode = .topics
+        sidebarMode = .board
         if !palette.isOpen { surface?.window?.makeFirstResponder(nil) }
     }
 
@@ -233,7 +233,7 @@ final class WorkspaceStore {
         else {
             let dormantGuest = boardSessions.contains { TopicGroupID.session($0.id) == id }
             route(.go(.emptyTopic(dormantGuest ? id : .noTopic)))
-            sidebarMode = .topics
+            sidebarMode = .board
             if !palette.isOpen { terminalHost.window?.makeFirstResponder(nil) }
         }
     }
@@ -339,7 +339,7 @@ final class WorkspaceStore {
     func goToOpenPlace(_ placeID: String) {
         guard link.features.contains(.topics), topics.place(ofOpenPlace: placeID) != nil else { return }
         route(.go(.openPlace(placeID)))
-        sidebarMode = .topics
+        sidebarMode = .board
         focusOpenPlaceField()
     }
 
@@ -479,13 +479,13 @@ final class WorkspaceStore {
 
     /// Whether Move Topic Up (`previous`) or Down (`next`) can move the card of the Active Topic or Board Session, as
     /// the card's own Move Up and Move Down do. Not at that end of the cards with its Pin, for a Settled
-    /// Topic, and outside Topics mode, where the cards do not show. The opened No Topic Session has Up only: Make a
+    /// Topic, and outside the Board view, where the cards do not show. The opened No Topic Session has Up only: Make a
     /// Guest.
     /// While a change runs or waits for its snapshot, a press waits in the queue instead, up to `queuedMoveLimit` for
     /// the card. The queued step is decided when it runs, so a press at the end of the cards is accepted and then does
     /// nothing.
     func canMoveActiveCard(_ direction: StepDirection) -> Bool {
-        guard link.features.contains(.topics), topics.mode == .topics, let active = topics.activeTopic else { return false }
+        guard link.features.contains(.topics), topics.mode == .board, let active = topics.activeTopic else { return false }
         if changingTopic || topicSnapshotPending {
             guard let card = currentGuestCard else { return false }
             return topicRequests.filter { $0.isMove(of: card) }.count < Self.queuedMoveLimit
@@ -943,7 +943,7 @@ final class WorkspaceStore {
                 case .window(let id)?:
                     route(.result(.window(id), lastStartedRead: lastStartedRead))
                     // A new tmux Window or Session names no Topic and leaves the Sidebar in its mode.
-                    if change.topicID != nil { sidebarMode = .topics }
+                    if change.topicID != nil { sidebarMode = .board }
                     moveFocusIntoWindow()
                     if surface == nil || surface?.processExited == true {
                         do {
@@ -1053,7 +1053,7 @@ final class WorkspaceStore {
     private func buildTopics() -> BoardModel {
         var config = self.config
         // Topic records and SessionPaths are on this Mac; a Remote App Window shows Sessions only.
-        if !link.features.contains(.topics) { config.sidebar.topics = false }
+        if !link.features.contains(.topics) { config.sidebar.board = false }
         return BoardModel(records: records, openPlaces: openPlaces, boardSessions: boardSessions, windows: windows, config: config,
                            selection: topicSelection, location: location, mode: sidebarMode, groups: topicGroups, benchShown: benchShown,
                            benchPeek: benchPeek, agents: agents,
@@ -1243,7 +1243,7 @@ final class WorkspaceStore {
         }
     }
     /// The open Session cards, by name (names survive tmux server restarts, ids don't). Sessions mode and the
-    /// No Topic card in Topics mode share them, so a card opened in either is open in both.
+    /// No Topic card in the Board view share them, so a card opened in either is open in both.
     var openSessionCards: Set<String> {
         didSet { defaults.set(Array(openSessionCards), forKey: "expandedSessions") }
     }
@@ -1264,7 +1264,7 @@ final class WorkspaceStore {
     /// rebuilt on every tmux refresh, as it would be through `topics`.
     var shownSidebarMode: SidebarMode {
         var sidebar = configStore.config.sidebar
-        if !link.features.contains(.topics) { sidebar.topics = false }
+        if !link.features.contains(.topics) { sidebar.board = false }
         return sidebar.shownMode(chosen: sidebarMode)
     }
     /// One value for both Sidebar modes, off until the user turns it on.
@@ -1414,7 +1414,7 @@ final class WorkspaceStore {
         self.visitStore = visitStore
         LegacyVisits.move(from: defaults, to: visitStore)
         visits = VisitLog(times: (try? visitStore.times(environment: environment?.name)) ?? [:])
-        sidebarMode = SidebarMode(rawValue: defaults.string(forKey: "sidebarWorkView") ?? "") ?? .topics
+        sidebarMode = SidebarMode(rawValue: defaults.string(forKey: "sidebarWorkView") ?? "") ?? .board
         openSessionCards = Set(defaults.stringArray(forKey: "expandedSessions") ?? [])
         sidebarVisible = defaults.object(forKey: "sidebarVisible") as? Bool ?? true
         sessionsVisible = defaults.object(forKey: "sessionsVisible") as? Bool ?? true
@@ -2969,13 +2969,13 @@ final class WorkspaceStore {
     var sidebarModeSwitchRefusal: String? {
         if !link.features.contains(.topics) { return topicsUnavailableNote ?? "A Remote App Window shows only Sessions" }
         let sidebar = configStore.config.sidebar
-        if !sidebar.topics { return "sidebar.topics is off in the Config" }
+        if !sidebar.board { return "sidebar.board is off in the Config" }
         if !sidebar.sessions { return "sidebar.sessions is off in the Config" }
         return nil
     }
 
-    /// "Switch to Sessions" while Topics shows, "Switch to Topics" while Sessions shows.
-    var sidebarModeSwitchTitle: String { "Switch to " + (shownSidebarMode == .topics ? SidebarMode.sessions : .topics).rawValue }
+    /// "Switch to Sessions" while the Board shows, "Switch to Board" while the Sessions show.
+    var sidebarModeSwitchTitle: String { "Switch to " + (shownSidebarMode == .board ? SidebarMode.sessions : .board).title }
 
     /// Does what the other header button does, and shows a hidden Sidebar in the other mode. When only one mode can
     /// show, an Explanation Pill says why.
@@ -2984,7 +2984,7 @@ final class WorkspaceStore {
             pills.show(Pill(.explanation, title: "Not switched", value: refusal))
             return
         }
-        sidebarMode = shownSidebarMode == .topics ? .sessions : .topics
+        sidebarMode = shownSidebarMode == .board ? .sessions : .board
         if !sidebarShown { toggleSidebar() }
     }
 

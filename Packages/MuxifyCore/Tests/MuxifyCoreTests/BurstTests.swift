@@ -148,7 +148,7 @@ final class BurstTests: XCTestCase {
                     input: InputCounts(keys: 0, clicks: 2, scrolls: 40, sidebarSwitches: 6, paletteOpens: 0),
                     bodies: BodyCounts(["TopicsSection": 6, "SidebarCard": 300]),
                     moving: MovingState(window: AppWindowState(visible: true, active: true), workingMarks: 2, marksMove: true,
-                                        sidebar: .topics, topicCards: 12, sessionRows: 0),
+                                        sidebar: .board, topicCards: 12, sessionRows: 0),
                     samples: samples, open: open)
     }
 

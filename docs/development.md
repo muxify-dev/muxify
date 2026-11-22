@@ -19,9 +19,9 @@ both link it, so both read and change Topics with the same code.
 ### Agent marks
 
 `AgentMark` in `MuxifyCore` decides the one Agent mark an Agent shows, from its
-Status, its Unread flag and the `notifications` switches. `TopicsModel` computes
+Status, its Unread flag and the `notifications` switches. `BoardModel` computes
 every mark once: `agentMarks` for each Agent by Pane ID, `Row.mark` for each
-Topic or Locked Session card, and `sessionMarks` for each Session card in
+Topic or Board Session card, and `sessionMarks` for each Session card in
 Sessions mode. A group's mark is its strongest member's. Do not decide a mark
 anywhere else.
 
@@ -49,7 +49,7 @@ it begins and ends:
   With an Agent at work, a SwiftUI clock kept the main thread busy almost all
   the time. The `working_marks` verify suite checks that the app stays idle
   while Working marks move.
-- The Sidebar pager hosts the Topics page and the Sessions page each in its own
+- The Sidebar pager hosts the Board page and the Sessions page each in its own
   `NSHostingView` (`SidebarPages`). A swipe sets their layers' transform and
   opacity, and the settle is a `CASpringAnimation` (`SidebarSlide`). SwiftUI
   hears only the committed mode. A layer transform is invisible to SwiftUI
@@ -237,7 +237,7 @@ The app then writes to `~/Library/Logs/Muxify/`:
     is left out, and `none` when every count is zero. The counter
     (`BodyCount` in `App/BodyCount.swift`) is in every build and counts only
     while Diagnostics is on. The counted views are `SidebarCard`,
-    `TopicCard`, `TopicsList` and `TopicsListPart`, the Sidebar page roots
+    `TopicCard`, `Board` and `BoardPart`, the Sidebar page roots
     `TopicsSection` and `SessionsSection`, and the Working-mark views
     `AgentMarkView` and `AgentMarkSpine`. Diagnostics never resets the
     counter; a count that fell, after the TestDriver's `counts reset=True`,
@@ -246,8 +246,9 @@ The app then writes to `~/Library/Logs/Muxify/`:
     `inactive`, as `visible,active`; `none` with no App Window.
   - `working_marks`: the Working marks of the Active Environment's Agents;
     `marks_move`: `true` when `ui.pulse` is on and Reduce Motion is off.
-  - `sidebar`: the Sidebar mode shown, `topics` or `sessions`; `topic_cards`
-    and `session_rows`: the Topic cards and Session rows it lists.
+  - `sidebar`: the Sidebar mode shown, `topics` for the Board or `sessions`;
+    `topic_cards` and `session_rows`: the cards of the Board and the Session
+    rows that it lists.
 
   The `window` to `session_rows` fields are the state at the end of the
   minute, in the focused App Window.

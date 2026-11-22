@@ -33,7 +33,7 @@ extension TopicGroupID {
     }
 }
 
-/// The group row after the open Topics and the No Topic card in Topics mode.
+/// The group row after the open Topics and the No Topic card in the Board view.
 enum TopicGroup: String, CaseIterable {
     case settled
 
@@ -158,7 +158,7 @@ struct TopicSelection: Equatable {
 }
 
 /// The Session cards' rule, beside `TopicSelection`: what stays open when the Location moves between Sessions.
-/// Sessions mode and the No Topic and Board Session cards in Topics mode share the one list it acts on.
+/// Sessions mode and the No Topic and Board Session cards in the Board view share the one list it acts on.
 enum SessionCardSelection {
     /// The open Session cards after the Location's Session changes from `previous` to `session`. The Location's
     /// card opens; with `one` it opens alone. A card opened by hand stays open while the Session stays the same.
@@ -502,7 +502,7 @@ struct BoardModel {
     /// the Bench line.
     /// Nil while the Active Topic is a Topic.
     let openedNoTopicSession: Session?
-    /// Settled, after the Topics rows in Topics mode. Empty in Sessions mode.
+    /// Settled, after the Topics rows in the Board view. Empty in Sessions mode.
     let groups: [Group]
     /// Every Settled Topic, newest first.
     let settledTopicIDs: [String]
@@ -517,7 +517,7 @@ struct BoardModel {
     let labels: TopicLabels
     let visibleAgents: [Agent]
     let agentsScope: AgentsScopeTarget
-    /// The line under each listed Agent, by Pane ID: its Topic's title in Topics mode, its Session's name in
+    /// The line under each listed Agent, by Pane ID: its Topic's title in the Board view, its Session's name in
     /// Sessions mode. Empty when the section lists one Topic or Session, which the header already names.
     let agentGroups: [String: String]
     /// The Agent mark each Session card's spine shows in Sessions mode, by Session ID.
@@ -537,17 +537,17 @@ struct BoardModel {
     let mode: SidebarMode
     /// `topics.tags`; nil while Tags are off.
     let tags: ConfigTags?
-    /// The list shows In Play places: the Sidebar is in Topics mode.
+    /// The list shows In Play places: the Sidebar is in the Board view.
     let showsInPlay: Bool
     var showsToggle: Bool { topicsEnabled && sessionsEnabled }
 
     init(records: [TopicRecord], openPlaces: [OpenPlace] = [], boardSessions: [BoardSession] = [], windows: [TmuxWindow], config: Config,
          selection: TopicSelection,
          location: Location? = nil,
-         mode: SidebarMode = .topics, groups groupsState: TopicGroupsState = TopicGroupsState(), benchShown: Bool = false,
+         mode: SidebarMode = .board, groups groupsState: TopicGroupsState = TopicGroupsState(), benchShown: Bool = false,
          benchPeek: BenchPeek? = nil,
          agents: [Agent] = [], panes: [TmuxPane]? = nil) {
-        topicsEnabled = config.sidebar.topics
+        topicsEnabled = config.sidebar.board
         sessionsEnabled = config.sidebar.sessions
         tags = config.topics.tags
         self.mode = config.sidebar.shownMode(chosen: mode)
@@ -556,7 +556,7 @@ struct BoardModel {
         sessionIDsOnBoard = topicsList.sessionIDsOnBoard
         boardSessionsBySession = topicsList.boardSessionsBySession
         cards = topicsList.order
-        inPlayInTopicsMode = self.mode == .topics ? config.topics.inPlay : nil
+        inPlayInTopicsMode = self.mode == .board ? config.topics.inPlay : nil
         let groupID = topicsList.group(of:)
         let windowsByID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let agentMarks = marks.panes
@@ -642,8 +642,8 @@ struct BoardModel {
         topicSessions = Dictionary((rows.flatMap(\.sessions) + noTopicSessions).map { ($0.id.session, $0) },
                                    uniquingKeysWith: { first, _ in first })
         self.rows = rows
-        showsInPlay = self.mode == .topics
-        list = Self.list(listCards, cut: self.mode == .topics ? cut : nil, benchShown: benchShown,
+        showsInPlay = self.mode == .board
+        list = Self.list(listCards, cut: self.mode == .board ? cut : nil, benchShown: benchShown,
                          peek: benchPeek, location: active, noTopic: openedNoTopicSession)
         let settled = records.filter { $0.settledAt != nil }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
@@ -657,7 +657,7 @@ struct BoardModel {
         }
         let settledRows = settled.prefix(groupsState.settledPages * TopicGroupsState.pageSize)
             .map { Self.settledRow($0, labels: labels, sessionPaths: config.sessionPaths, tags: config.topics.tags, expanded: openTopics) }
-        groups = self.mode == .topics ? [
+        groups = self.mode == .board ? [
             Group(kind: .settled, topics: settledRows,
                   hiddenCount: settled.count - settledRows.count, isExpanded: groupsState.open == .settled),
         ].filter { $0.count > 0 } : []
@@ -666,7 +666,7 @@ struct BoardModel {
             return nil
         }, uniquingKeysWith: { first, _ in first })
         let scope: AgentsScopeTarget
-        if config.sidebar.agentsScope[self.mode] == .active, self.mode == .topics, let activeTopic {
+        if config.sidebar.agentsScope[self.mode] == .active, self.mode == .board, let activeTopic {
             let title = rows.first { $0.id == activeTopic }?.title ?? emptyTopic?.title ?? "No Topic"
             scope = .topic(activeTopic, title: title)
         } else {

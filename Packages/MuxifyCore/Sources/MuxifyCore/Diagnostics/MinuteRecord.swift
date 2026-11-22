@@ -106,7 +106,7 @@ public struct MovingState: Equatable, Sendable {
               let cards = record["topic_cards"].flatMap(Int.init), let rows = record["session_rows"].flatMap(Int.init)
         else { return nil }
         let windowState = window == "none" ? nil : AppWindowState(value: window)
-        let mode = sidebar == "none" ? nil : [SidebarMode.topics, .sessions].first { Self.word($0) == sidebar }
+        let mode = sidebar == "none" ? nil : [SidebarMode.board, .sessions].first { Self.word($0) == sidebar }
         guard (window == "none") == (windowState == nil), (sidebar == "none") == (mode == nil) else { return nil }
         self.init(window: windowState, workingMarks: marks, marksMove: moves, sidebar: mode, topicCards: cards, sessionRows: rows)
     }

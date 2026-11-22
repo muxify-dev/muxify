@@ -11,13 +11,14 @@ public struct EnvironmentShown: Codable, Equatable, Sendable {
 
     /// Which Sidebar modes the Config shows.
     public struct Sidebar: Codable, Equatable, Sendable {
+        /// Whether the Config shows the Board view, `sidebar.board`. The key stays `topics` for the readers it has.
         public var topics = true
         public var sessions = true
 
         public init() {}
 
         public init(_ config: Config.Sidebar) {
-            topics = config.topics
+            topics = config.board
             sessions = config.sessions
         }
     }

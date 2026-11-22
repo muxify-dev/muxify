@@ -14,7 +14,7 @@ final class PaneRowsTests: XCTestCase {
                  unread: false)
     }
 
-    private func model(_ windows: [TmuxWindow], panes: [TmuxPane]?, mode: SidebarMode = .topics) -> BoardModel {
+    private func model(_ windows: [TmuxWindow], panes: [TmuxPane]?, mode: SidebarMode = .board) -> BoardModel {
         var selection = TopicSelection()
         selection.select(windowID: windows[0].id, activeTopic: .topic("t"))
         return BoardModel(records: [TopicRecord(id: "t", title: "T")], windows: windows, config: Config(),

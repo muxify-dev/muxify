@@ -49,43 +49,43 @@ final class SidebarFormatTests: XCTestCase {
         let topic = SidebarFormat.Context(values: [.topic_title: "Title", .session_count: "2", .window_count: "3"],
                                           loops: [.sessions: [session, second]])
         let defaults = SidebarFormats.defaults
-        XCTAssertEqual(defaults.text(for: .topic, in: topic, mode: .topics).summary, "proj · proj2 · 3 Windows")
-        XCTAssertEqual(defaults.text(for: .topic, in: .init(), mode: .topics).summary, "No Sessions")
+        XCTAssertEqual(defaults.text(for: .topic, in: topic, mode: .board).summary, "proj · proj2 · 3 Windows")
+        XCTAssertEqual(defaults.text(for: .topic, in: .init(), mode: .board).summary, "No Sessions")
         var noted = topic
         noted.values[.topic_note] = "Bisect, then ship"
-        XCTAssertEqual(defaults.text(for: .topic, in: noted, mode: .topics).summary, "proj · proj2 · 3 Windows",
+        XCTAssertEqual(defaults.text(for: .topic, in: noted, mode: .board).summary, "proj · proj2 · 3 Windows",
                        "the card draws the Note on its own line, so the default Summary leaves it out")
         XCTAssertEqual(try SidebarFormat("[#{topic_note}]").expand(in: .init(values: [.topic_note: "Bisect"])), "[Bisect]")
         XCTAssertEqual(defaults.text(for: .session, in: .init(values: [.window_count: "1"]), mode: .sessions).summary, "1 Window")
         var custom = defaults
         custom.topic.title = .init(try SidebarFormat("#{pane_title}"))
         custom.topic.summary = .init(try SidebarFormat(""))
-        XCTAssertEqual(custom.text(for: .topic, in: topic, mode: .topics).title, "Title")
-        XCTAssertEqual(custom.text(for: .topic, in: topic, mode: .topics).summary, "")
+        XCTAssertEqual(custom.text(for: .topic, in: topic, mode: .board).title, "Title")
+        XCTAssertEqual(custom.text(for: .topic, in: topic, mode: .board).summary, "")
     }
 
     func testConfigParsesPerModeFormatsAndReportsOnlyInvalidField() throws {
         let source = """
         sidebar:
           agents_scope:
-            topics: window
+            board: window
             sessions: all
           formats:
             topic:
               title: '#{topic_title}!'
               summary:
-                topics: '#{misspelled}'
+                board: '#{misspelled}'
                 sessions: 'custom'
             window:
               summary: '#{pane_current_command}'
         """
         let config = try Config.load(path: "/config") { _ in source }.get()
-        XCTAssertEqual(config.sidebar.agentsScope.topics, .window)
+        XCTAssertEqual(config.sidebar.agentsScope.board, .window)
         XCTAssertEqual(config.sidebar.agentsScope.sessions, .all)
-        XCTAssertEqual(config.sidebar.formats.topic.summary.topics, SidebarFormats.defaults.topic.summary.topics)
+        XCTAssertEqual(config.sidebar.formats.topic.summary.board, SidebarFormats.defaults.topic.summary.board)
         XCTAssertEqual(config.sidebar.formats.topic.summary.sessions.source, "custom")
         XCTAssertEqual(config.sidebar.formats.topic.title.sessions.source, "#{topic_title}!")
-        XCTAssertEqual(config.sidebar.formats.window.summary.topics.source, "#{pane_current_command}")
+        XCTAssertEqual(config.sidebar.formats.window.summary.board.source, "#{pane_current_command}")
         XCTAssertEqual(config.problems.count, 1)
         XCTAssertEqual(config.problems.first?.line, 9)
         XCTAssertTrue(config.problems.first?.message.contains("misspelled") == true)
@@ -98,15 +98,15 @@ final class SidebarFormatTests: XCTestCase {
             agent:
               title: '#{window_name}'
               summary:
-                topics: '#{topic_title}'
+                board: '#{topic_title}'
                 sessions: '#{session_name}'
         """ }.get()
         XCTAssertTrue(config.problems.isEmpty)
         let context = SidebarFormat.Context(values: [.window_name: "shell", .topic_title: "Task", .session_name: "app"])
-        for mode in [SidebarMode.topics, .sessions] {
+        for mode in [SidebarMode.board, .sessions] {
             let text = config.sidebar.formats.text(for: .agent, in: context, mode: mode)
             XCTAssertEqual(text.title, "shell")
-            XCTAssertEqual(text.summary, mode == .topics ? "Task" : "app")
+            XCTAssertEqual(text.summary, mode == .board ? "Task" : "app")
         }
     }
 
@@ -116,17 +116,17 @@ final class SidebarFormatTests: XCTestCase {
           formats:
             agent:
               title:
-                topics: '#{window_name'
+                board: '#{window_name'
                 sessions: '#{session_name}'
               summary: 'custom'
         """ }.get()
         XCTAssertEqual(config.problems.count, 1)
         XCTAssertEqual(config.problems.first?.line, 5)
-        XCTAssertTrue(config.problems.first?.message.contains("sidebar.formats.agent.title.topics") == true)
+        XCTAssertTrue(config.problems.first?.message.contains("sidebar.formats.agent.title.board") == true)
         let context = SidebarFormat.Context(values: [.pane_label: "Agent task", .session_name: "app"])
-        XCTAssertEqual(config.sidebar.formats.text(for: .agent, in: context, mode: .topics).title, "Agent task")
+        XCTAssertEqual(config.sidebar.formats.text(for: .agent, in: context, mode: .board).title, "Agent task")
         XCTAssertEqual(config.sidebar.formats.text(for: .agent, in: context, mode: .sessions).title, "app")
-        XCTAssertEqual(config.sidebar.formats.text(for: .agent, in: context, mode: .topics).summary, "custom")
+        XCTAssertEqual(config.sidebar.formats.text(for: .agent, in: context, mode: .board).summary, "custom")
         var formats = config.sidebar.formats
         formats.agent.title = .init(try SidebarFormat(""))
         formats.agent.summary = .init(try SidebarFormat(""))
@@ -175,22 +175,22 @@ final class SidebarFormatTests: XCTestCase {
           formats:
             window:
               left:
-                topics: ''
+                board: ''
                 sessions: null
               right:
-                topics: '#{symbol:globe} #{tab_count}'
+                board: '#{symbol:globe} #{tab_count}'
         """
         let config = try Config.load(path: "/config") { _ in source }.get()
         XCTAssertTrue(config.problems.isEmpty)
         let context = SidebarFormat.Context(values: [.tab_count: "2", .window_title: "Window"])
-        let topics = config.sidebar.formats.windowRow(in: context, mode: .topics)
+        let topics = config.sidebar.formats.windowRow(in: context, mode: .board)
         XCTAssertEqual(topics.left, [])
         XCTAssertEqual(topics.right, [.symbol("globe"), .text(" 2")])
         XCTAssertEqual(topics.text.title, "Window")
         let sessions = config.sidebar.formats.windowRow(in: context, mode: .sessions)
         XCTAssertNil(sessions.left)
         XCTAssertNil(sessions.right)
-        XCTAssertNil(SidebarFormats.defaults.windowRow(in: context, mode: .topics).left)
+        XCTAssertNil(SidebarFormats.defaults.windowRow(in: context, mode: .board).left)
     }
 
     func testConfigReportsInvalidSymbolForItsModeAndKeepsOtherParts() throws {
@@ -199,10 +199,10 @@ final class SidebarFormatTests: XCTestCase {
           formats:
             window:
               left:
-                topics: '#{current_app_icon}'
+                board: '#{current_app_icon}'
                 sessions: '#{symbol:absent.muxify.symbol}'
               right:
-                topics: null
+                board: null
                 sessions: '✨ #{window_panes}'
               summary: 'unchanged'
             pane:
@@ -221,10 +221,10 @@ final class SidebarFormatTests: XCTestCase {
         XCTAssertEqual(config.sidebar.formats.windowParts.left.sessions?.source, "#{symbol:absent.muxify.symbol}")
         #endif
         XCTAssertTrue(try XCTUnwrap(config.problems.last).message.contains("sidebar.formats.pane.left"))
-        XCTAssertEqual(config.sidebar.formats.windowParts.left.topics?.source, "#{current_app_icon}")
-        XCTAssertNil(config.sidebar.formats.windowParts.right.topics)
+        XCTAssertEqual(config.sidebar.formats.windowParts.left.board?.source, "#{current_app_icon}")
+        XCTAssertNil(config.sidebar.formats.windowParts.right.board)
         XCTAssertEqual(config.sidebar.formats.windowParts.right.sessions?.source, "✨ #{window_panes}")
-        XCTAssertEqual(config.sidebar.formats.window.summary.topics.source, "unchanged")
+        XCTAssertEqual(config.sidebar.formats.window.summary.board.source, "unchanged")
     }
 
     private var tagged: SidebarFormat.Context {
@@ -259,7 +259,7 @@ final class SidebarFormatTests: XCTestCase {
         func load(_ text: String) throws -> Config { try Config.load(path: "/c.yaml") { _ in text }.get() }
         let defaults = try load("")
         XCTAssertEqual(defaults.sidebar.tagPlacement, .none, "Tags show on no card by default")
-        XCTAssertEqual(defaults.sidebar.formats.topicTags.topics.source, "#{T:#{tag}}")
+        XCTAssertEqual(defaults.sidebar.formats.topicTags.board.source, "#{T:#{tag}}")
         XCTAssertEqual(defaults.sidebar.formats.topicTags.sessions.source, "#{T:#{tag}}")
         let custom = try load("""
         sidebar:
@@ -267,13 +267,13 @@ final class SidebarFormatTests: XCTestCase {
           formats:
             topic:
               tags:
-                topics: '#{T:#{tag} }'
+                board: '#{T:#{tag} }'
                 sessions: ''
         """)
         XCTAssertEqual(custom.problems, [])
         XCTAssertEqual(custom.sidebar.tagPlacement, .line)
         XCTAssertEqual(try load("sidebar:\n  tag_placement: corner").sidebar.tagPlacement, .corner)
-        XCTAssertEqual(custom.sidebar.formats.topicTags.topics.source, "#{T:#{tag} }")
+        XCTAssertEqual(custom.sidebar.formats.topicTags.board.source, "#{T:#{tag} }")
         XCTAssertEqual(custom.sidebar.formats.topicTags.sessions.source, "")
         XCTAssertEqual(try load("sidebar:\n  formats:\n    topic:\n      tags: null").sidebar.formats.topicTags,
                        SidebarFormats.defaults.topicTags, "null keeps the default")

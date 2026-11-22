@@ -37,12 +37,12 @@ enum SidebarRowState: Equatable {
     }
 }
 
-/// What a Session card shows, in Sessions mode and as the opened No Topic Session in Topics mode.
+/// What a Session card shows, in Sessions mode and as the opened No Topic Session in the Board view.
 struct SessionCardState: Equatable {
     let session: SessionGroup
     let isOpen: Bool
     let mark: CardMark?
-    /// A Board Session is a Board Session.
+    /// A Board Session among the Guests, which shows the Guest mark here too.
     let isGuest: Bool
     let formatted: SidebarFormats.Text
     let items: [BoardModel.SessionChildren.Item]
@@ -87,7 +87,7 @@ extension WorkspaceStore {
         return SessionCardState(
             session: session, isOpen: openSessionCards.contains(session.name),
             mark: model.sessionMarks[session.id].map(CardMark.agent),
-            isGuest: model.sessionIDsOnBoard.contains(session.id),
+            isGuest: model.boardSessionsBySession[session.id].map { id in model.split.guests.contains { $0.id == .session(id) } } ?? false,
             formatted: sidebarText(.session, context: sidebarFormatContexts.sessions[session.id]),
             items: items, rows: sidebarRowStates(items), selectedWindowID: selected,
             guestState: guestState(of: .session(session.id)),

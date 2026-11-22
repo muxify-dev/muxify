@@ -4,7 +4,7 @@ A Topic is one thing the user wants to get done. It groups Sessions, and its Ses
 
 ## See every Topic and Session
 
-- `muxify environment show` prints every Session in tmux order and the user's Topics list in the order that Muxify shows it: the Pinned Topics, the In Play places, the Guests and the Bench, then the No Topic Sessions. Each card has its mark, and each Topic has its Note, Tags and state (live, Dormant or Empty). With `--json`, a card names its Sessions by id. It does not give Windows or Panes: use `topic show` for those. Use it to see which Topics are In Play, or which Agent waits for an answer.
+- `muxify environment show` prints every Session in tmux order and the user's Board in the order that Muxify shows it: the Pinned Topics, the In Play places, the Guests and the Bench, then the No Topic Sessions. Each card has its mark, and each Topic has its Note, Tags and state (live, Dormant or Empty). With `--json`, a card names its Sessions by id. It does not give Windows or Panes: use `topic show` for those. Use it to see which Topics are In Play, or which Agent waits for an answer.
 
 ## See the whole Topic
 
@@ -18,7 +18,7 @@ A Topic is one thing the user wants to get done. It groups Sessions, and its Ses
 - `muxify window new -- <command>` makes a Window in your Session and runs the command there. Use it for a process that must keep running, such as a dev server or a watcher, so the user can see it and stop it. It prints the new Window's id.
 - `muxify topic add-session <dir>` makes a Session in another folder for this Topic. `--worktree` makes a new Worktree on a new branch named from the Topic, so your work does not change the user's checkout.
 - `muxify window move` moves a Window to another Session or Topic.
-- `muxify session move --topic <id|label>` moves a whole Session into an open Topic. `muxify session move --new-topic ["title"]` moves it into a new Topic, which is a Guest. A new Topic from a Guest Session takes the Guest Session's place. `--session <name|id>` names the Session, else your own Session moves.
+- `muxify session move --topic <id|label>` moves a whole Session into an open Topic. `muxify session move --new-topic ["title"]` moves it into a new Topic, which is a Guest. A new Topic from a Board Session, a Session in no Topic that has a card on the Board, takes that card's place. `--session <name|id>` names the Session, else your own Session moves.
 
 ## Worktrees outside a Topic
 

@@ -25,7 +25,7 @@ final class PaletteCatalogTests: XCTestCase {
 
     private func catalog(records: [TopicRecord], windows: [TmuxWindow], selected: String? = nil, visits: VisitLog = VisitLog(),
                          lastWindow: [TopicGroupID: String] = [:], agents: [Agent] = [],
-                         mode: SidebarMode = .topics, sessionPaths: [SessionPath]? = nil) -> PaletteCatalog {
+                         mode: SidebarMode = .board, sessionPaths: [SessionPath]? = nil) -> PaletteCatalog {
         var config = Config()
         config.sessionPaths = sessionPaths ?? [game, notes]
         var selection = TopicSelection()
@@ -167,7 +167,7 @@ final class PaletteCatalogTests: XCTestCase {
         let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
                        window("@2", session: "notes-2", directory: "/work/notes"),
                        window("@3", session: "scratch", directory: "/tmp/scratch")]
-        for mode in [SidebarMode.topics, .sessions] {
+        for mode in [SidebarMode.board, .sessions] {
             let catalog = catalog(records: records, windows: windows, mode: mode)
             XCTAssertEqual(Set(ids(catalog.list([.sessions], query: "", rules: .standard))), ["session-path:/work/notes", "session:$scratch", "session:$notes-2", "session:$game/alpha",
                 "session-path:/work/game/main", "session-path:/work/game/release"])

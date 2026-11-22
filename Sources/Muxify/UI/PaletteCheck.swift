@@ -71,7 +71,7 @@ extension CommandPalette {
     func checkRows(_ draft: CheckDraft) -> PickList<PaletteItem> {
         guard let topics = store?.topics else { return .empty }
         let candidates = draft.action.listed(topics).map { cardCandidate($0, choice: .check($0.id)) }
-        return FuzzyRanker.list([PickSectionInput(id: "topics", title: "Topics", rule: .ranked(showsWhenEmpty: true),
+        return FuzzyRanker.list([PickSectionInput(id: "topics", title: "Board", rule: .ranked(showsWhenEmpty: true),
                                                   candidates: candidates)], query: FuzzyQuery(query), rules: PickRules())
     }
 

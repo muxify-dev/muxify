@@ -17,7 +17,7 @@ final class AgentsScopeTests: XCTestCase {
     }
 
     private func model(_ records: [TopicRecord], _ windows: [TmuxWindow], _ agents: [Agent], selected: String,
-                       mode: SidebarMode = .topics, scope: Config.Sidebar.AgentsScope = .active) -> BoardModel {
+                       mode: SidebarMode = .board, scope: Config.Sidebar.AgentsScope = .active) -> BoardModel {
         var config = Config()
         config.sidebar.agentsScope = .init(scope)
         var selection = TopicSelection()
@@ -103,12 +103,12 @@ final class AgentsScopeTests: XCTestCase {
         let first = window("@1", session: "$1", topic: "a")
         let other = window("@2", session: "$2", topic: "a")
         var config = Config()
-        config.sidebar.topics = false
+        config.sidebar.board = false
         var selection = TopicSelection()
         selection.windowID = "@1"
         let scoped = BoardModel(records: [alpha], windows: [first, other], config: config, selection: selection,
                         location: selection.windowLocation,
-                                 mode: .topics, agents: [agent("%1", in: first), agent("%2", in: other)])
+                                 mode: .board, agents: [agent("%1", in: first), agent("%2", in: other)])
         XCTAssertEqual(scoped.mode, .sessions)
         XCTAssertEqual(scoped.visibleAgents.map(\.paneID), ["%1"])
     }
@@ -118,12 +118,12 @@ final class AgentsScopeTests: XCTestCase {
         let inBeta = window("@2", session: "$2", topic: "b")
         let loose = window("@3", session: "$3", topic: nil)
         let agents = [agent("%1", in: inAlpha), agent("%2", in: inBeta), agent("%3", in: loose)]
-        for mode in [SidebarMode.topics, .sessions] {
+        for mode in [SidebarMode.board, .sessions] {
             let every = model([alpha, beta], [inAlpha, inBeta, loose], agents, selected: "@1", mode: mode, scope: .all)
             XCTAssertEqual(every.agentsScope, .everyAgent, "\(mode)")
             XCTAssertNil(every.agentsScope.name, "\(mode)")
             XCTAssertEqual(every.visibleAgents.map(\.paneID), ["%1", "%2", "%3"], "\(mode)")
-            let groups = mode == .topics ? ["%1": "Alpha", "%2": "Beta", "%3": "No Topic"] : ["%1": "name-$1", "%2": "name-$2", "%3": "name-$3"]
+            let groups = mode == .board ? ["%1": "Alpha", "%2": "Beta", "%3": "No Topic"] : ["%1": "name-$1", "%2": "name-$2", "%3": "name-$3"]
             XCTAssertEqual(every.agentGroups, groups, "\(mode)")
         }
     }

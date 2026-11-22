@@ -85,11 +85,11 @@ struct QuickSwitchTargets {
     /// when a place opens or fills.
     let cards: [QuickSwitchTarget]
     let windows: [QuickSwitchTarget]
-    /// The Windows a Topic Window step goes through: the Active Topic's in Sidebar order in Topics mode, the
+    /// The Windows a Topic Window step goes through: the Active Topic's in Sidebar order in the Board view, the
     /// Session's in Sessions mode.
     let topicWindows: [QuickSwitchTarget]
     let tabs: [QuickSwitchTarget]
-    /// The Sessions a Session step goes through: every Session in Sessions mode, the Active Topic's in Topics mode.
+    /// The Sessions a Session step goes through: every Session in Sessions mode, the Active Topic's in the Board view.
     let sessions: [QuickSwitchTarget]
     /// The rows of the Board, Board Sessions included, in either Sidebar mode. A Topic step skips an Open Place.
     let topics: [QuickSwitchTarget]
@@ -141,8 +141,8 @@ extension QuickSwitchTargets {
         let cards = numbered.filter { if case .openPlace = $0 { return false } else { return true } }
         let allSessions = sessions.map { QuickSwitchTarget.session($0.id) }
         let sessionWindows = windows.map { QuickSwitchTarget.window($0.id) }
-        let shown = model.mode == .topics ? Self.sessions(of: model) : nil
-        self.init(cards: model.mode == .topics ? numbered : allSessions, windows: sessionWindows,
+        let shown = model.mode == .board ? Self.sessions(of: model) : nil
+        self.init(cards: model.mode == .board ? numbered : allSessions, windows: sessionWindows,
                   topicWindows: shown.map { $0.flatMap(\.windows).map { .window($0.id) } } ?? sessionWindows,
                   tabs: tabIDs.map { .tab($0) }, sessions: shown.map { $0.map { .session($0.id.session) } } ?? allSessions,
                   topics: cards)

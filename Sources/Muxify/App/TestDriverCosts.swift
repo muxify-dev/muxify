@@ -47,7 +47,7 @@ struct CardRebuildCost: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(0..<views, id: \.self) { _ in Color.clear.frame(width: mode == .topics ? 0.1 : 0.2) }
+            ForEach(0..<views, id: \.self) { _ in Color.clear.frame(width: mode == .board ? 0.1 : 0.2) }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)

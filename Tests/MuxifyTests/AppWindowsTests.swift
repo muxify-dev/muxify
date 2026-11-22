@@ -191,17 +191,17 @@ final class AppWindowsTests: XCTestCase {
     @MainActor func testSidebarModeSwitchFlipsTheShownModeShowsAHiddenSidebarAndExplainsARemoteAppWindow() throws {
         try withWindows { windows, _ in
             let local = windows.store(for: AppWindowRequest())
-            local.sidebarMode = .topics
+            local.sidebarMode = .board
             local.sidebarVisible = true
             XCTAssertNil(local.sidebarModeSwitchRefusal)
             XCTAssertEqual(local.sidebarModeSwitchTitle, "Switch to Sessions")
             local.perform(.toggleSidebarMode)
             XCTAssertEqual(local.shownSidebarMode, .sessions)
-            XCTAssertEqual(local.sidebarModeSwitchTitle, "Switch to Topics")
+            XCTAssertEqual(local.sidebarModeSwitchTitle, "Switch to Board")
             XCTAssertTrue(local.sidebarVisible)
             local.sidebarVisible = false
             local.perform(.toggleSidebarMode)
-            XCTAssertEqual(local.shownSidebarMode, .topics)
+            XCTAssertEqual(local.shownSidebarMode, .board)
             XCTAssertTrue(local.sidebarShown, "the switch shows a hidden Sidebar in the other mode")
             XCTAssertNil(local.pills.shown)
 

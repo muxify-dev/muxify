@@ -199,12 +199,12 @@ final class ConfigTests: XCTestCase {
     }
 
     func testSidebarViewsDefaultToTrueAndAcceptBooleans() throws {
-        XCTAssertEqual(try load("").sidebar, Config.Sidebar(topics: true, sessions: true))
+        XCTAssertEqual(try load("").sidebar, Config.Sidebar(board: true, sessions: true))
         XCTAssertEqual(try load("").sidebar.agents, .init(nil), "the View menu decides")
         XCTAssertNil(try load("").sidebar.panes, "the View menu decides")
         XCTAssertTrue(try load("").sidebar.animateSwitching)
-        let config = try load("sidebar:\n  topics: false\n  sessions: true\n  animate_switching: false\n  agents: false\n  panes: true")
-        XCTAssertEqual(config.sidebar, Config.Sidebar(topics: false, sessions: true, animateSwitching: false, agents: .init(false), panes: true))
+        let config = try load("sidebar:\n  board: false\n  sessions: true\n  animate_switching: false\n  agents: false\n  panes: true")
+        XCTAssertEqual(config.sidebar, Config.Sidebar(board: false, sessions: true, animateSwitching: false, agents: .init(false), panes: true))
         XCTAssertTrue(try load("sidebar:\n  animate_switching: true").sidebar.animateSwitching)
         XCTAssertTrue(config.problems.isEmpty)
     }
@@ -260,7 +260,7 @@ final class ConfigTests: XCTestCase {
 
     func testSidebarWrongTypesReportProblemsAndKeepDefaults() throws {
         for value in ["1", "null", "[]", "wrong", "\"false\"", "'true'"] {
-            let config = try load("sidebar:\n  topics: \(value)\n  sessions: \(value)\n  agents: \(value)\n  panes: \(value)\n  animate_switching: \(value)")
+            let config = try load("sidebar:\n  board: \(value)\n  sessions: \(value)\n  agents: \(value)\n  panes: \(value)\n  animate_switching: \(value)")
             XCTAssertEqual(config.sidebar, Config.Sidebar(), value)
             XCTAssertEqual(config.problems.count, 5, value)
             XCTAssertEqual(config.problems.last?.message, "sidebar.animate_switching: expected a boolean", value)
@@ -272,7 +272,7 @@ final class ConfigTests: XCTestCase {
 
     func testAgentsScopeDefaultsToActiveAcceptsAllAndReportsAnythingElse() throws {
         XCTAssertEqual(try load("").sidebar.agentsScope, .init(.active))
-        XCTAssertEqual(try load("sidebar:\n  topics: false").sidebar.agentsScope, .init(.active))
+        XCTAssertEqual(try load("sidebar:\n  board: false").sidebar.agentsScope, .init(.active))
         for (value, scope) in [("active", Config.Sidebar.AgentsScope.active), ("all", .all), ("'all'", .all)] {
             let config = try load("sidebar:\n  agents_scope: \(value)")
             XCTAssertEqual(config.sidebar.agentsScope, .init(scope), value)
@@ -292,13 +292,13 @@ final class ConfigTests: XCTestCase {
           agents:
             sessions: false
           agents_scope:
-            topics: all
+            board: all
             sessions: active
         """)
         XCTAssertEqual(config.problems, [])
-        XCTAssertNil(config.sidebar.agents[.topics], "a mode left out stays with the View menu")
+        XCTAssertNil(config.sidebar.agents[.board], "a mode left out stays with the View menu")
         XCTAssertEqual(config.sidebar.agents[.sessions], false)
-        XCTAssertEqual(config.sidebar.agentsScope[.topics], .all)
+        XCTAssertEqual(config.sidebar.agentsScope[.board], .all)
         XCTAssertEqual(config.sidebar.agentsScope[.sessions], .active)
         XCTAssertTrue(Config.template.contains("#   #   sessions: false"))
     }
@@ -307,18 +307,18 @@ final class ConfigTests: XCTestCase {
         let config = try load("""
         sidebar:
           agents:
-            topics: yes please
+            board: yes please
             sessions: true
           agents_scope:
-            topics: every
+            board: every
             panes: all
         """)
-        XCTAssertNil(config.sidebar.agents[.topics])
+        XCTAssertNil(config.sidebar.agents[.board])
         XCTAssertEqual(config.sidebar.agents[.sessions], true)
         XCTAssertEqual(config.sidebar.agentsScope, .init(.active))
         XCTAssertEqual(config.problems.map(\.message), [
-            "sidebar.agents.topics: expected a boolean",
-            "sidebar.agents_scope.topics: expected active, window or all",
+            "sidebar.agents.board: expected a boolean",
+            "sidebar.agents_scope.board: expected active, window or all",
             "unknown key \"sidebar.agents_scope.panes\"",
         ])
         XCTAssertEqual(config.problems.map(\.line), [3, 6, 7])
@@ -1016,6 +1016,18 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(try load("topics:\n  insert_position: " + value).problems, [ConfigProblem(
                 path: root, line: 2, message: "topics.insert_position is gone: a new Topic is a Guest, and a returning Topic goes to the top of the Bench")])
         }
+    }
+
+    func testTheTopicsViewKeysAreReadAsTheBoardWithAProblemThatNamesTheNewKey() throws {
+        let config = try load("sidebar:\n  topics: false\n  agents:\n    topics: false\n    sessions: true")
+        XCTAssertFalse(config.sidebar.board, "the old key still turns the Board view off")
+        XCTAssertEqual(config.sidebar.agents[.board], false)
+        XCTAssertEqual(config.sidebar.agents[.sessions], true)
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 2, message: "sidebar.topics is now sidebar.board: rename the key"),
+            ConfigProblem(path: root, line: 4, message: "sidebar.agents.topics is now sidebar.agents.board: rename the key"),
+        ])
+        XCTAssertEqual(try load("sidebar:\n  board: false\n  agents:\n    board: false").problems, [])
     }
 
     func testTheLockActionsAreGoneAndEachProblemNamesWhatToUse() throws {

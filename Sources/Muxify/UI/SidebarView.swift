@@ -87,7 +87,7 @@ private struct WorkSection: View {
             } sessions: {
                 SessionsSection(store: store).animatesSessionCards(store)
             }
-        } else if model.mode == .topics {
+        } else if model.mode == .board {
             TopicsSection(store: store, model: model)
         } else if model.sessionsEnabled {
             SessionsSection(store: store)
@@ -1278,7 +1278,7 @@ private struct SessionsSection: View {
     }
 }
 
-/// A Session card, in Sessions mode and as the opened No Topic Session in Topics mode. Each place gives its own Window and Pane rows.
+/// A Session card, in Sessions mode and as the opened No Topic Session in the Board view. Each place gives its own Window and Pane rows.
 /// It shows only `state`, which its list reads from the store, and touches the store only in its actions, so a card whose
 /// values stay the same does not update on a switch elsewhere.
 private struct SessionCard<Row: View>: View, Equatable {

@@ -23,7 +23,7 @@ final class SidebarFormatContextTests: XCTestCase {
         let contexts = SidebarFormatContexts(model: model, windows: [window], panes: [pane], agents: agents,
                                              branches: branches, records: [record], sessionPaths: [], tabCounts: ["@1": 4])
         let topic = try XCTUnwrap(contexts.topics[.topic("topic")])
-        XCTAssertEqual(SidebarFormats.defaults.text(for: .topic, in: topic, mode: .topics).summary, "app-feature · 1 Window")
+        XCTAssertEqual(SidebarFormats.defaults.text(for: .topic, in: topic, mode: .board).summary, "app-feature · 1 Window")
         XCTAssertEqual(try SidebarFormat("#{S:#{branch}}").expand(in: topic), "feature")
         XCTAssertEqual(try SidebarFormat("#{P:#{session_name}/#{window_index}/#{pane_index}/#{branch}/#{tab_count}}").expand(in: topic),
                        "app-feature/2/3/feature/4")
@@ -37,7 +37,7 @@ final class SidebarFormatContextTests: XCTestCase {
         let model = BoardModel(records: [], boardSessions: [lock], windows: [], config: Config(), selection: TopicSelection())
         let contexts = SidebarFormatContexts(model: model, windows: [], panes: [], agents: [], branches: TopicBranches(), records: [],
                                              boardSessions: [lock], sessionPaths: [], tabCounts: [:])
-        let text = SidebarFormats.defaults.text(for: .session, in: try XCTUnwrap(contexts.dormantBoardSessions["g1"]), mode: .topics)
+        let text = SidebarFormats.defaults.text(for: .session, in: try XCTUnwrap(contexts.dormantBoardSessions["g1"]), mode: .board)
         XCTAssertEqual(text.title, "notes")
         XCTAssertEqual(text.summary, "2 Windows")
     }
@@ -50,7 +50,7 @@ final class SidebarFormatContextTests: XCTestCase {
             let pane = TmuxPane(id: "%1", windowID: window.id, title: "Agent task", command: "sleep",
                                 agent: "codex", agentStatus: "working", unread: false)
             let agents = Agent.list(panes: [pane], windows: [window])
-            for mode in [SidebarMode.topics, .sessions] {
+            for mode in [SidebarMode.board, .sessions] {
                 for scope in [Config.Sidebar.AgentsScope.all, .active, .window] {
                     var config = Config()
                     config.sidebar.agentsScope = .init(scope)
@@ -90,7 +90,7 @@ final class SidebarFormatContextTests: XCTestCase {
         var formats = SidebarFormats.defaults
         formats.agent.title = .init(try SidebarFormat("#{topic_title} / #{window_name}"))
         formats.agent.summary = .init(try SidebarFormat("#{pane_label} / #{pane_current_path} / #{agent_status}"))
-        let text = formats.text(for: .agent, in: try XCTUnwrap(contexts.panes["%1"]), mode: .topics)
+        let text = formats.text(for: .agent, in: try XCTUnwrap(contexts.panes["%1"]), mode: .board)
         XCTAssertEqual(text.title, "Task / shell")
         XCTAssertEqual(text.summary, "Agent task / /agent / working")
     }

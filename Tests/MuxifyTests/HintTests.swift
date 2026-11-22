@@ -295,7 +295,7 @@ final class HintTests: XCTestCase {
         let windows = [window("1", topic: "work"), window("2"), window("3", topic: "work"), window("4", guest: true),
                        window("5", topic: "pinned"), window("6")]
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
-        func targets(selecting windowID: String?, mode: SidebarMode = .topics) -> QuickSwitchTargets {
+        func targets(selecting windowID: String?, mode: SidebarMode = .board) -> QuickSwitchTargets {
             var selection = TopicSelection()
             selection.windowID = windowID
             let model = BoardModel(records: [dormant, work, pinned], boardSessions: [BoardSession(id: "$4", order: 3, isGuest: true)], windows: windows, config: Config(),
@@ -332,7 +332,7 @@ final class HintTests: XCTestCase {
         let sessions = ["$1", "$2", "$3"].map { id in
             SessionGroup(id: id, name: "session-" + id.dropFirst(), windows: windows.filter { $0.sessionID == id })
         }
-        func targets(selecting windowID: String, mode: SidebarMode = .topics) -> QuickSwitchTargets {
+        func targets(selecting windowID: String, mode: SidebarMode = .board) -> QuickSwitchTargets {
             var selection = TopicSelection()
             selection.windowID = windowID
             let model = BoardModel(records: [work], windows: windows, config: Config(), selection: selection,

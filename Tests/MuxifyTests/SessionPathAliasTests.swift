@@ -11,7 +11,7 @@ final class SessionPathAliasTests: XCTestCase {
         .fixture(id: id, sessionID: "$" + session, sessionName: session, path: directory, topicID: topic, sessionPath: directory)
     }
 
-    private func catalog(records: [TopicRecord] = [], windows: [TmuxWindow] = [], mode: SidebarMode = .topics) -> PaletteCatalog {
+    private func catalog(records: [TopicRecord] = [], windows: [TmuxWindow] = [], mode: SidebarMode = .board) -> PaletteCatalog {
         var config = Config()
         config.sessionPaths = [vault, game]
         let model = BoardModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: mode, agents: [])
