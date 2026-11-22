@@ -591,8 +591,14 @@ final class ConfigTests: XCTestCase {
         for (action, spellings, side) in expected {
             XCTAssertEqual(config.keybinds.triggers[action] ?? [], spellings.map(trigger), action.rawValue)
             XCTAssertEqual(action.requiredFocus, side, action.rawValue)
+            XCTAssertTrue(action.acts(whileFocus: side), action.rawValue)
+            XCTAssertFalse(action.acts(whileFocus: side == .terminal ? .browser : .terminal), action.rawValue)
+            XCTAssertFalse(action.acts(whileFocus: nil), action.rawValue)
         }
         XCTAssertNil(ConfigAction.selectNextTopicWindow.requiredFocus)
+        for focus: PanelLayout.Side? in [.terminal, .browser, nil] {
+            XCTAssertTrue(ConfigAction.selectNextTopicWindow.acts(whileFocus: focus))
+        }
         let custom = try load("keybindings:\n  resize_pane_left: ctrl+cmd+left\n  browser_back: cmd+left_bracket")
         XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+cmd+left"), focus: .terminal), .resizePaneLeft)
         XCTAssertNil(custom.keybinds.action(for: trigger("ctrl+cmd+left"), focus: .browser))

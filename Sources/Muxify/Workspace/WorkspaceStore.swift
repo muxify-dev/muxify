@@ -3300,6 +3300,14 @@ final class WorkspaceStore {
     private static let closeWindow = KeyTrigger(modifiers: .command, key: .character("w"))
 
     #if DEBUG
+    /// Performs the keybind action as its key does, with no key: only while the side it requires has Focus (ADR
+    /// 0042). False when it does not act. For the test driver's `keybind` (scripts/verify/README.md).
+    func performKeybind(_ action: ConfigAction) -> Bool {
+        guard !isShuttingDown, action.acts(whileFocus: keyFocus) else { return false }
+        perform(action)
+        return true
+    }
+
     /// Delivers a key press as AppKit does, without the keyboard: the keybinds,
     /// then the App Window's views, then the menu (scripts/verify/README.md).
     func deliverKeyDown(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {

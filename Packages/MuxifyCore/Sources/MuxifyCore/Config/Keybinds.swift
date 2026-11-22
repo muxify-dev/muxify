@@ -15,6 +15,12 @@ extension KeybindAction {
 
     public var requiredFocus: PanelLayout.Side? { nil }
 
+    /// Whether the action acts while `focus`, the side with Focus or nil for
+    /// neither, has it: everywhere, or only on its required side.
+    public func acts(whileFocus focus: PanelLayout.Side?) -> Bool {
+        requiredFocus == nil || requiredFocus == focus
+    }
+
     /// Two actions can share a trigger when no Focus has both acting on it:
     /// one acts only while one side has Focus, and the other acts only on the
     /// other side or everywhere else.
@@ -331,7 +337,7 @@ public struct KeybindSet<Action: KeybindAction>: Equatable {
     /// that acts everywhere.
     public func action(for trigger: KeyTrigger, focus: PanelLayout.Side?) -> Action? {
         let owners = triggers.filter { $0.value.contains(trigger) }.map(\.key)
-        return owners.first { $0.requiredFocus != nil && $0.requiredFocus == focus }
+        return owners.first { $0.requiredFocus != nil && $0.acts(whileFocus: focus) }
             ?? owners.first { $0.requiredFocus == nil }
     }
 

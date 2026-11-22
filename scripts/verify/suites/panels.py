@@ -93,6 +93,23 @@ class Panels(unittest.TestCase):
         wait(lambda: len(panes()) == 3, 'the Split Pane Down Command did not split the current Pane')
         self.assertEqual(len({pane.split()[1] for pane in panes()}), 2, 'no new Pane is below the current one: %s' % panes())
 
+    def test_keybind_splits_the_current_pane_only_while_the_terminal_has_focus(self):
+        # split_pane_right acts only while the Terminal has Focus (ADR 0042); the driver performs it with no key.
+        target = 'panels:' + self.id().rsplit('.', 1)[-1][:24]
+        panes = lambda: self.s.tmux('list-panes', '-t', target, '-F', '#{pane_left} #{pane_top} #{pane_width} #{pane_height}').splitlines()
+        self.assertFalse(self.s.keybind('no_such_action'), 'keybind acted on an unknown action name')
+        self.s.act('press', 'Focus Browser')
+        self.wait_focus('browser', 'Focus Browser did not give the Browser Focus')
+        before = panes()
+        self.assertFalse(self.s.keybind('split_pane_right'), 'split_pane_right acted while the Browser has Focus')
+        time.sleep(SETTLE)
+        self.assertEqual(panes(), before, 'split_pane_right changed the Panes while the Browser has Focus')
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+        self.assertTrue(self.s.keybind('split_pane_right'), 'split_pane_right did not act while the Terminal has Focus')
+        wait(lambda: len(panes()) == 2, 'split_pane_right did not split the current Pane')
+        self.assertEqual(len({pane.split()[0] for pane in panes()}), 2, 'the new Pane is not beside the current one: %s' % panes())
+
     def wait_toggles(self, expected, message):
         values = lambda rs: {key: self.s.row(key, rs).get('accessibilityValue') for key in expected}
         return self.s.wait_rows(lambda rs: values(rs) == expected, '%s: %s' % (message, values(self.s.rows())))

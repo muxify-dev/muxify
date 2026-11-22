@@ -393,6 +393,12 @@ class Sandbox:
             command, target, ': ' + result['error'] if result.get('error') else '')
         return result
 
+    def keybind(self, action):
+        """Performs the Muxify keybind action by its Config name, such as `split_pane_right`, on the first App Window as
+        its key does, with no key. Returns whether it acted: False for an unknown name or an action the Focus does not
+        allow."""
+        return self.driver('keybind', text=action)['pressed']
+
     def rows(self):
         return self.driver('dump')['rows']
 
