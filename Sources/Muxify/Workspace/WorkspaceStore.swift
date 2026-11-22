@@ -1314,6 +1314,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var isLinked = false
     @ObservationIgnored private var linkSubscription: EnvironmentSubscription?
     @ObservationIgnored private var generation = UUID()
+    /// What the link was last told of `ui.status_line`, so a Config change elsewhere tells it nothing.
+    @ObservationIgnored private var toldHidesStatusLine: Bool?
     /// Why this attachment shows Sessions only, once its Host Server could not run; nil until then.
     private(set) var topicsUnavailableReason: HostServerUnavailable?
     /// When the Host Server stopped during this attachment, to count 3 within 60 s.
@@ -1549,6 +1551,8 @@ final class WorkspaceStore {
     private func subscribeToLink() {
         let current = generation
         reportColours()
+        toldHidesStatusLine = nil
+        followStatusLineSetting()
         linkSubscription = link.subscribe { [weak self] event in
             guard let self, self.generation == current else { return }
             self.receive(event)
@@ -2071,6 +2075,12 @@ final class WorkspaceStore {
               let targetIndex = navigation.targetIndex(currentIndex: currentIndex, count: siblings.count)
         else { return }
         select(siblings[targetIndex])
+    }
+
+    /// `toggle_last_window`: the current Session's Last Window, as tmux marks it. Selecting it makes tmux mark the
+    /// Window just left, so the action goes back and forth. Nothing marked, or one Window, does nothing.
+    private func selectLastWindow() {
+        if let last = quickSwitchWindows.first(where: { $0.isLastWindow && $0.id != selectedWindowID }) { select(last) }
     }
 
     /// Shows what a `muxify://select` URL names (`muxify session open`, `window open`, `topic open`).
@@ -3173,10 +3183,23 @@ final class WorkspaceStore {
         case .focusBrowser: focus(.browser)
         case .toggleFocus: toggleFocus()
         case .toggleZoomPane: toggleZoomOfCurrentPane()
+        case .splitPaneRight: splitCurrentPane(.right)
+        case .splitPaneDown: splitCurrentPane(.down)
+        case .splitPaneLeft: splitCurrentPane(.left)
+        case .splitPaneUp: splitCurrentPane(.up)
+        case .splitWindowRight: splitCurrentPane(.right, full: true)
+        case .splitWindowDown: splitCurrentPane(.down, full: true)
+        case .equalizePanes: equalizePanes()
         case .resizePaneLeft: resizeCurrentPane(.left)
         case .resizePaneRight: resizeCurrentPane(.right)
         case .resizePaneUp: resizeCurrentPane(.up)
         case .resizePaneDown: resizeCurrentPane(.down)
+        case .selectPaneLeft: selectPane(.left)
+        case .selectPaneRight: selectPane(.right)
+        case .selectPaneUp: selectPane(.up)
+        case .selectPaneDown: selectPane(.down)
+        case .selectPanePrevious: selectPane(.previous)
+        case .selectPaneNext: selectPane(.next)
         case .findInPane: showFindInPane()
         case .findInPage: browserCommand { $0.activeTab?.showFind() }
         case .selectNextTab: browserCommand { $0.selectTab(offset: 1) }
@@ -3192,6 +3215,7 @@ final class WorkspaceStore {
              .selectTab1, .selectTab2, .selectTab3, .selectTab4, .selectTab5,
              .selectTab6, .selectTab7, .selectTab8, .selectTab9:
             if let selection = action.quickSwitchSelection { quickSwitch(selection) }
+        case .toggleLastWindow: selectLastWindow()
         case .selectNextWindow, .selectPrevWindow, .selectNextTopicWindow, .selectPrevTopicWindow,
              .selectNextSession, .selectPrevSession, .selectNextTopic, .selectPrevTopic:
             guard let step = action.step else { return }
@@ -3262,6 +3286,22 @@ final class WorkspaceStore {
         runOnCurrentPane { pane, _ in .resizePane(target: pane, by: .zoom) }
     }
 
+    /// Splits the current Pane with tmux's own `split-window`, whatever the tmux config binds, so the new Pane is on
+    /// `side` and starts in the current Pane's folder. With `full`, the new Pane spans the Window's whole edge on
+    /// `side`, as `split-window -f` does; an older Host Server makes a normal split.
+    func splitCurrentPane(_ side: PaneDirection, full: Bool = false) {
+        runOnCurrentPane { pane, _ in .splitPane(target: pane, side: side, full: full ? true : nil) }
+    }
+
+    /// Makes another Pane of the current Window active with tmux's select-pane, whatever the tmux config binds:
+    /// the previous and next Panes in tmux's order of the Window, the directions from the current Pane.
+    private func selectPane(_ move: PaneMove) {
+        switch move {
+        case .previous, .next: runOnCurrentPane { _, window in .selectPane(target: window, move: move) }
+        case .up, .down, .left, .right: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: move) }
+        }
+    }
+
     /// Moves the current Pane's border by 10 cells, as Ghostty's resize_split does.
     private func resizeCurrentPane(_ direction: PaneDirection) {
         runOnCurrentPane { pane, _ in .resizePane(target: pane, by: .border(direction, cells: 10)) }
@@ -3288,6 +3328,14 @@ final class WorkspaceStore {
     private static let closeWindow = KeyTrigger(modifiers: .command, key: .character("w"))
 
     #if DEBUG
+    /// Performs the keybind action as its key does, with no key: only while the side it requires has Focus (ADR
+    /// 0042). False when it does not act. For the test driver's `keybind` (scripts/verify/README.md).
+    func performKeybind(_ action: ConfigAction) -> Bool {
+        guard !isShuttingDown, action.acts(whileFocus: keyFocus) else { return false }
+        perform(action)
+        return true
+    }
+
     /// Delivers a key press as AppKit does, without the keyboard: the keybinds,
     /// then the App Window's views, then the menu (scripts/verify/README.md).
     func deliverKeyDown(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
@@ -3520,6 +3568,24 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
         }
     }
 
+    /// Tells the link whether the header shows the Session and its Windows (`ui.status_line`), so that tmux's status line
+    /// does not show them a second time (ADR 0099): now, and again each time this App Window's Config changes it.
+    private func followStatusLineSetting() {
+        let current = generation
+        let hides = withObservationTracking { config.statusLine.enabled } onChange: { [weak self] in
+            // Called before the change is stored: read the new Config on the next turn.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.generation == current else { return }
+                    self.followStatusLineSetting()
+                }
+            }
+        }
+        guard hides != toldHidesStatusLine else { return }
+        toldHidesStatusLine = hides
+        link.hideStatusLine(hides)
+    }
+
     /// Tells the link the Terminal's colours while this is the key App Window, so programs in the Terminal's Session
     /// get them as the answer to a colour question (ADR 0095), and no colours otherwise, so it writes none. The key App
     /// Window calls it again when it becomes key: the screen in use writes last.
@@ -3541,24 +3607,28 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
         case GHOSTTY_SPLIT_DIRECTION_UP: .up
         default: .right
         }
-        runOnCurrentPane { pane, _ in .splitPane(target: pane, side: side) }
+        splitCurrentPane(side)
     }
 
     func ghosttyGotoSplit(_ direction: ghostty_action_goto_split_e) {
         switch direction {
-        case GHOSTTY_GOTO_SPLIT_PREVIOUS: runOnCurrentPane { _, window in .selectPane(target: window, move: .previous) }
-        case GHOSTTY_GOTO_SPLIT_NEXT: runOnCurrentPane { _, window in .selectPane(target: window, move: .next) }
-        case GHOSTTY_GOTO_SPLIT_UP: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .up) }
-        case GHOSTTY_GOTO_SPLIT_DOWN: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .down) }
-        case GHOSTTY_GOTO_SPLIT_LEFT: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .left) }
-        default: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .right) }
+        case GHOSTTY_GOTO_SPLIT_PREVIOUS: selectPane(.previous)
+        case GHOSTTY_GOTO_SPLIT_NEXT: selectPane(.next)
+        case GHOSTTY_GOTO_SPLIT_UP: selectPane(.up)
+        case GHOSTTY_GOTO_SPLIT_DOWN: selectPane(.down)
+        case GHOSTTY_GOTO_SPLIT_LEFT: selectPane(.left)
+        default: selectPane(.right)
         }
     }
 
     func ghosttyToggleSplitZoom() { toggleZoomOfCurrentPane() }
     func ghosttyStartSearch() { showFindInPane() }
 
-    func ghosttyEqualizeSplits() {
+    func ghosttyEqualizeSplits() { equalizePanes() }
+
+    /// Spreads the current Window's Panes out evenly with tmux's own `select-layout -E`, whatever the tmux config
+    /// binds.
+    func equalizePanes() {
         runOnCurrentPane { pane, _ in .selectLayout(target: pane) }
     }
 

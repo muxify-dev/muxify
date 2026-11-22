@@ -20,6 +20,7 @@ final class ViewCommandWireTests: XCTestCase {
             (.switchClient(client: "/dev/ttys001", target: "$1:@2"), #"{"switch_client":{"client":"/dev/ttys001","target":"$1:@2"}}"#),
             (.splitPane(target: "%1", side: .down), #"{"split_pane":{"side":"down","target":"%1"}}"#),
             (.splitPane(target: "%1", side: .left, directory: "/work"), #"{"split_pane":{"directory":"/work","side":"left","target":"%1"}}"#),
+            (.splitPane(target: "%1", side: .right, full: true), #"{"split_pane":{"full":true,"side":"right","target":"%1"}}"#),
             (.resizePane(target: "%1", by: .zoom), #"{"resize_pane":{"by":{"zoom":{}},"target":"%1"}}"#),
             (.resizePane(target: "%1", by: .border(.up, cells: 10)),
              #"{"resize_pane":{"by":{"border":{"cells":10,"direction":"up"}},"target":"%1"}}"#),
@@ -63,6 +64,12 @@ final class ViewCommandWireTests: XCTestCase {
                        ["switch-client", "-Z", "-c", "/dev/t", "-t", "$1:@2"])
         XCTAssertEqual(ViewCommandExecutor.arguments(for: .splitPane(target: "%1", side: .up)),
                        ["split-window", "-v", "-b", "-t", "%1", "-c", "#{pane_current_path}"])
+        XCTAssertEqual(ViewCommandExecutor.arguments(for: .splitPane(target: "%1", side: .down, full: true)),
+                       ["split-window", "-v", "-f", "-t", "%1", "-c", "#{pane_current_path}"])
+        XCTAssertEqual(ViewCommandExecutor.arguments(for: .splitPane(target: "%1", side: .right, full: true)),
+                       ["split-window", "-h", "-f", "-t", "%1", "-c", "#{pane_current_path}"])
+        XCTAssertEqual(ViewCommandExecutor.arguments(for: .splitPane(target: "%1", side: .right, full: false)),
+                       ["split-window", "-h", "-t", "%1", "-c", "#{pane_current_path}"])
         XCTAssertEqual(ViewCommandExecutor.arguments(for: .resizePane(target: "%1", by: .border(.left, cells: 10))),
                        ["resize-pane", "-L", "-t", "%1", "10"])
         XCTAssertEqual(ViewCommandExecutor.arguments(for: .setAgentUnread([PaneUnread(pane: "%1", unread: true), PaneUnread(pane: "%2", unread: false)])),

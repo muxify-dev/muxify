@@ -261,6 +261,14 @@ public struct Config: Equatable {
     /// The Ghostty config file the terminal loads on top of Ghostty's
     /// default files, as an absolute path.
     public var ghosttyConfigFile: String?
+    /// `ghostty.theme`: the Terminal's Ghostty `theme`, spelled as Ghostty spells it, which wins over every Ghostty
+    /// config file. Nil: `defaultGhosttyTheme`, under the Ghostty config files.
+    public var ghosttyTheme: String?
+    /// The Ghostty themes that apply when neither the Config nor a Ghostty config file sets one.
+    public static let defaultGhosttyThemes = (light: "iTerm2 Solarized Light", dark: "Dracula")
+    /// `defaultGhosttyThemes` as Ghostty spells the pair.
+    public static var defaultGhosttyTheme: String { ghosttyTheme(light: defaultGhosttyThemes.light, dark: defaultGhosttyThemes.dark) }
+    static func ghosttyTheme(light: String, dark: String) -> String { "light:\(light),dark:\(dark)" }
     /// `override`: the Config Override paths the Config names, resolved, in list order, missing ones included
     /// (ADR 0075).
     public var overrides: [String] = []
@@ -316,6 +324,12 @@ public struct Config: Equatable {
         #   # files. ~/ is the home directory; a relative path starts at the
         #   # directory of this file.
         #   config_file: ~/.config/ghostty/config
+        #   # The Terminal's Ghostty theme, over any theme a Ghostty config
+        #   # sets: one theme, or one for light appearance and one for dark.
+        #   # Without it, a theme from a Ghostty config applies, else this one.
+        #   theme:
+        #     light: iTerm2 Solarized Light
+        #     dark: Dracula
         #
         # ui:
         #   # The Interface font size: the size in points, like Ghostty's
@@ -328,6 +342,7 @@ public struct Config: Equatable {
         #   header_height: 30
         #   status_line:
         #     # Show the Session name and Window selector. Git and other controls stay visible.
+        #     # While on, tmux shows no status line of its own where the Terminal is.
         #     enabled: true
         #     session:
         #       # A long Session name is cut with "…" in the middle to stay over
@@ -582,8 +597,20 @@ public struct Config: Equatable {
         #   # Cmd+backquote stays available for macOS App Window switching.
         #   # select_card_1 through select_card_9 Jump To Topic or Session cards.
         #   # select_tab_1 through select_tab_9 select Tabs and show the Browser.
-        #   # toggle_zoom_pane, resize_pane_* and find_in_pane act only while
-        #   # the Terminal has Focus. find_in_page, select_next_tab, select_prev_tab,
+        #   # split_pane_right (Cmd+D), split_pane_down (Cmd+Shift+D), split_pane_left
+        #   # and split_pane_up run tmux's split-window themselves, so they need no
+        #   # tmux key binding. split_pane_left and split_pane_up are unbound.
+        #   # split_window_right and split_window_down add a Pane along the Window's
+        #   # whole right or bottom edge, as split-window -f does, and are unbound.
+        #   # An older Host Server makes a normal split for them.
+        #   # equalize_panes spreads the Window's Panes out evenly with tmux's
+        #   # select-layout -E, whatever the tmux config binds, and is unbound.
+        #   # select_pane_left, select_pane_right, select_pane_up and select_pane_down
+        #   # make the Pane in that direction active; select_pane_previous and
+        #   # select_pane_next the Pane before or after it in tmux's order. They run
+        #   # tmux's select-pane themselves and are unbound.
+        #   # toggle_zoom_pane, split_pane_*, split_window_*, equalize_panes, resize_pane_*, select_pane_* and find_in_pane
+        #   # act only while the Terminal has Focus. find_in_page, select_next_tab, select_prev_tab,
         #   # browser_back and browser_forward act only while the Browser has Focus. With Focus
         #   # elsewhere, their keys go on to Ghostty, the page or the menu.
         #   # resize_pane_* move the Pane's border 10 cells and are unbound.
@@ -593,6 +620,9 @@ public struct Config: Equatable {
         #   # ninth Windows in the current Session, not their tmux indices.
         #   # select_next_window and select_prev_window wrap within the Session
         #   # and have no keybindings until you assign them.
+        #   # toggle_last_window selects the Session's Last Window, the one it
+        #   # showed before, as tmux's last-window does; again, it goes back. It
+        #   # acts whatever has Focus and is unbound.
         #   # select_next_topic_window and select_prev_topic_window step
         #   # through every Window of the Active Topic in Topics mode, and
         #   # wrap within the Session in Sessions mode. They are unbound.
@@ -1199,10 +1229,43 @@ private struct ConfigReader {
                 // Kept although missing, so the watcher sees the file appear.
                 config.ghosttyConfigFile = file
                 if read(file) == nil { problem(at: value, "ghostty.config_file \(file): not found") }
+            case "theme":
+                if let theme = ghosttyTheme(value) { config.ghosttyTheme = theme }
             default:
                 problem(at: key, "unknown key \"ghostty.\(name)\"")
             }
         }
+    }
+
+    /// A theme name, or a mapping with a theme name for `light`, `dark` or both, as Ghostty spells the pair. A
+    /// side the mapping leaves out keeps its default.
+    private mutating func ghosttyTheme(_ node: Node) -> String? {
+        func name(_ node: Node, _ place: String, pair: Bool) -> String? {
+            let name = string(node)?.trimmingCharacters(in: .whitespaces)
+            // A comma or a colon would end a theme name of Ghostty's light:dark pair; a newline would end the line.
+            let forbidden = CharacterSet.controlCharacters.union(pair ? CharacterSet(charactersIn: ",:") : [])
+            guard let name, !name.isEmpty, name.rangeOfCharacter(from: forbidden) == nil else {
+                problem(at: node, "\(place): expected a theme name")
+                return nil
+            }
+            return name
+        }
+        guard node.mapping != nil else { return name(node, "ghostty.theme", pair: false) }
+        var (light, dark) = Config.defaultGhosttyThemes
+        var valid = true
+        for (key, keyNode, value) in entries(of: node, "ghostty.theme") {
+            guard key == "light" || key == "dark" else {
+                problem(at: keyNode, "unknown key \"ghostty.theme.\(key)\"")
+                valid = false
+                continue
+            }
+            guard let theme = name(value, "ghostty.theme.\(key)", pair: true) else {
+                valid = false
+                continue
+            }
+            if key == "light" { light = theme } else { dark = theme }
+        }
+        return valid ? Config.ghosttyTheme(light: light, dark: dark) : nil
     }
 
     public mutating func readRemoteEnvironments(_ node: Node) {

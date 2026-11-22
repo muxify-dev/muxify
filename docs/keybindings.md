@@ -48,10 +48,23 @@ listed below.
 | `focus_browser` | ⌘⇧B | Move Focus to the Browser: to its page, or to the address field of a blank Tab. If the Browser is hidden, show it. If the Terminal is Maximized, Restore first |
 | `toggle_focus` | ⌘0 | Move Focus to the Terminal while the Browser has Focus, and to the Browser otherwise, as `focus_terminal` and `focus_browser` do. ⌘0 is also Ghostty's default for `reset_font_size` |
 | `toggle_zoom_pane` | ⌘M | Zoom the current Pane: show it alone in its Window, or show all the Panes again. While a Pane is Zoomed, its Window's Pane badge in the Sidebar is on an accent capsule. Terminal Focus only |
+| `split_pane_right` | ⌘D | Split the current Pane and put the new Pane on its right, in the same folder. Muxify runs tmux's `split-window` itself, so it works with no tmux config and on a Remote Environment. Terminal Focus only |
+| `split_pane_down` | ⌘⇧D | Split the current Pane and put the new Pane below it, in the same folder, as `split_pane_right` does. Terminal Focus only |
+| `split_pane_left` | Unbound | Split the current Pane and put the new Pane on its left, in the same folder, as `split_pane_right` does. Terminal Focus only |
+| `split_pane_up` | Unbound | Split the current Pane and put the new Pane above it, in the same folder, as `split_pane_right` does. Terminal Focus only |
+| `split_window_right` | Unbound | Add a Pane along the Window's whole right edge, as tmux's `split-window -f` does, in the current Pane's folder. Muxify runs `split-window` itself, as `split_pane_right` does. An older Host Server on a Remote Environment makes a normal split instead. Terminal Focus only |
+| `split_window_down` | Unbound | Add a Pane along the Window's whole bottom edge, in the current Pane's folder, as `split_window_right` does. An older Host Server makes a normal split instead. Terminal Focus only |
+| `equalize_panes` | Unbound | Spread the current Window's Panes out evenly, as tmux's `select-layout -E` does. Muxify runs `select-layout` itself, so it works with no tmux config and on a Remote Environment. Terminal Focus only |
 | `resize_pane_left` | Unbound | Move the current Pane's border 10 cells left. Terminal Focus only |
 | `resize_pane_right` | Unbound | Move the current Pane's border 10 cells right. Terminal Focus only |
 | `resize_pane_up` | Unbound | Move the current Pane's border 10 cells up. Terminal Focus only |
 | `resize_pane_down` | Unbound | Move the current Pane's border 10 cells down. Terminal Focus only |
+| `select_pane_left` | Unbound | Make the Pane on the left of the current Pane the Window's active Pane. Muxify runs tmux's `select-pane` itself, so it works with no tmux config and on a Remote Environment. Terminal Focus only |
+| `select_pane_right` | Unbound | Make the Pane on the right of the current Pane active, as `select_pane_left` does. Terminal Focus only |
+| `select_pane_up` | Unbound | Make the Pane above the current Pane active, as `select_pane_left` does. Terminal Focus only |
+| `select_pane_down` | Unbound | Make the Pane below the current Pane active, as `select_pane_left` does. Terminal Focus only |
+| `select_pane_previous` | Unbound | Make the Pane before the current one, in tmux's order, active. Terminal Focus only |
+| `select_pane_next` | Unbound | Make the Pane after the current one, in tmux's order, active. Terminal Focus only |
 | `find_in_pane` | ⌘F | Open [Find in Pane](#find-in-pane) over the Terminal, or select its query while it is open. Terminal Focus only. From the Browser, ⌘F is `find_in_page` |
 | `find_in_page` | ⌘F | Open Find in Page above the page, and select the text in its field. Browser Focus only. From the Terminal, ⌘F is `find_in_pane` |
 | `select_next_tab` | ⌘⇧], ⌃Tab | Select the next Browser Tab. Browser Focus only |
@@ -73,6 +86,7 @@ listed below.
 | `select_window_9` | ⌘9 | Select the ninth Window, not the last one |
 | `select_next_window` | Unbound | Select the next Window, wrapping to the first |
 | `select_prev_window` | Unbound | Select the previous Window, wrapping to the last |
+| `toggle_last_window` | Unbound | Select the current Session's Last Window, the one it showed before, as tmux's `last-window` does; again, go back. Muxify reads the Last Window from tmux, so it works with no tmux config. It does nothing in a Session with one Window, or with an older Host Server. Acts whatever has Focus |
 | `select_next_topic_window` | Unbound | Select the next Window of the Active Topic, wrapping to the first. In Topics mode, every Window of the Active Topic's Sessions takes part, in the order the Sidebar shows them; for No Topic, the Windows of the No Topic Sessions. In Sessions mode, only the current Session's Windows take part |
 | `select_prev_topic_window` | Unbound | Select the previous Window of the Active Topic, wrapping to the last |
 
@@ -152,7 +166,11 @@ shortcut.
 Commands also lists the layout and Focus actions: Maximize or Restore, Maximize
 Terminal, Maximize Browser, Focus Terminal, Focus Browser, and Show or Hide for
 the Sidebar, the Terminal and the Browser, and Toggle Bench while the Topics list has a Bench line. Each row shows its configured shortcut.
-Zoom Pane runs at once on the current Pane, as `toggle_zoom_pane` does.
+Zoom Pane runs at once on the current Pane, as `toggle_zoom_pane` does. Split
+Pane Right, Split Pane Down, Split Pane Left, Split Pane Up, Split Window Right,
+Split Window Down and Equalize Panes run at once too, as `split_pane_right`,
+`split_pane_down`, `split_pane_left`, `split_pane_up`, `split_window_right`,
+`split_window_down` and `equalize_panes` do.
 A row appears only when its action can change something.
 
 Move opens for a Pane with ⌘⇧T (while the Browser does not have Focus), a Window with `move_window` or a Session with ⌘⇧M.

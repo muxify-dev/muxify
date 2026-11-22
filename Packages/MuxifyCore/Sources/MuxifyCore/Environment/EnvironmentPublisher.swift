@@ -24,6 +24,10 @@ import Foundation
 /// Client, one without `ignore-size`, detaches; and before Muxify types into a Session that it made. It sends them and
 /// returns at once: nothing waits for tmux's answer, so a switch never waits for one.
 ///
+/// While its App Window's header shows the Session and its Windows, it hides tmux's status line in each Session that the
+/// Terminal moves to, before a switch that Muxify starts there, and gives every Session it hid it in the status line
+/// back when that ends (`TmuxStatusLine`, ADR 0099).
+///
 /// It does not decide whose screen changed the focus, which tmux does not say: it tells an in-process subscriber that
 /// the focus changed in the Window that the Terminal shows, or that another screen took that Window, and writes a
 /// Window's Panes when the subscriber asks (`reportColours(toWindow:)`). The subscriber decides: the App Window's store,
@@ -32,7 +36,7 @@ import Foundation
 /// The Listener follows the Terminal: it sits in the Session that the Client of `clientMarker` shows and moves there
 /// each time that Client does, as Muxify Mobile's control Client does. Before that Client attaches, it sits in the
 /// Session that tmux picks. It never makes a Session, so the server exits with the last one, and the Listener with it;
-/// it attaches again once a Session appears. It installs no tmux hook.
+/// it attaches again once a Session appears. The only tmux hooks it installs are `TmuxStatusLine`'s.
 ///
 /// Every read runs on one serial queue, so writes and reads keep the order they were asked in. Events go out on the
 /// delivery queue, in that order.
@@ -99,6 +103,8 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     private var readQueued = false
     private var news: ((News) -> Void)?
     private var colours: TerminalColours?
+    /// Whether the Terminal's Sessions have no tmux status line, because the App Window's header shows the Session.
+    private var hidesStatusLine = false
     /// The Sessions whose Panes got the colours before the switches that Muxify started there, in order, until the
     /// Terminal moves: its move to one of them writes them no more.
     private var switchedSessions: [String] = []
@@ -311,16 +317,51 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         let session = colours == nil ? nil : panes.first?.first
         let marked = session != nil && switchedSessions.last != session
         if marked, let session { switchedSessions.append(session) }
+        let statusLine = hidesStatusLine ? panes.first?.first.map(TmuxStatusLine.hiding) ?? [] : []
         lock.unlock()
         let colourReport = colours.map { ColourReport.commands(panes: panes.compactMap(\.last), colours: $0) } ?? []
         let arguments = ViewCommandExecutor.arguments(for: .switchClient(client: client, target: target))
-        guard listener.send(colourReport + [arguments.map(Tmux.shellQuote).joined(separator: " ")]) else {
+        guard listener.send(colourReport + statusLine.map(TmuxStatusLine.line) + [TmuxStatusLine.line(arguments)]) else {
             lock.lock()
             if marked, let index = switchedSessions.lastIndex(where: { $0 == session }) { switchedSessions.remove(at: index) }
             lock.unlock()
             return false
         }
         return true
+    }
+
+    // MARK: - tmux's status line (ADR 0099)
+
+    /// While `hides`, the Terminal's Session and each Session it moves to have no tmux status line, because the App
+    /// Window's header shows the Session and its Windows. False gives the status line back to every Session that
+    /// Muxify hid it in, also one that an earlier Muxify hid it in.
+    public func hideStatusLine(_ hides: Bool) {
+        lock.lock()
+        hidesStatusLine = hides
+        lock.unlock()
+        queue.async { [self] in
+            if hides {
+                guard handler != nil, let session = terminalSession, Self.isSessionID(session) else { return }
+                hideStatusLine(in: session)
+            } else {
+                let listed = (try? run(TmuxStatusLine.listing)) ?? ""
+                let showing = TmuxStatusLine.showing(listed: listed,
+                                                     terminalSession: terminalSession.flatMap { Self.isSessionID($0) ? $0 : nil })
+                // Behind any hide still on its way to tmux on the Listener's connection, which a command of its own
+                // could overtake.
+                if !listener.send(showing.map(TmuxStatusLine.line)) {
+                    for arguments in showing { _ = try? run(arguments) }
+                }
+            }
+        }
+    }
+
+    /// Hides the status line in `session`, the Terminal's, while the header shows the Session. On `queue`.
+    private func hideStatusLine(in session: String) {
+        lock.lock()
+        let hides = hidesStatusLine
+        lock.unlock()
+        if hides { listener.send(TmuxStatusLine.hiding(session).map(TmuxStatusLine.line)) }
     }
 
     /// Another screen's control Client detached, so its Colour Reports stay on the Panes: the Terminal's Session gets
@@ -505,6 +546,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         lock.unlock()
         let written = index != nil
         if !written { reportColoursToTheTerminalsSession() }
+        hideStatusLine(in: session)
     }
 
     /// Attaches the Listener to the Terminal's Session or, before the Terminal attaches, to the Session that tmux
@@ -598,6 +640,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
                 if attached, session == terminalSession {
                     movedSession = session
                     reportColoursToTheTerminalsSession()
+                    hideStatusLine(in: session)
                 }
             case .client(let name, let session) where name == ownClient?.tty:
                 // The Terminal moved, by a switch that Muxify started or one made inside tmux; the Listener follows.
@@ -710,7 +753,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         let session = fields(["session_id", "session_name", "session_activity", "session_path", "@muxify_topic",
                               "@muxify_lock", "@muxify_session_id"])
         let window = fields(["window_id", "window_index", "window_name", "window_active", "window_panes",
-                             "window_bell_flag", "window_layout", "window_zoomed_flag", Tmux.tabsOption,
+                             "window_bell_flag", "window_layout", "window_zoomed_flag", "window_last_flag", Tmux.tabsOption,
                              Tmux.activeTabOption, Tmux.shownOption, Tmux.maximizeOption, Tmux.openOption,
                              Tmux.lastWindowOption, Tmux.agentOption])
         let pane = fields(["pane_id", "pane_index", "pane_active", "pane_title", "pane_current_path",

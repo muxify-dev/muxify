@@ -20,8 +20,10 @@ public enum HostProtocol {
     /// do not connect (ADR 0098).
     public static let supported: ClosedRange<Int> = 2...2
     /// What this build's Host Server adds to its protocol, declared in its `hello`. A client declares only what it
-    /// uses: the Mac declares none, the phone all of them.
+    /// uses: the Mac `macCapabilities`, the phone all of them.
     public static let capabilities: [String] = HostCapability.allCases.map(\.rawValue)
+    /// What the Mac uses of a Host Server's capabilities.
+    public static let macCapabilities: [String] = [HostCapability.statusLine.rawValue]
     /// How long the client waits for the server's `hello`.
     public static let helloTimeout: TimeInterval = 10
     /// How long the server waits for any frame before it exits. Longer than the Mac's own master timeout
@@ -43,6 +45,8 @@ public enum HostCapability: String, CaseIterable, Sendable {
     case rankedSessionPaths = "ranked-session-paths"
     /// `browser_tabs`: a Window's stored Browser Tabs.
     case browserTabs = "browser-tabs"
+    /// `status_line`: the Host Server's Listener hides tmux's status line in the Terminal's Sessions (ADR 0099).
+    case statusLine = "status-line"
 }
 
 /// The `kind` of a frame.
@@ -211,6 +215,11 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// `window`, it writes every Pane of that Window now, as the Mac decided after a `focus` event; without one, every
     /// Pane of the Session that the Terminal shows. Answers `{}`. Protocol 2's base.
     case colours(ColoursRequest)
+    /// Whether the Mac's header shows the Session and its Windows, so that the Host Server's Listener hides tmux's status
+    /// line in each Session that the Terminal moves to, or gives it back to every Session that Muxify hid it in
+    /// (ADR 0099). Answers `{}`. Needs `status-line`: a Mac sends it only to a server that declared it, and an older
+    /// server's Sessions keep their status line.
+    case statusLine(StatusLineRequest)
 
     /// The capability that the client must have declared for the server to serve this request; nil for the
     /// protocol's base. A new case does not compile until it chooses.
@@ -221,6 +230,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .visitSessionPath: return .rankedSessionPaths
         case .subscribe(let subscription): return subscription.capability
         case .browserTabs: return .browserTabs
+        case .statusLine: return .statusLine
         case .ping, .shutdown, .markRead, .view, .topicChoices, .worktreeStarts, .adoptWorktrees, .claimOpen, .releaseOpen, .git, .gitWrite,
              .gitNetwork, .upload, .colours:
             return nil
@@ -244,6 +254,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case upload
         case browserTabs = "browser_tabs"
         case colours
+        case statusLine = "status_line"
     }
 
     public init(from decoder: Decoder) throws {
@@ -273,6 +284,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .upload: self = .upload(try values.decode(UploadChunk.self, forKey: key))
         case .browserTabs: self = .browserTabs(try values.decode(BrowserTabsRequest.self, forKey: key))
         case .colours: self = .colours(try values.decode(ColoursRequest.self, forKey: key))
+        case .statusLine: self = .statusLine(try values.decode(StatusLineRequest.self, forKey: key))
         }
     }
 
@@ -298,6 +310,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .upload(let chunk): try values.encode(chunk, forKey: .upload)
         case .browserTabs(let request): try values.encode(request, forKey: .browserTabs)
         case .colours(let request): try values.encode(request, forKey: .colours)
+        case .statusLine(let request): try values.encode(request, forKey: .statusLine)
         }
     }
 }
@@ -439,6 +452,15 @@ public struct ColoursRequest: Codable, Equatable, Sendable {
         try values.encodeIfPresent(colours?.background.hex, forKey: .background)
         try values.encodeIfPresent(colours?.foreground.hex, forKey: .foreground)
         try values.encodeIfPresent(window, forKey: .window)
+    }
+}
+
+/// `status_line`: whether the Terminal's Sessions have no tmux status line.
+public struct StatusLineRequest: Codable, Equatable, Sendable {
+    public var hidden: Bool
+
+    public init(hidden: Bool) {
+        self.hidden = hidden
     }
 }
 

@@ -12,7 +12,7 @@ extension TmuxWindow {
         openRequests: [String] = [], homeDirectory: String? = nil, hostName: String? = nil, isRemote: Bool = false,
         sourceID: String = "", topicID: String? = nil, savedSessionID: String = "", lockOrder: Double? = nil,
         sessionPath: String = "", activePaneID: String = "", startCommand: String = "", sessionCreated: Int = 0,
-        layout: String = "", isZoomed: Bool = false
+        layout: String = "", isZoomed: Bool = false, isLastWindow: Bool = false
     ) -> TmuxWindow {
         var window = TmuxWindow(id: id, sessionID: sessionID, sessionName: sessionName, index: index, name: name,
                                 paneTitle: paneTitle, path: path, command: command, isActive: isActive, paneCount: paneCount,
@@ -31,6 +31,7 @@ extension TmuxWindow {
         window.sessionCreated = sessionCreated
         window.layout = layout
         window.isZoomed = isZoomed
+        window.isLastWindow = isLastWindow
         return window
     }
 }

@@ -53,8 +53,11 @@ public enum ViewCommand: Codable, Hashable, Sendable {
     /// Shows `target` in the App Window's own Client `client`, keeping a Zoomed Pane zoomed. Refused when `client`
     /// no longer names that Client.
     case switchClient(client: String, target: String)
-    /// Splits `target`, putting the new Pane on its `side`, started in `directory`, else in the Pane's folder.
-    case splitPane(target: String, side: PaneDirection, directory: String? = nil)
+    /// Splits `target`, putting the new Pane on its `side`, started in `directory`, else in the Pane's folder. With
+    /// `full`, the new Pane spans the whole Window's edge on that side, as tmux's `split-window -f` does. nil and false
+    /// both make a normal split, and the app sends nil, so the JSON of a normal split has no `full` key; an older Host
+    /// Server ignores the key and makes a normal split (ADR 0086 change rule 1).
+    case splitPane(target: String, side: PaneDirection, directory: String? = nil, full: Bool? = nil)
     case resizePane(target: String, by: PaneResize)
     /// Spreads the Panes of `target`'s Window out evenly.
     case selectLayout(target: String)
@@ -232,13 +235,14 @@ public struct ViewCommandExecutor {
             }
         case .switchClient(let client, let target):
             return ["switch-client", "-Z", "-c", client, "-t", target]
-        case .splitPane(let target, let side, let directory):
-            let flags: [String] = switch side {
+        case .splitPane(let target, let side, let directory, let full):
+            let sideFlags: [String] = switch side {
             case .left: ["-h", "-b"]
             case .right: ["-h"]
             case .up: ["-v", "-b"]
             case .down: ["-v"]
             }
+            let flags = sideFlags + (full == true ? ["-f"] : [])
             return ["split-window"] + flags + ["-t", target, "-c", directory ?? "#{pane_current_path}"]
         case .resizePane(let target, .zoom):
             return ["resize-pane", "-Z", "-t", target]

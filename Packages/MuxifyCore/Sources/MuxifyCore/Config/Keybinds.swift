@@ -15,6 +15,12 @@ extension KeybindAction {
 
     public var requiredFocus: PanelLayout.Side? { nil }
 
+    /// Whether the action acts while `focus`, the side with Focus or nil for
+    /// neither, has it: everywhere, or only on its required side.
+    public func acts(whileFocus focus: PanelLayout.Side?) -> Bool {
+        requiredFocus == nil || requiredFocus == focus
+    }
+
     /// Two actions can share a trigger when no Focus has both acting on it:
     /// one acts only while one side has Focus, and the other acts only on the
     /// other side or everywhere else.
@@ -67,10 +73,23 @@ public enum ConfigAction: String, KeybindAction {
     case focusBrowser = "focus_browser"
     case toggleFocus = "toggle_focus"
     case toggleZoomPane = "toggle_zoom_pane"
+    case splitPaneRight = "split_pane_right"
+    case splitPaneDown = "split_pane_down"
+    case splitPaneLeft = "split_pane_left"
+    case splitPaneUp = "split_pane_up"
+    case splitWindowRight = "split_window_right"
+    case splitWindowDown = "split_window_down"
+    case equalizePanes = "equalize_panes"
     case resizePaneLeft = "resize_pane_left"
     case resizePaneRight = "resize_pane_right"
     case resizePaneUp = "resize_pane_up"
     case resizePaneDown = "resize_pane_down"
+    case selectPaneLeft = "select_pane_left"
+    case selectPaneRight = "select_pane_right"
+    case selectPaneUp = "select_pane_up"
+    case selectPaneDown = "select_pane_down"
+    case selectPanePrevious = "select_pane_previous"
+    case selectPaneNext = "select_pane_next"
     case findInPane = "find_in_pane"
     case findInPage = "find_in_page"
     case selectNextTab = "select_next_tab"
@@ -108,6 +127,7 @@ public enum ConfigAction: String, KeybindAction {
     case selectWindow9 = "select_window_9"
     case selectNextWindow = "select_next_window"
     case selectPrevWindow = "select_prev_window"
+    case toggleLastWindow = "toggle_last_window"
     case selectNextTopicWindow = "select_next_topic_window"
     case selectPrevTopicWindow = "select_prev_topic_window"
     case selectNextSession = "select_next_session"
@@ -149,10 +169,23 @@ public enum ConfigAction: String, KeybindAction {
         .focusBrowser: ["cmd+shift+b"],
         .toggleFocus: ["cmd+0"],
         .toggleZoomPane: ["cmd+m"],
+        .splitPaneRight: ["cmd+d"],
+        .splitPaneDown: ["cmd+shift+d"],
+        .splitPaneLeft: [],
+        .splitPaneUp: [],
+        .splitWindowRight: [],
+        .splitWindowDown: [],
+        .equalizePanes: [],
         .resizePaneLeft: [],
         .resizePaneRight: [],
         .resizePaneUp: [],
         .resizePaneDown: [],
+        .selectPaneLeft: [],
+        .selectPaneRight: [],
+        .selectPaneUp: [],
+        .selectPaneDown: [],
+        .selectPanePrevious: [],
+        .selectPaneNext: [],
         .findInPane: ["cmd+f"],
         .findInPage: ["cmd+f"],
         .selectNextTab: ["cmd+shift+right_bracket", "ctrl+tab"],
@@ -190,6 +223,7 @@ public enum ConfigAction: String, KeybindAction {
         .selectWindow9: ["cmd+9"],
         .selectNextWindow: [],
         .selectPrevWindow: [],
+        .toggleLastWindow: [],
         .selectNextTopicWindow: [],
         .selectPrevTopicWindow: [],
         .selectNextSession: [],
@@ -205,7 +239,8 @@ public enum ConfigAction: String, KeybindAction {
     /// from the Browser, and a Tab key does not take one from the Terminal.
     public var requiredFocus: PanelLayout.Side? {
         switch self {
-        case .toggleZoomPane, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown, .findInPane: .terminal
+        case .toggleZoomPane, .splitPaneRight, .splitPaneDown, .splitPaneLeft, .splitPaneUp, .splitWindowRight, .splitWindowDown, .equalizePanes, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown,
+             .selectPaneLeft, .selectPaneRight, .selectPaneUp, .selectPaneDown, .selectPanePrevious, .selectPaneNext, .findInPane: .terminal
         case .findInPage, .selectNextTab, .selectPrevTab, .browserBack, .browserForward, .closeTab, .reopenClosedTab: .browser
         default: nil
         }
@@ -327,7 +362,7 @@ public struct KeybindSet<Action: KeybindAction>: Equatable {
     /// that acts everywhere.
     public func action(for trigger: KeyTrigger, focus: PanelLayout.Side?) -> Action? {
         let owners = triggers.filter { $0.value.contains(trigger) }.map(\.key)
-        return owners.first { $0.requiredFocus != nil && $0.requiredFocus == focus }
+        return owners.first { $0.requiredFocus != nil && $0.acts(whileFocus: focus) }
             ?? owners.first { $0.requiredFocus == nil }
     }
 

@@ -30,6 +30,9 @@ class ColourReportTerminal(unittest.TestCase):
     def setUpClass(cls):
         cls.sandbox = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(cls.sandbox.teardown)
+        # A dark Terminal in either appearance: tmux answers black for a Pane that no screen reported, so the other
+        # screen's report of the other kind of colour is white, which changes the probe's colour scheme.
+        (cls.sandbox.root/'config/muxify/config.yaml').write_text('ghostty:\n  theme: Dracula\n')
         cls.sandbox.tmux('new-session', '-d', '-s', 'phone')
         cls.start_probe('base-colours')
         cls.sandbox.launch()

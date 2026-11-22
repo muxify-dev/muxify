@@ -4,6 +4,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.panels
 """
 
+import os
 import re
 import time
 import unittest
@@ -81,6 +82,148 @@ class Panels(unittest.TestCase):
         self.s.run_command('Zoom Pane')
         wait(lambda: self.s.tmux('display-message', '-p', '-t', target, '#{window_zoomed_flag}') == '0',
              'the Zoom Pane Command did not show all the Panes again')
+
+    def test_the_split_pane_commands_split_the_current_pane_with_no_tmux_binding(self):
+        # The sandbox's tmux server runs with no config, so no key of tmux's splits; Muxify runs split-window itself.
+        target = 'panels:' + self.id().rsplit('.', 1)[-1][:24]
+        panes = lambda: self.s.tmux('list-panes', '-t', target, '-F', '#{pane_left} #{pane_top}').splitlines()
+        self.s.run_command('Split Pane Right')
+        wait(lambda: len(panes()) == 2, 'the Split Pane Right Command did not split the current Pane')
+        self.assertEqual(len({pane.split()[0] for pane in panes()}), 2, 'the new Pane is not beside the current one: %s' % panes())
+        self.s.run_command('Split Pane Down')
+        wait(lambda: len(panes()) == 3, 'the Split Pane Down Command did not split the current Pane')
+        self.assertEqual(len({pane.split()[1] for pane in panes()}), 2, 'no new Pane is below the current one: %s' % panes())
+
+    def test_the_split_pane_left_and_up_commands_put_the_new_pane_on_their_side_in_its_folder(self):
+        # The sandbox's tmux server runs with no config, so no key of tmux's splits; Muxify runs split-window itself.
+        geometry = lambda pane: [int(n) for n in self.s.tmux('display-message', '-p', '-t', pane, '#{pane_left} #{pane_top}').split()]
+        folder = lambda pane: self.s.tmux('display-message', '-p', '-t', pane, '#{pane_current_path}')
+        for command, side in [('Split Pane Left', 'left'), ('Split Pane Up', 'up')]:
+            current = self.active_pane()
+            path = os.path.realpath(self.s.root/('split-' + side))
+            os.makedirs(path, exist_ok=True)
+            self.s.tmux('respawn-pane', '-k', '-c', path, '-t', current, SHELL)
+            wait(lambda: folder(current) == path, 'the current Pane is not in %s: %s' % (path, folder(current)))
+            count = len(self.s.tmux('list-panes', '-t', self.window, '-F', '#{pane_id}').splitlines())
+            self.s.run_command(command)
+            wait(lambda: self.active_pane() != current, 'the %s Command did not split the current Pane' % command)
+            new = self.active_pane()
+            self.assertEqual(len(self.s.tmux('list-panes', '-t', self.window, '-F', '#{pane_id}').splitlines()), count + 1)
+            (new_left, new_top), (left, top) = geometry(new), geometry(current)
+            if side == 'left':
+                self.assertTrue(new_left < left and new_top == top, 'the new Pane %s is not left of %s' % ((new_left, new_top), (left, top)))
+            else:
+                self.assertTrue(new_top < top and new_left == left, 'the new Pane %s is not above %s' % ((new_left, new_top), (left, top)))
+            wait(lambda: folder(new) == path, 'the new Pane started in %s, not in %s' % (folder(new), path))
+
+    def test_the_split_window_commands_add_a_pane_along_the_windows_whole_edge(self):
+        # The sandbox's tmux server runs with no config; Muxify runs split-window -f itself. A normal split of the
+        # current Pane would span only that Pane's width or height, not the Window's.
+        fields = lambda target, format: [int(n) for n in self.s.tmux('display-message', '-p', '-t', target, format).split()]
+        folder = lambda pane: self.s.tmux('display-message', '-p', '-t', pane, '#{pane_current_path}')
+        for command, existing in [('Split Window Down', '-h'), ('Split Window Right', '-v')]:
+            if command == 'Split Window Right':
+                self.window = self.new_window('split-window-right')
+            window = self.window
+            current = self.active_pane()
+            path = os.path.realpath(self.s.root/command.lower().replace(' ', '-'))
+            os.makedirs(path, exist_ok=True)
+            self.s.tmux('respawn-pane', '-k', '-c', path, '-t', current, SHELL)
+            self.s.tmux('split-window', '-d', existing, '-t', current, SHELL)
+            wait(lambda: folder(current) == path, 'the current Pane is not in %s: %s' % (path, folder(current)))
+            self.s.run_command(command)
+            wait(lambda: self.active_pane() != current, 'the %s Command did not split the Window' % command)
+            new = self.active_pane()
+            self.assertEqual(len(self.s.tmux('list-panes', '-t', window, '-F', '#{pane_id}').splitlines()), 3)
+            width, height = fields(window, '#{window_width} #{window_height}')
+            left, top, pane_width, pane_height = fields(new, '#{pane_left} #{pane_top} #{pane_width} #{pane_height}')
+            if command == 'Split Window Down':
+                self.assertTrue(left == 0 and pane_width == width and top + pane_height == height,
+                                'the new Pane %s does not span the bottom of the %dx%d Window' % ((left, top, pane_width, pane_height), width, height))
+            else:
+                self.assertTrue(top == 0 and pane_height == height and left + pane_width == width,
+                                'the new Pane %s does not span the right of the %dx%d Window' % ((left, top, pane_width, pane_height), width, height))
+            wait(lambda: folder(new) == path, 'the new Pane started in %s, not in %s' % (folder(new), path))
+
+    def test_the_equalize_panes_command_spreads_the_windows_panes_out_evenly(self):
+        # The sandbox's tmux server runs with no config; Muxify runs select-layout -E itself.
+        current = self.active_pane()
+        self.s.tmux('split-window', '-d', '-h', '-t', current, SHELL)
+        self.s.tmux('resize-pane', '-t', current, '-x', '30')
+        widths = lambda: [int(n) for n in self.s.tmux('list-panes', '-t', self.window, '-F', '#{pane_width}').split()]
+        wait(lambda: len(widths()) == 2 and abs(widths()[0] - widths()[1]) > 20, 'the Panes are not of unequal width: %s' % widths())
+        self.s.run_command('Equalize Panes')
+        wait(lambda: abs(widths()[0] - widths()[1]) <= 1, 'Equalize Panes did not spread the Panes out evenly: %s' % widths())
+
+    def test_keybind_splits_the_current_pane_only_while_the_terminal_has_focus(self):
+        # split_pane_right acts only while the Terminal has Focus (ADR 0042); the driver performs it with no key.
+        target = 'panels:' + self.id().rsplit('.', 1)[-1][:24]
+        panes = lambda: self.s.tmux('list-panes', '-t', target, '-F', '#{pane_left} #{pane_top} #{pane_width} #{pane_height}').splitlines()
+        self.assertFalse(self.s.keybind('no_such_action'), 'keybind acted on an unknown action name')
+        self.s.act('press', 'Focus Browser')
+        self.wait_focus('browser', 'Focus Browser did not give the Browser Focus')
+        before = panes()
+        self.assertFalse(self.s.keybind('split_pane_right'), 'split_pane_right acted while the Browser has Focus')
+        time.sleep(SETTLE)
+        self.assertEqual(panes(), before, 'split_pane_right changed the Panes while the Browser has Focus')
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+        self.assertTrue(self.s.keybind('split_pane_right'), 'split_pane_right did not act while the Terminal has Focus')
+        wait(lambda: len(panes()) == 2, 'split_pane_right did not split the current Pane')
+        self.assertEqual(len({pane.split()[0] for pane in panes()}), 2, 'the new Pane is not beside the current one: %s' % panes())
+
+    def test_the_toggle_last_window_keybind_goes_back_to_the_last_window_and_forth_again(self):
+        # The sandbox's tmux server runs with no config, so no key of tmux's runs last-window; Muxify reads tmux's
+        # window_last_flag and selects that Window as any other Window change.
+        a = self.window
+        b = self.new_window('toggle-last-b')
+        last = lambda: self.s.tmux('list-windows', '-t', self.session, '-F', '#{window_id} #{window_last_flag}').split('\n')
+        wait(lambda: a + ' 1' in last(), 'tmux does not mark %s as the Last Window: %s' % (a, last()))
+        for expected, left in ((a, b), (b, a)):
+            time.sleep(SETTLE)  # the app reads the flag with the Windows
+            self.assertTrue(self.s.keybind('toggle_last_window'), 'toggle_last_window did not act')
+            self.s.wait_shown(expected)
+            wait(lambda: left + ' 1' in last(), 'tmux does not mark %s, the Window just left, as the Last Window: %s' % (left, last()))
+
+    def surround_the_current_pane(self):
+        """Splits the Window's Pane so that a Pane is left, right, above and below it, and keeps it active. Returns its
+        id, the id of the Pane on each side, and the Window's Pane ids in tmux's order."""
+        current = self.active_pane()
+        sides = {side: self.s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', *flags, '-t', current, SHELL)
+                 for side, flags in [('right', ['-h']), ('left', ['-h', '-b']), ('down', ['-v']), ('up', ['-v', '-b'])]}
+        order = self.s.tmux('list-panes', '-t', self.window, '-F', '#{pane_id}').splitlines()
+        self.assertEqual(len(order), 5, 'the Window does not have five Panes: %s' % order)
+        return current, sides, order
+
+    def active_pane(self):
+        return self.s.tmux('display-message', '-p', '-t', self.window, '#{pane_id}')
+
+    def test_the_select_pane_keybinds_select_the_pane_in_each_direction_with_no_tmux_binding(self):
+        # The sandbox's tmux server runs with no config, so no key of tmux's selects a Pane; Muxify runs select-pane.
+        current, sides, order = self.surround_the_current_pane()
+        index = order.index(current)
+        expected = {'select_pane_' + side: pane for side, pane in sides.items()}
+        expected['select_pane_previous'] = order[(index - 1) % len(order)]
+        expected['select_pane_next'] = order[(index + 1) % len(order)]
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+        for action, pane in expected.items():
+            self.s.tmux('select-pane', '-t', current)
+            self.assertEqual(self.active_pane(), current)
+            self.assertTrue(self.s.keybind(action), '%s did not act while the Terminal has Focus' % action)
+            wait(lambda: self.active_pane() == pane,
+                 '%s made %s active, not %s' % (action, self.active_pane(), pane))
+
+    def test_a_select_pane_keybind_leaves_the_active_pane_while_the_browser_has_focus(self):
+        current, _, _ = self.surround_the_current_pane()
+        self.s.act('press', 'Focus Browser')
+        self.wait_focus('browser', 'Focus Browser did not give the Browser Focus')
+        for action in ('select_pane_left', 'select_pane_next'):
+            self.assertFalse(self.s.keybind(action), '%s acted while the Browser has Focus' % action)
+        time.sleep(SETTLE)
+        self.assertEqual(self.active_pane(), current, 'a select_pane action changed the active Pane while the Browser has Focus')
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
 
     def wait_toggles(self, expected, message):
         values = lambda rs: {key: self.s.row(key, rs).get('accessibilityValue') for key in expected}

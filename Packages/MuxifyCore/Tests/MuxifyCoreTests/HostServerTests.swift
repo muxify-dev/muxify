@@ -158,7 +158,8 @@ final class HostServerTests: XCTestCase {
     func testTheServerDeclaresItsCapabilitiesAndAClientThatDeclaredNoneGetsNoneOfThem() async throws {
         let client = try await connect()
         let session = try await client.connect()
-        XCTAssertEqual(session.peerCapabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs"])
+        XCTAssertEqual(session.peerCapabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs",
+                                                  "status-line"])
         let recorder = subscribe(client)
         try await wait("no first item") { !recorder.items.isEmpty }
         let before = try windows(of: "work")
@@ -673,6 +674,34 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(shallow, ["alpha", "beta"].map { projects.appendingPathComponent($0).path }, "a hidden folder is skipped")
         let deep = try await folders(depth: 2)
         XCTAssertEqual(deep, ["alpha", "beta", "beta/inner"].map { projects.appendingPathComponent($0).path })
+    }
+
+    // MARK: - tmux's status line (ADR 0099)
+
+    func testTheStatusLineRequestNeedsItsCapabilityAndHidesTheStatusLineWhereTheMacsTerminalIs() async throws {
+        let refused = try await connect()
+        do {
+            _ = try await refused.call(HostRequest.statusLine(StatusLineRequest(hidden: true)), as: ProtocolEmpty.self)
+            XCTFail("status_line ran for a client that did not declare status-line")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .unsupported)
+            XCTAssertTrue(error.message.contains("status-line"), error.message)
+        }
+
+        let nonce = "n" + UUID().uuidString.prefix(8).lowercased()
+        let client = try await connect(nonce: nonce, capabilities: HostProtocol.macCapabilities)
+        _ = subscribe(client)
+        let terminal = try attachClient(to: "work")
+        let value = [String(terminal.pid), terminal.tty, "/home/u", "box", "remote"].joined(separator: Tmux.separator)
+        try tmux.run(["set-option", "-sq", ClientMarker.option(nonce: nonce), value])
+        try await client.call(HostRequest.statusLine(StatusLineRequest(hidden: true)), as: ProtocolEmpty.self)
+        try await wait("the Terminal's Session on the Host kept its status line") {
+            try self.tmuxOutput(["show-options", "-qv", "-t", "=work:", "status"]) == "off"
+        }
+        try await client.call(HostRequest.statusLine(StatusLineRequest(hidden: false)), as: ProtocolEmpty.self)
+        try await wait("the Terminal's Session on the Host did not get its status line back") {
+            try self.tmuxOutput(["show-options", "-qv", "-t", "=work:", "status"]) == ""
+        }
     }
 
     func testRankedSessionPathsATopicsRowsAndAVisitNeedTheCapabilityAndRootsAnswerWithoutIt() async throws {

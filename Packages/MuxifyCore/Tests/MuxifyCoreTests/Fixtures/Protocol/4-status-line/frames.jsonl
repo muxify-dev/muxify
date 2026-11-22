@@ -1,0 +1,8 @@
+{"hello":{"build":"muxify 1a2b3c4 1763100000","capabilities":["request","snapshot","topic-detail","ranked-session-paths","browser-tabs","status-line"],"min_protocol":2,"protocol":2},"id":0,"kind":"hello"}
+{"hello":{"build":"muxify 1a2b3c4 1763100000","capabilities":["status-line"],"nonce":"0a1b2c3d","protocol":2},"id":0,"kind":"hello"}
+{"id":1,"kind":"request","request":{"status_line":{"hidden":true}}}
+{"end":{"ok":{}},"id":1,"kind":"end"}
+{"id":2,"kind":"request","request":{"status_line":{"hidden":false}}}
+{"end":{"ok":{}},"id":2,"kind":"end"}
+{"id":3,"kind":"request","request":{"view":{"split_pane":{"full":true,"side":"down","target":"%3"}}}}
+{"end":{"ok":{"output":""}},"id":3,"kind":"end"}

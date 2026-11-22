@@ -77,6 +77,33 @@ The banner lists problems by file, the Config first and then each Override in
 list order, and then by line. A syntax error in a Config Override keeps the last
 good Config, like one in the Config.
 
+## Terminal theme
+
+The Terminal follows the App Window's appearance: Ghostty's
+`iTerm2 Solarized Light` theme in light appearance and `Dracula` in dark. This
+default applies only when no Ghostty config file sets `theme`, so the theme of
+your own Ghostty config wins over it.
+
+To choose the theme in the Config, set `ghostty.theme`. It wins over any theme
+a Ghostty config file sets. Write one theme name, or a mapping with a theme
+name for `light` and one for `dark`:
+
+```yaml
+ghostty:
+  theme:
+    light: Nord Light
+    dark: Nord
+```
+
+A name is one of Ghostty's themes (`ghostty +list-themes`), a theme file in
+`~/.config/ghostty/themes`, or an absolute path, as for Ghostty's own `theme`.
+Muxify's own colours, such as the Command Palette's, follow the theme. A
+mapping that leaves out `light` or `dark` keeps that side's default. A mapping
+with another key, or an empty name, is a Config problem, and the theme stays as
+if `ghostty.theme` were left out. A theme name
+that Ghostty cannot find leaves Ghostty's built-in colours, and Muxify writes
+Ghostty's message to Diagnostics. Changes apply live.
+
 ## Terminal environment
 
 Muxify sets `MUXIFY_TERMINAL=1` for its terminal processes, locally and on the
@@ -91,8 +118,9 @@ set -ga update-environment ' MUXIFY_TERMINAL'
 ```
 
 This records the attaching terminal, not which terminal is currently showing a
-Pane. It is not a per-client status-bar setting; tmux's `status` option belongs
-to the Session.
+Pane. tmux's `status` option belongs to the Session; Muxify hides it itself
+while the header shows the Session (see [Header](#header)), so a tmux config
+needs no hook for that.
 
 ## Remote Environments
 
@@ -461,6 +489,20 @@ Set it to `false` to hide only those two controls; the Git/branch button,
 Environment selector and panel controls stay visible. Changes apply live.
 Removing the setting restores the default. Invalid values use the default and
 appear in the Config problems banner.
+
+While `status_line.enabled` is on, tmux shows no status line of its own in the
+Session that the Terminal shows, on this Mac and on a Remote Environment's host,
+so the Session and its Windows do not show twice. You need no tmux config for
+it. tmux's `status` belongs to a Session, not to a terminal, so the last
+terminal to arrive in a Session wins: when another terminal, such as iTerm or
+Ghostty.app, attaches to or switches into a Session that Muxify hid the status
+line in, that Session gets it back, also after Muxify quits. Muxify only ever
+undoes its own change, never a `status` that your tmux config sets. Turning
+`status_line.enabled` off gives every such Session its status line back. On tmux
+before 3.8, tmux cannot tell a Muxify Terminal from another terminal, so the
+status line can flash for a moment when the Terminal moves. A Remote Environment
+in Sessions-only mode keeps tmux's status line. See
+[ADR 0099](adr/0099-the-header-hides-tmuxs-status-line-where-the-terminal-is.md).
 
 `status_line.session.wrap` keeps the Session name over the sidebar: a name
 wider than that room is cut with "…" in the middle, as the branch is, and its

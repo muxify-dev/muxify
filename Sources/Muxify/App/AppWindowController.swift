@@ -42,6 +42,11 @@ final class AppWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    #if DEBUG
+    /// The App Window's store, for the test driver.
+    var workspaceStore: WorkspaceStore { store }
+    #endif
+
     /// The request that brings this App Window back, on the Environment it shows now.
     func window(_ window: NSWindow, willEncodeRestorableState state: NSCoder) {
         AppWindowRestoration.encode(AppWindowRequest(id: request.id, environmentName: store.activeEnvironment?.name), in: state)

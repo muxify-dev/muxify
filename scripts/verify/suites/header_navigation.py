@@ -47,6 +47,20 @@ class HeaderNavigation(unittest.TestCase):
                               'header did not show Git HEAD ' + expected)
         self.assertEqual(self.s.row('toggle-git-view', rs)['accessibilityLabel'], expected)
 
+    def status(self):
+        """The `status` that the check's Session sets itself; empty when it takes tmux's global one."""
+        return self.s.tmux('show-options', '-qv', '-t', '=' + self.name + ':', 'status')
+
+    def test_the_terminals_session_has_no_tmux_status_line_while_the_header_shows_it(self):
+        wait(lambda: self.status() == 'off', lambda: 'tmux still shows its status line under the header: %r' % self.status())
+
+    def test_turning_the_header_status_line_off_gives_tmux_its_status_line_back(self):
+        wait(lambda: self.status() == 'off', 'tmux still shows its status line under the header')
+        config = self.s.root/'config/muxify/config.yaml'
+        self.addCleanup(config.unlink, missing_ok=True)
+        config.write_text('ui:\n  status_line:\n    enabled: false\n')
+        wait(lambda: self.status() == '', lambda: 'tmux did not get its status line back: %r' % self.status())
+
     def test_session_name_follows_tmux_rename(self):
         self.s.tmux('rename-session', '-t', self.name, 'header-renamed')
         rs = self.s.wait_rows(lambda rs: self.s.row('header-session-name', rs).get('accessibilityValue') == 'header-renamed',

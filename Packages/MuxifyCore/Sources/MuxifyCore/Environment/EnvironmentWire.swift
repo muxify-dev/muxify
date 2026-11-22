@@ -230,6 +230,7 @@ extension TmuxWindow: Codable {
         case sessionCreated = "session_created"
         case layout
         case isZoomed = "zoomed"
+        case isLastWindow = "last_window"
     }
 
     public init(from decoder: Decoder) throws {
@@ -257,7 +258,8 @@ extension TmuxWindow: Codable {
                   startCommand: try values.decodeIfPresent(String.self, forKey: .startCommand) ?? "",
                   sessionCreated: try values.decodeIfPresent(Int.self, forKey: .sessionCreated) ?? 0,
                   layout: try values.decodeIfPresent(String.self, forKey: .layout) ?? "",
-                  isZoomed: try values.decodeIfPresent(Bool.self, forKey: .isZoomed) ?? false)
+                  isZoomed: try values.decodeIfPresent(Bool.self, forKey: .isZoomed) ?? false,
+                  isLastWindow: try values.decodeIfPresent(Bool.self, forKey: .isLastWindow) ?? false)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -286,5 +288,7 @@ extension TmuxWindow: Codable {
         try values.encode(sessionCreated, forKey: .sessionCreated)
         try values.encode(layout, forKey: .layout)
         try values.encode(isZoomed, forKey: .isZoomed)
+        // A new optional key (ADR 0086 change rule 1): absent is false, so an older Host Server marks no Last Window.
+        if isLastWindow { try values.encode(isLastWindow, forKey: .isLastWindow) }
     }
 }

@@ -10,6 +10,8 @@ final class EnvironmentPublisherTests: XCTestCase {
     private var publishers: [EnvironmentPublisher] = []
     private var saved: [String: String?] = [:]
     private var clientProcess: Process?
+    /// The Clients attached after the Terminal's: other terminals.
+    private var otherProcesses: [Process] = []
     private var socket: String { directory.appendingPathComponent("s").path }
 
     override func setUpWithError() throws {
@@ -28,12 +30,13 @@ final class EnvironmentPublisherTests: XCTestCase {
     override func tearDownWithError() throws {
         publishers.forEach { $0.stop() }
         publishers = []
-        if let clientProcess, clientProcess.isRunning {
-            clientProcess.terminate()
+        for process in [clientProcess].compactMap({ $0 }) + otherProcesses where process.isRunning {
+            process.terminate()
             // `waitUntilExit` can miss the exit and wait for ever, as in HostServerTests: wait for the pid, a while at most.
             let deadline = Date().addingTimeInterval(5)
-            while kill(clientProcess.processIdentifier, 0) == 0, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+            while kill(process.processIdentifier, 0) == 0, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
         }
+        otherProcesses = []
         if let actual = try? server?.run(["display-message", "-p", "#{socket_path}"]),
            actual.trimmingCharacters(in: .whitespacesAndNewlines) == socket {
             _ = try? server.run(["kill-server"])
@@ -494,17 +497,81 @@ final class EnvironmentPublisherTests: XCTestCase {
         try server.run(["display-message", "-p", "-c", tty, "#{client_session}"]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // MARK: - tmux's status line (ADR 0099)
+
+    func testWhileTheHeaderShowsTheSessionEachSessionTheTerminalShowsHasNoStatusLine() async throws {
+        try server.run(["new-session", "-d", "-s", "work"])
+        try server.run(["new-session", "-d", "-s", "other"])
+        try server.run(["new-session", "-d", "-s", "third"])
+        let terminal = try startTerminal(in: "work", colours: nil, hidingStatusLine: true)
+        try await wait("the Terminal's Session kept its status line") { try self.sessionStatus("work") == "off" }
+        XCTAssertNil(try sessionStatus("other"), "a Session that the Terminal never showed lost its status line")
+        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+
+        XCTAssertTrue(try publishers[0].switchClient(terminal.tty, to: "=other"), "no Listener ran the switch")
+        try await wait("a switch that Muxify started kept the status line") { try self.sessionStatus("other") == "off" }
+
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=third"])
+        try await wait("a switch made inside tmux kept the status line") { try self.sessionStatus("third") == "off" }
+        XCTAssertEqual(try sessionStatus("work"), "off", "the Terminal's own arrival gave the status line back")
+    }
+
+    func testAnotherTerminalThatArrivesInAHiddenSessionGetsTheStatusLineBack() async throws {
+        try server.run(["new-session", "-d", "-s", "work"])
+        try server.run(["new-session", "-d", "-s", "other"])
+        try server.run(["set-option", "-t", "=other:", "status", "2"])
+        _ = try startTerminal(in: "work", colours: nil, hidingStatusLine: true)
+        try await wait("the Terminal's Session kept its status line") { try self.sessionStatus("work") == "off" }
+        try await waitForTheHooks()
+
+        let screen = try attachClient(to: "other")
+        try server.run(["switch-client", "-c", screen.tty, "-t", "=work"])
+        try await wait("another terminal's move did not give the status line back") { try self.sessionStatus("work") == nil }
+        XCTAssertEqual(try sessionStatus("other"), "2", "the hook changed a status line that Muxify did not hide")
+        XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "=work:", TmuxStatusLine.marker]), "", "the mark stayed")
+    }
+
+    func testTurningItOffGivesEveryHiddenSessionItsStatusLineBackAndRemovesTheHooks() async throws {
+        try server.run(["new-session", "-d", "-s", "work"])
+        try server.run(["new-session", "-d", "-s", "other"])
+        try server.run(["set-option", "-t", "=other:", "status", "2"])
+        let terminal = try startTerminal(in: "work", colours: nil, hidingStatusLine: true)
+        try await wait("the Terminal's Session kept its status line") { try self.sessionStatus("work") == "off" }
+        try await waitForTheHooks()
+
+        publishers[0].hideStatusLine(false)
+        try await wait("the Terminal's Session did not get its status line back") { try self.sessionStatus("work") == nil }
+        try await wait("Muxify's hooks stayed") { try !self.server.run(["show-hooks", "-g"]).contains("[77]") }
+        XCTAssertEqual(try sessionStatus("work"), nil, "a hide on its way to tmux hid the status line again")
+        XCTAssertEqual(try sessionStatus("other"), "2", "a status line that Muxify did not hide changed")
+
+        try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
+        try await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertEqual(try sessionStatus("other"), "2", "a move hid the status line while the header does not show the Session")
+    }
+
+    /// Muxify's hooks come after `status off` on the Listener's connection, so a Session can lose its status line
+    /// before they are set.
+    private func waitForTheHooks() async throws {
+        try await wait("no hook gives the status line back") {
+            let hooks = try self.server.run(["show-hooks", "-g"])
+            return hooks.contains("client-attached[77]") && hooks.contains("client-session-changed[77]")
+        }
+    }
+
     private static let light = ColourProbes.light
     private static let dark = ColourProbes.dark
 
     /// A publisher with a Client marker, a Terminal's Client attached to `session` that the marker names, and the
     /// colours of the key App Window, or none.
-    private func startTerminal(in session: String, colours: TerminalColours?,
-                               sent: SentLines? = nil, news: NewsLog? = nil) throws -> ViewCommandExecutor.Client {
+    private func startTerminal(in session: String, colours: TerminalColours?, sent: SentLines? = nil, news: NewsLog? = nil,
+                               hidingStatusLine: Bool = false) throws -> ViewCommandExecutor.Client {
         let marker = ClientMarker.option(nonce: "terminal")
         _ = start(clientMarker: marker, sent: sent, news: news)
         publishers[0].reportColours(colours)
-        let terminal = try attachClient(to: session)
+        if hidingStatusLine { publishers[0].hideStatusLine(true) }
+        // Muxify sets it for its Terminal's processes, on this Mac and over SSH.
+        let terminal = try attachClient(to: session, environment: ["MUXIFY_TERMINAL": "1"])
         let value = [String(terminal.pid), terminal.tty, "/Users/u", "mac", "local"].joined(separator: Tmux.separator)
         try server.run(["set-option", "-sq", marker, value])
         return terminal
@@ -610,8 +677,10 @@ final class EnvironmentPublisherTests: XCTestCase {
         }
     }
 
-    /// A Client attached to `session` in a pseudo-terminal, as a Terminal is: its tty and pid.
-    private func attachClient(to session: String) throws -> ViewCommandExecutor.Client {
+    /// A Client attached to `session` in a pseudo-terminal, as a Terminal is: its tty and pid. The first is the
+    /// Terminal's; a later one is another terminal. `environment` adds to the Client's environment.
+    private func attachClient(to session: String, environment extra: [String: String] = [:]) throws -> ViewCommandExecutor.Client {
+        let attachedBefore = Set(try nonControlClients().map(\.tty))
         let binary = try XCTUnwrap(server.binary)
         let attach = [binary, "-u", "-S", socket, "-f", "/dev/null", "attach-session", "-t", session]
         let process = Process()
@@ -625,19 +694,33 @@ final class EnvironmentPublisherTests: XCTestCase {
         environment["TMUX"] = nil
         environment["TMUX_PANE"] = nil
         environment["TERM"] = "xterm-256color"
+        environment.merge(extra) { $1 }
         process.environment = environment
         process.standardInput = Pipe()
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
-        clientProcess = process
+        if clientProcess == nil { clientProcess = process } else { otherProcesses.append(process) }
         let deadline = Date().addingTimeInterval(8)
         while Date() < deadline {
-            let fields = (try? server.run(["list-clients", "-f", "#{==:#{client_control_mode},0}", "-F", "#{client_tty} #{client_pid}"]))?
-                .trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: " ") ?? []
-            if fields.count == 2, !fields[0].isEmpty, let pid = Int(fields[1]) { return ViewCommandExecutor.Client(tty: fields[0], pid: pid) }
+            if let client = try nonControlClients().first(where: { !attachedBefore.contains($0.tty) }) { return client }
             Thread.sleep(forTimeInterval: 0.05)
         }
         throw TmuxError.timedOut
+    }
+
+    private func nonControlClients() throws -> [ViewCommandExecutor.Client] {
+        ((try? server.run(["list-clients", "-f", "#{==:#{client_control_mode},0}", "-F", "#{client_tty} #{client_pid}"])) ?? "")
+            .split(separator: "\n").compactMap { line in
+                let fields = line.split(separator: " ")
+                guard fields.count == 2, let pid = Int(fields[1]) else { return nil }
+                return ViewCommandExecutor.Client(tty: String(fields[0]), pid: pid)
+            }
+    }
+
+    /// The `status` that `session` sets itself, such as `off`; nil when it takes the global one.
+    private func sessionStatus(_ session: String) throws -> String? {
+        let value = try server.run(["show-options", "-qv", "-t", "=" + session + ":", "status"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 }
