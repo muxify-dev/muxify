@@ -121,9 +121,9 @@ step to the Commands search.
 
 Commands also lists Move Topic Up and Move Topic Down, and Pin or Unpin. They
 run at once on the Active Topic, as their keybindings do. Pin and Unpin also act
-on the card of the current Board Session. Move Topic Up and Move Topic Down also move the card of the current Board
-Session, and appear only when the card can move that way: among the cards with its Pin, or
-into the next In Play section.
+on the card of the current Board Session. Move Topic Up and Move Topic Down also
+move the card of the current Board Session, and appear only when the card can
+move that way: among the cards with its Pin, or into the next In Play section.
 
 Commands also lists Set Topic Note, and Clear Topic Note while the Active Topic
 has a Topic Note. Set Topic Note opens one field that starts with the current
