@@ -946,6 +946,39 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "notes", SessionLock.legacyOption]).trimmingCharacters(in: .whitespacesAndNewlines), "")
     }
 
+    func testTheImportBeforeARequestIsNotTheRequestsWrite() throws {
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        try server.run(["set-option", "-t", "notes", SessionLock.legacyOption, "5"])
+        let id = try XCTUnwrap(RequestID("5c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f"))
+        let pending = PendingRequest(id: id, verb: "topic pin", words: [], callerPane: nil, workingDirectory: "/")
+        let requested = EnvironmentService(paths: paths, server: server, request: pending)
+        _ = try failure(requested.handle(EnvironmentRequest(.pin, target: .topic(.id("gone")))))
+        XCTAssertEqual(try locks().map(\.order), [5], "the request imports the Lock")
+        XCTAssertEqual(try RequestLedger(paths: paths).lookup(pending), .new, "a Request that changed nothing is not started")
+    }
+
+    func testACommandOnAGuestSessionByItsIdTakesItsLiveSessionAndNamesWhyThereIsNone() throws {
+        let topic = try regularTopic("First", using: service())
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        let lock = try XCTUnwrap(locks().first)
+        _ = try change(service().handle(EnvironmentRequest(.renameSession(name: "jots"), target: .guestSession(lock.id))))
+        XCTAssertEqual(try server.snapshot().windows.first { $0.savedSessionID == lock.id }?.sessionName, "jots")
+
+        try server.run(["kill-session", "-t", "=jots"])
+        // A Session in an open Topic is never a Guest Session, whatever its `@muxify_session_id` says.
+        try server.run(["new-session", "-d", "-s", "other", "-c", sessionPath.folder.path])
+        try server.run(["set-option", "-t", "=other:", "@muxify_topic", topic])
+        try server.run(["set-option", "-t", "=other:", "@muxify_session_id", lock.id])
+        let dormant = try failure(service().handle(EnvironmentRequest(.renameSession(name: "x"), target: .guestSession(lock.id))))
+        XCTAssertEqual(dormant.message, TopicRequestError.guestSessionDormant(lock.id).description)
+        XCTAssertNotNil(try server.snapshot().windows.first { $0.sessionName == "other" }, "the Topic's Session keeps its name")
+
+        _ = try change(service().handle(EnvironmentRequest(.benchTopic, target: .guestSession(lock.id))))
+        let gone = try failure(service().handle(EnvironmentRequest(.renameSession(name: "x"), target: .guestSession(lock.id))))
+        XCTAssertEqual(gone.message, "No Guest Session has the id \(lock.id).")
+    }
+
     func testADormantGuestSessionReopensWithItsWindowsAtItsPlaceAndBenchEndsIt() throws {
         try regularTopic("First", using: service())
         for name in ["notes", "chores"] { try server.run(["new-session", "-d", "-s", name, "-c", sessionPath.folder.path]) }

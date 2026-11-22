@@ -25,7 +25,7 @@ extension EnvironmentService {
     private func pin(_ request: EnvironmentRequest, _ pinned: Bool, client: String?) -> EnvironmentResponse {
         do {
             let records = try store.read().records
-            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: try server.snapshot(), client: client)
+            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: try serverSnapshot(), client: client)
             if topic.isPinned == pinned { return .changed(TopicChange(topicID: topic.id)) }
             try store.write { try $0.pin(topic.id, pinned) }
             return .changed(TopicChange(topicID: topic.id))
@@ -38,8 +38,8 @@ extension EnvironmentService {
     func moveCard(_ request: EnvironmentRequest, _ move: CardMove, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
+            let snapshot = try serverSnapshot()
             let contents = try store.read()
-            let snapshot = try server.snapshot()
             let stepping = move == .up || move == .down
             let card = try self.card(request.target, caller: request.caller, contents: contents, snapshot: snapshot,
                                      client: client, allowUnlockedSession: stepping)
@@ -85,8 +85,8 @@ extension EnvironmentService {
     /// Choose In Play writes the order of the Topics list, as a card move does.
     private func chooseInPlay(_ cards: [TopicListRef], client: String?) -> EnvironmentResponse {
         do {
+            let snapshot = try serverSnapshot()
             let contents = try store.read()
-            let snapshot = try server.snapshot()
             let chosen = try cards.map { try listID($0, contents: contents, snapshot: snapshot) }
             try store.write { try $0.chooseInPlay(chosen, inPlay: topics.inPlay) }
             return .changed(TopicChange(topicID: nil))
@@ -98,8 +98,8 @@ extension EnvironmentService {
     /// Replace from Bench writes the order of the Topics list, as a card move does.
     private func replaceFromBench(_ request: EnvironmentRequest, with ref: TopicListRef, client: String?) -> EnvironmentResponse {
         do {
+            let snapshot = try serverSnapshot()
             let contents = try store.read()
-            let snapshot = try server.snapshot()
             let card = try self.card(request.target, caller: request.caller, contents: contents, snapshot: snapshot, client: client)
             let benched = try listID(ref, contents: contents, snapshot: snapshot)
             try store.write { try $0.replaceFromBench(card.id, with: benched, inPlay: topics.inPlay) }
@@ -114,8 +114,8 @@ extension EnvironmentService {
     private func guest(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
+            let snapshot = try serverSnapshot()
             let contents = try store.read()
-            let snapshot = try server.snapshot()
             let card = try self.card(request.target, caller: request.caller, contents: contents, snapshot: snapshot, client: client,
                                      allowUnlockedSession: true)
             if let window = card.unlocked {
@@ -167,8 +167,8 @@ extension EnvironmentService {
     private func cardChange(_ request: EnvironmentRequest, client: String?, allowUnlockedSession: Bool = false,
                             _ change: (RequestCard) -> ((inout TopicTransaction) throws -> Void)?) -> EnvironmentResponse {
         do {
+            let snapshot = try serverSnapshot()
             let contents = try store.read()
-            let snapshot = try server.snapshot()
             let card = try self.card(request.target, caller: request.caller, contents: contents, snapshot: snapshot, client: client,
                                      allowUnlockedSession: allowUnlockedSession)
             guard let write = change(card) else { return .changed(card.change) }
@@ -195,7 +195,7 @@ extension EnvironmentService {
         var phase = TopicFailure.Phase.nothingChanged
         do {
             let records = try store.read().records
-            let snapshot = try server.snapshot()
+            let snapshot = try serverSnapshot()
             let place = try scope.map { try readPlace($0, request, records: records, snapshot: snapshot, client: client) } ?? .environment
             let agents = scope == .topicMark ? [] : Agent.list(panes: snapshot.panes, windows: snapshot.windows, ordered: false)
             var changed = ReadPlan.changes(change, in: place, records: records, agents: agents, windows: snapshot.windows)
@@ -313,7 +313,7 @@ extension EnvironmentService {
     private func changeTags(_ request: EnvironmentRequest, _ change: TopicTagChange, client: String?) -> EnvironmentResponse {
         do {
             let records = try store.read().records
-            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: try server.snapshot(), client: client)
+            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: try serverSnapshot(), client: client)
             try checkDefined(change, on: topic.tags)
             try store.write { try $0.changeTags(of: topic.id, change) }
             return .changed(TopicChange(topicID: topic.id))
@@ -326,7 +326,7 @@ extension EnvironmentService {
     private func setNote(_ request: EnvironmentRequest, _ note: String?, client: String?) -> EnvironmentResponse {
         do {
             let records = try store.read().records
-            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: try server.snapshot(), client: client)
+            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: try serverSnapshot(), client: client)
             try store.write { try $0.setNote(of: topic.id, note) }
             return .changed(TopicChange(topicID: topic.id))
         } catch {

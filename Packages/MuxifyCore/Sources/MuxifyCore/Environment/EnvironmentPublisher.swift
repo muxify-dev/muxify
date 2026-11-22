@@ -425,8 +425,9 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     }
 
     private func importLegacyLocks(_ snapshot: TmuxSnapshot) -> Bool {
+        var snapshot = snapshot
         do {
-            return try SessionLock.importLegacy(from: snapshot, into: topics) { _ = try run($0) }
+            return try SessionLock.importLegacy(from: &snapshot, into: topics) { _ = try run($0) }
         } catch {
             report("importing Locks: \(error)")
             return false

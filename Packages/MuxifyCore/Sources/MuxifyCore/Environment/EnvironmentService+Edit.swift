@@ -25,7 +25,7 @@ extension EnvironmentService {
         if case .guestSession? = request.target { return moveCard(request, move, client: client) }
         do {
             let records = try store.read().records
-            let window = try sessionWindow(request.target, caller: request.caller, snapshot: try server.snapshot(), client: client)
+            let window = try sessionWindow(request.target, caller: request.caller, snapshot: try serverSnapshot(), client: client)
             if records.contains(where: { $0.id == window.topicID && $0.settledAt == nil }) { return edit(request, client: client) }
             return moveCard(request, move, client: client)
         } catch {
@@ -55,9 +55,9 @@ extension EnvironmentService {
     func edit(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
+            let snapshot = try serverSnapshot()
             let contents = try store.read()
             let records = contents.records
-            let snapshot = try server.snapshot()
             let planned = try plan(request, contents: contents, snapshot: snapshot, client: client)
             let edit = planned.edit
             try TopicWorktrees.check(edit.commands)

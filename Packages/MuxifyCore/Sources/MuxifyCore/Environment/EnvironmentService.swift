@@ -47,16 +47,12 @@ public struct EnvironmentService: Sendable {
             switch read {
             case .list: return list()
             case .show: return show(request, client: client)
-            case .environmentShow:
-                importLegacyLocks()
-                return environmentShow()
+            case .environmentShow: return environmentShow()
             case .listWorktrees(let all, let from): return listWorktrees(request, all: all, from: from, client: client)
             }
         case .records:
-            importLegacyLocks()
             return changeRecords(request, client: client)
         case .edit:
-            importLegacyLocks()
             switch request.command {
             case .moveSession(.up): return stepSession(request, .up, client: client)
             case .moveSession(.down): return stepSession(request, .down, client: client)
@@ -70,19 +66,22 @@ public struct EnvironmentService: Sendable {
         }
     }
 
-    /// Imports the Locks that an older Muxify kept in tmux (`SessionLock.importLegacy`) before a request that changes the
-    /// Topics list or shows it, so a Guest Session from before keeps its card. A failed import leaves the request as
-    /// it would be without one.
-    private func importLegacyLocks() {
-        guard let snapshot = try? server.snapshot() else { return }
-        _ = try? SessionLock.importLegacy(from: snapshot, into: store) { try server.run($0) }
+    /// The tmux server as a request reads it. A Lock that an older Muxify kept in tmux moves into the state database
+    /// first (`SessionLock.importLegacy`), so a Guest Session from before keeps its card; a request that also reads
+    /// the records reads them after this, so it finds the new Lock. The import writes through a store without the
+    /// Request, so the Request's ledger row still marks only its own write. A failed import leaves the snapshot as
+    /// tmux gave it.
+    func serverSnapshot() throws -> TmuxSnapshot {
+        var snapshot = try server.snapshot()
+        _ = try? SessionLock.importLegacy(from: &snapshot, into: TopicStore(paths: paths, inPlay: topics.inPlay)) { try server.run($0) }
+        return snapshot
     }
 
     /// The Sessions the Settle sheet offers, as the Topic's live Sessions are now. It reads and writes nothing else.
     public func settleChoices(for target: EnvironmentTarget) -> Result<[TopicSettleSession], TopicFailure> {
         do {
             let records = try store.read().records
-            let snapshot = try server.snapshot()
+            let snapshot = try serverSnapshot()
             let topic = try openTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
             let record = topic.remembering(snapshot, order: topics.sessionOrder) ?? topic
             return .success(TopicSettleSession.choices(topic: record, snapshot: snapshot, sessionPaths: sessionPaths,
@@ -95,7 +94,7 @@ public struct EnvironmentService: Sendable {
     public func sessionPathChoices(for target: EnvironmentTarget) -> Result<TopicSessionPathChoices, TopicFailure> {
         do {
             let records = try store.read().records
-            let snapshot = try server.snapshot()
+            let snapshot = try serverSnapshot()
             let topic = try openTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
             return .success(TopicSessionPathChoices(topic: topic, records: records, windows: snapshot.windows, sessionPaths: sessionPaths))
         } catch { return .failure(failure(error, phase: .nothingChanged)) }
@@ -104,7 +103,7 @@ public struct EnvironmentService: Sendable {
     public func forgetChoices(for target: EnvironmentTarget) -> Result<TopicForgetChoices, TopicFailure> {
         do {
             let records = try store.read().records
-            let snapshot = try server.snapshot()
+            let snapshot = try serverSnapshot()
             let topic = try forgetTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
             return .success(TopicForgetChoices(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, paths: paths))
         } catch { return .failure(failure(error, phase: .nothingChanged)) }
@@ -125,7 +124,7 @@ public struct EnvironmentService: Sendable {
     public func removeAndKillWorktree(of target: EnvironmentTarget) -> Result<TopicForgetChoices.Worktree?, TopicFailure> {
         do {
             let records = try store.read().records
-            let snapshot = try server.snapshot()
+            let snapshot = try serverSnapshot()
             let window = try sessionWindow(target, caller: nil, snapshot: snapshot, client: nil)
             guard let topic = TopicMembershipPlan.openTopic(of: window, records: records) else { throw TopicRequestError.sourceHasNoTopic }
             return .success(madeWorktree(of: window, topic: topic, snapshot: snapshot))
@@ -143,8 +142,12 @@ public struct EnvironmentService: Sendable {
     func sessionWindow(_ target: EnvironmentTarget?, caller: TopicCaller?, snapshot: TmuxSnapshot, client: String?) throws -> TmuxWindow {
         let sessionID: String
         if case .session(let id)? = target { sessionID = id.rawValue }
-        else if case .guestSession(let lock)? = target {
-            guard let live = snapshot.windows.first(where: { $0.savedSessionID == lock }) else { throw TopicRequestError.guestSessionDormant(lock) }
+        else if case .guestSession(let id)? = target {
+            let contents = try store.read()
+            guard let lock = contents.locks.first(where: { $0.id == id }) else { throw TopicRequestError.guestSessionUnavailable(id) }
+            guard let live = lock.windows(in: snapshot.windows, open: contents.records.openTopicIDs).first else {
+                throw TopicRequestError.guestSessionDormant(id)
+            }
             sessionID = live.sessionID
         }
         else if case .sessionName(let name)? = target {
@@ -177,7 +180,7 @@ public struct EnvironmentService: Sendable {
     func show(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         do {
             let records = try store.read().records
-            let snapshot = try server.snapshot()
+            let snapshot = try serverSnapshot()
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             let branches = TopicBranches(records: [topic]) { try? String(contentsOfFile: $0, encoding: .utf8) }
             return .topic(TopicDetail(record: topic, label: TopicLabels(records).label(of: topic), snapshot: snapshot,
@@ -187,11 +190,11 @@ public struct EnvironmentService: Sendable {
         }
     }
 
-    /// One read of the records, then one tmux snapshot, as `show` does.
+    /// One tmux snapshot, then one read of the records, which an import from the snapshot may have changed.
     func environmentShow() -> EnvironmentResponse {
         do {
-            let contents = try store.read()
-            return .snapshot(EnvironmentSnapshot(contents: contents, tmux: try server.snapshot(), topics: topics, notifications: notifications))
+            let tmux = try serverSnapshot()
+            return .snapshot(EnvironmentSnapshot(contents: try store.read(), tmux: tmux, topics: topics, notifications: notifications))
         } catch {
             return .failed(failure(error, phase: .nothingChanged))
         }
