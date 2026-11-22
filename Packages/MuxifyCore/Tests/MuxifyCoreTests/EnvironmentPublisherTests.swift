@@ -56,7 +56,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         try await wait("no first item") { !recorder.items.isEmpty }
         let first = try XCTUnwrap(recorder.items.first)
         XCTAssertEqual(Set(first.map(\.key)), ["session \(try sessionID("work"))", "session \(try sessionID("other"))",
-                                               "topic first", "open_places", "guest_sessions", "server"])
+                                               "topic first", "open_places", "board_sessions", "server"])
         guard case .server(let state)? = first.first(where: { $0.key == "server" }) else { return XCTFail("no server event") }
         XCTAssertTrue(state.isRunning)
         XCTAssertEqual(state.socketPath, socket)

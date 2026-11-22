@@ -6,7 +6,7 @@ import MuxifyCore
 struct EnvironmentFeatures: OptionSet, Sendable {
     let rawValue: Int
 
-    /// Topic records, the Topics list and every Topic Action.
+    /// Topic records, the Board and every Topic Action.
     static let topics = EnvironmentFeatures(rawValue: 1 << 0)
     /// The Git View's reads, changes and network commands.
     static let git = EnvironmentFeatures(rawValue: 1 << 1)
@@ -227,7 +227,7 @@ protocol EnvironmentLink: AnyObject {
     /// The Sessions and Worktrees that Forget offers for the Topic.
     func forgetChoices(for target: EnvironmentTarget, local: EnvironmentService?)
         async -> Result<(sessions: [TopicSettleSession], worktrees: [TopicForgetChoices.Worktree]), TopicFailure>?
-    /// Makes the Guests of an older Muxify's Locked Sessions; nil when it changed nothing or failed nothing.
+    /// Makes the Guests of an older Muxify's Board Sessions; nil when it changed nothing or failed nothing.
     func gatherGuests(local: EnvironmentService?) async -> TopicFailure?
     /// Unread on visit: clears the Unread of these Topics.
     func markTopicsRead(_ ids: Set<String>) async throws

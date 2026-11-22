@@ -1,6 +1,6 @@
 import Foundation
 
-/// The Sessions and the Topics list of the Environment, in the order that Muxify shows them, from one read of the
+/// The Sessions and the Board of the Environment, in the order that Muxify shows them, from one read of the
 /// records and one tmux snapshot: what `muxify environment show` prints. A client draws each array in the order it
 /// comes and sorts nothing, so the card rules stay in MuxifyCore. Every missing value is encoded as null, never left out.
 public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
@@ -41,7 +41,7 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
         /// tmux `session_activity`, in seconds since 1970.
         public var activity: Int
         @EncodesNull public var mark: CardMark?
-        /// The open Topic it is in; nil for a No Topic Session, a Guest Session or not.
+        /// The open Topic it is in; nil for a No Topic Session, a Board Session or not.
         @EncodesNull public var topic: String?
         public var windows: [Window]
 

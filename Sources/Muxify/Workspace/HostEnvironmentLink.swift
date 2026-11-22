@@ -662,7 +662,7 @@ final class HostEnvironmentLink: EnvironmentLink {
         }
     }
 
-    /// An older Muxify's Locked Sessions are a Mac's records only: nothing to gather on a Host.
+    /// An older Muxify's Board Sessions are a Mac's records only: nothing to gather on a Host.
     func gatherGuests(local: EnvironmentService?) async -> TopicFailure? { nil }
 
     func markTopicsRead(_ ids: Set<String>) async throws {

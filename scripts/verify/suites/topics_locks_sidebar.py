@@ -33,7 +33,7 @@ class TopicsLocksSidebar(TopicsSidebar):
 
     def lock(self, lock_id):
         """The Lock's row in the state database, or None."""
-        return next((lock for lock in self.store.locks() if lock['id'] == lock_id), None)
+        return next((lock for lock in self.store.board_sessions() if lock['id'] == lock_id), None)
 
     def above(self, upper, lower, rs):
         return self.s.has(upper, rs) and self.s.has(lower, rs) and frame(self.s.row(upper, rs))[1] > frame(self.s.row(lower, rs))[1]
@@ -44,7 +44,7 @@ class TopicsLocksSidebar(TopicsSidebar):
         sid = self.new_session(name, self.beta)
         self.s.tmux('set-option', '-t', sid, '@muxify_lock', str(order))
         lock_id = self.lock_id(sid)
-        self.addCleanup(self.store.remove_lock, lock_id)
+        self.addCleanup(self.store.remove_board_session, lock_id)
         key = 'locked-' + lock_id
         self.find(key, 'no card for the Guest Session ' + name)
         return sid, key, lock_id
@@ -61,7 +61,7 @@ class TopicsLocksSidebar(TopicsSidebar):
         s.act('action', card, 'Make a Guest')
 
         lock_id = self.lock_id(sid)
-        self.addCleanup(self.store.remove_lock, lock_id)
+        self.addCleanup(self.store.remove_board_session, lock_id)
         key = 'locked-' + lock_id
         rs = self.find(key, 'Make a Guest gave the Session no card')
         rs = s.wait_rows(lambda rs: self.above('topic-guest-last', key, rs) and self.above('topic-guest-pinned', 'topic-guest-first', rs)

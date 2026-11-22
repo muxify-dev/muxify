@@ -350,7 +350,7 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
             let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: environment)
             return try XCTUnwrap(try jsonLine(shown.stdout)["unpinned"] as? [String: Any], shown.stdout)
         }
-        /// The places, the Guests and the Bench: each card is its Topic's label, its Locked Session's id, or `open`.
+        /// The places, the Guests and the Bench: each card is its Topic's label, its Board Session's tmux id, or `open`.
         func cards() async throws -> String {
             let sections = try await unpinned()
             return ["places", "guests", "bench"].map { section in
@@ -370,11 +370,10 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
 
         try await step(["make-guest", "--session", "notes"], "[First Second] [\(notes)] [Fourth Third]")
         try await step(["make-guest", "--topic", "Third"], "[First Second] [\(notes) Third] [Fourth]")
-        // A card that a command line names by its Session.
         let refused = try await run(cli, arguments: ["topic", "replace-from-bench", "--with-session", "notes", "--topic", "First"],
                                     environment: environment)
-        XCTAssertEqual(refused.status, 1, "a Guest Session is In Play: " + refused.output)
-        XCTAssertTrue(refused.stderr.contains("not on the Bench"), refused.stderr)
+        XCTAssertEqual(refused.status, 2, "the Bench holds only Topics: " + refused.output)
+        XCTAssertTrue(refused.stderr.contains("no Board Session is on the Bench"), refused.stderr)
         try await step(["bench", "--topic", "Third"], "[First Second] [\(notes)] [Third Fourth]")
         try await step(["bench", "--topic", "Second"], "[First open] [\(notes)] [Second Third Fourth]")
         let places = try await unpinned()["places"] as? [[String: Any]]
@@ -385,6 +384,11 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
         try await step(["move", "--before", "First", "--topic", "Third"], "[Fourth Second] [\(notes)] [Third First]")
         try await step(["choose-in-play", "--topic", "Third", "--topic", "First"], "[Third First] [\(notes)] [Fourth Second]")
         try await step(["replace-from-bench", "--with", "Second", "--session", "notes"], "[Third First] [Second] [Fourth]")
+        try await step(["make-guest", "--session", "notes"], "[Third First] [Second \(notes)] [Fourth]")
+        try await step(["choose-in-play", "--session", "notes", "--topic", "Third"], "[\(notes) Third] [Second] [First Fourth]")
+        try await step(["bench", "--session", "notes"], "[open Third] [Second] [First Fourth]")
+        try await step(["make-guest", "--session", "notes"], "[open Third] [Second \(notes)] [First Fourth]")
+        try await step(["fill-place", "1", "--session", "notes"], "[\(notes) Third] [Second] [First Fourth]")
     }
 
     func testTopicForgetSettledForgetsOnlyTheSettledTopicsOlderThanTheDaysAndKeepsTheirWorktrees() async throws {
@@ -2039,7 +2043,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(shown.status, 0, shown.output)
         XCTAssertTrue(shown.stdout.contains("Guests\ndormant session\t\(lock.id)\tnotes\n"), shown.stdout)
 
-        let reopened = try await run(cli, arguments: ["topic", "reopen", "--guest-session", lock.id], environment: environment)
+        let reopened = try await run(cli, arguments: ["topic", "reopen", "--board-session", lock.id], environment: environment)
         XCTAssertEqual(reopened.status, 0, reopened.output)
         let windows = try sandbox.tmux(["list-windows", "-t", "=notes:", "-F", "#{window_id}"]).split(separator: "\n")
         XCTAssertEqual(windows.count, 2, "Reopen creates both Windows")
@@ -2047,23 +2051,23 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
                        lock.id)
 
         try sandbox.tmux(["kill-session", "-t", "=notes"])
-        let fresh = try await run(cli, arguments: ["topic", "start-fresh", "--guest-session", lock.id], environment: environment)
+        let fresh = try await run(cli, arguments: ["topic", "start-fresh", "--board-session", lock.id], environment: environment)
         XCTAssertEqual(fresh.status, 0, fresh.output)
         XCTAssertEqual(try sandbox.tmux(["list-windows", "-t", "=notes:", "-F", "#{window_id}"]).split(separator: "\n").count, 1,
                        "Start Fresh creates one shell Window")
         XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "=notes:", "@muxify_session_id"]).trimmingCharacters(in: .whitespacesAndNewlines),
                        lock.id)
-        let live = try await run(cli, arguments: ["topic", "start-fresh", "--guest-session", lock.id], environment: environment)
+        let live = try await run(cli, arguments: ["topic", "start-fresh", "--board-session", lock.id], environment: environment)
         XCTAssertEqual(live.status, 1, live.output)
-        XCTAssertEqual(live.stderr, "muxify: The Guest Session \(lock.id) has a live Session. Start Fresh makes only a Dormant Guest Session again. "
+        XCTAssertEqual(live.stderr, "muxify: The Board Session \(lock.id) has a live Session. Start Fresh makes only a Dormant Board Session again. "
                        + "No changes were made.\n")
 
-        let benched = try await run(cli, arguments: ["topic", "bench", "--guest-session", lock.id], environment: environment)
+        let benched = try await run(cli, arguments: ["topic", "bench", "--board-session", lock.id], environment: environment)
         XCTAssertEqual(benched.status, 0, benched.output)
         XCTAssertEqual(try sandbox.boardSessions(), [])
-        let gone = try await run(cli, arguments: ["topic", "reopen", "--guest-session", lock.id], environment: environment)
+        let gone = try await run(cli, arguments: ["topic", "reopen", "--board-session", lock.id], environment: environment)
         XCTAssertEqual(gone.status, 1, gone.output)
-        XCTAssertEqual(gone.stderr, "muxify: No Guest Session has the id \(lock.id). No changes were made.\n")
+        XCTAssertEqual(gone.stderr, "muxify: No Board Session has the id \(lock.id). No changes were made.\n")
     }
 
     func testEnvironmentShowJSONListsTheCapabilitiesAndAReadRefusesARequest() async throws {
@@ -2072,8 +2076,8 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         let environment = sandbox.cliEnvironment(pane: nil)
         let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: environment)
         XCTAssertEqual(shown.status, 0, shown.output)
-        XCTAssertTrue(shown.stdout.contains(#""capabilities":["request","session-paths","guest-sessions"]"#), shown.stdout)
-        XCTAssertEqual(try jsonLine(shown.stdout)["capabilities"] as? [String], ["request", "session-paths", "guest-sessions"])
+        XCTAssertTrue(shown.stdout.contains(#""capabilities":["request","session-paths","board"]"#), shown.stdout)
+        XCTAssertEqual(try jsonLine(shown.stdout)["capabilities"] as? [String], ["request", "session-paths", "board"])
         let text = try await run(cli, arguments: ["environment", "show"], environment: environment)
         XCTAssertFalse(text.stdout.contains("capabilities"), text.stdout)
 

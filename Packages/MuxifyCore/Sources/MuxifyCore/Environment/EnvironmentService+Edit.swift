@@ -6,7 +6,7 @@ extension EnvironmentService {
     private struct Planned {
         var edit: TopicEdit
         var shown: Location?
-        /// The Lock that the plan ends, written with the record before tmux changes: its Guest Session goes into a
+        /// The Board Session that the plan ends, written with the record before tmux changes: its Board Session goes into a
         /// Topic, whose new record takes its place, or ends.
         var endedSession: String? = nil
         /// What the plan renames, for the answer. What a plan makes comes from tmux instead.
@@ -20,7 +20,7 @@ extension EnvironmentService {
     }
 
     /// `session move up|down` has one meaning for each Session: a Session in an open Topic takes one place among the
-    /// Topic's Sessions, and a Guest Session, which is always in no Topic, moves its card, also when it is Dormant.
+    /// Topic's Sessions, and a Board Session, which is always in no Topic, moves its card, also when it is Dormant.
     func stepSession(_ request: EnvironmentRequest, _ move: CardMove, client: String?) -> EnvironmentResponse {
         if case .boardSession? = request.target { return moveCard(request, move, client: client) }
         do {
@@ -67,7 +67,7 @@ extension EnvironmentService {
                 postCreate = try setUpWorktree(new)
             }
             let read = edit.record.flatMap { record in records.first { $0.id == record.id } }
-            // A plan names the Lock of any Session in no Topic that it ends; only a Guest Session has one.
+            // A plan names the Board Session of any Session in no Topic that it ends; only a Board Session has one.
             let endedSession = planned.endedSession.flatMap { id in contents.boardSessions.contains { $0.id == id } ? id : nil }
             if let record = edit.record {
                 try store.write { transaction in
@@ -308,8 +308,8 @@ extension EnvironmentService {
             let topic = records.first { $0.id == window.topicID && $0.settledAt == nil }
             let kill = TmuxObjectPlan.kill(window, session: session, snapshot: snapshot, expectedPaneIDs: request.expectedPaneIDs,
                                            topic: topic, order: topics.sessionOrder)
-            // A kill that ends a Guest Session ends its Lock too: the tmux server may exit with it, and a Session that
-            // ends with its server comes back as a Dormant Guest Session.
+            // A kill that ends a Board Session takes its card off the Board too: the tmux server may exit with it, and a Session that
+            // ends with its server comes back as a Dormant Board Session.
             let ends = session || !snapshot.windows.contains { $0.sessionID == window.sessionID && $0.id != window.id }
             return Planned(edit: try kill.get(), endedSession: ends && topic == nil && !window.savedSessionID.isEmpty ? window.savedSessionID : nil,
                            stopped: TmuxObjectPlan.agents(killedBy: window, session: session, in: snapshot))

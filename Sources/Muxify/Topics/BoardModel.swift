@@ -63,7 +63,7 @@ struct TopicGroupsState: Equatable {
     mutating func showMoreSettled() { settledPages += 1 }
 
     /// Opens the group that lists the Active Topic, with the Settled pages that reach its row, and closes the open group
-    /// when the Active Topic is in the Topics list, a Locked Session or No Topic. Only a change of the Active Topic or of
+    /// when the Active Topic is on the Board, a Board Session or No Topic. Only a change of the Active Topic or of
     /// the group that lists it does this, so a header click stays while the user works in the same Topic.
     mutating func follow(_ model: BoardModel) {
         let place = Place(topic: model.activeTopic, group: model.activeTopicGroup)
@@ -158,7 +158,7 @@ struct TopicSelection: Equatable {
 }
 
 /// The Session cards' rule, beside `TopicSelection`: what stays open when the Location moves between Sessions.
-/// Sessions mode and the No Topic and Locked Session cards in Topics mode share the one list it acts on.
+/// Sessions mode and the No Topic and Board Session cards in Topics mode share the one list it acts on.
 enum SessionCardSelection {
     /// The open Session cards after the Location's Session changes from `previous` to `session`. The Location's
     /// card opens; with `one` it opens alone. A card opened by hand stays open while the Session stays the same.
@@ -271,17 +271,17 @@ struct BoardModel {
         var agentSpines: [String: AgentMark] = [:]
         var usesRowMarks = false
         var isUnread = false
-        /// A Guest: a Topic with the Guest mark, or a Locked Session.
+        /// A Guest: a Topic with the Guest mark, or a Board Session.
         var isGuest = false
         let isPinned: Bool
         let sessions: [Session]
         let isExpanded: Bool
         /// Nil for a Settled Topic.
         let state: TopicState?
-        /// In Config order, then the Tags the Config no longer defines. A Locked Session has none, and with Tags
+        /// In Config order, then the Tags the Config no longer defines. A Board Session has none, and with Tags
         /// off no Topic has any.
         var tags: [ShownTag] = []
-        /// The Topic Note from the record. A Locked Session has none.
+        /// The Topic Note from the record. A Board Session has none.
         var note: String? = nil
         /// True for no Tag, so a missing filter keeps every row.
         func has(_ tag: Tag?) -> Bool { tag.map { tag in tags.contains { $0.tag == tag } } ?? true }
@@ -315,7 +315,7 @@ struct BoardModel {
         case card(TopicGroupID)
     }
 
-    /// A card of the Topics list in list order: a Topic or a Locked Session, or an Open Place.
+    /// A card of the Board in list order: a Topic or a Board Session, or an Open Place.
     enum ListCard {
         case row(Row)
         case openPlace(String)
@@ -326,7 +326,7 @@ struct BoardModel {
         }
     }
 
-    /// One item of the Topics list, in the order the Sidebar shows them.
+    /// One item of the Board, in the order the Sidebar shows them.
     enum ListItem: Identifiable {
         case card(Row)
         /// An In Play place that no card fills, at place `place`, counted from 1.
@@ -358,7 +358,7 @@ struct BoardModel {
             }
         }
 
-        /// The card's Topic, Locked Session or No Topic; nil for an Open Place and a line.
+        /// The card's Topic, Board Session or No Topic; nil for an Open Place and a line.
         var cardID: TopicGroupID? {
             switch self {
             case .card(let row): return row.id
@@ -368,7 +368,7 @@ struct BoardModel {
         }
     }
 
-    /// The open Topics and the Locked Sessions, in one order; `groups` lists the others. No Topic has no row.
+    /// The open Topics and the Board Sessions, in one order; `groups` lists the others. No Topic has no row.
     let rows: [Row]
     /// The Next Topic after `card` leaves the list together with the Topics `others`: the nearest card below it that the Sidebar
     /// shows and that stays. With In Play and no such card, the first In Play card that stays, also when the Bench is
@@ -394,7 +394,7 @@ struct BoardModel {
     }
 
     /// The title of the Topic whose Session this is, among the open and shown Settled Topics. Nil for a
-    /// Session in no Topic, and for a Locked Session, which is its own row.
+    /// Session in no Topic, and for a Board Session, which is its own row.
     func topicTitle(ofSession sessionID: String) -> String? {
         let all = rows + groups.flatMap(\.topics)
         let row = all.first { row in
@@ -407,7 +407,7 @@ struct BoardModel {
     /// The Pinned and In Play cards, then the Bench line, the opened No Topic Session and the Benched cards that
     /// show, in list order. Without a Bench: the cards of `rows`, then the opened No Topic Session.
     let list: [ListItem]
-    /// The Topics list in two parts: the items that stay at the top of the Sidebar (the Pinned and In Play cards, the
+    /// The Board in two parts: the items that stay at the top of the Sidebar (the Pinned and In Play cards, the
     /// Bench line and the opened No Topic Session), and the Benched cards that show, which scroll alone under them.
     /// `bench` is nil without a Bench line, and then every item is in `top`.
     var listParts: (top: ArraySlice<ListItem>, bench: ArraySlice<ListItem>?) {
@@ -428,12 +428,12 @@ struct BoardModel {
         return activeTopic
     }
 
-    /// Whether the Topics list shows the card now: not on a hidden Bench, and not in Sessions mode.
+    /// Whether the Board shows the card now: not on a hidden Bench, and not in Sessions mode.
     func shows(_ card: TopicGroupID) -> Bool {
         list.contains { $0.cardID == card }
     }
 
-    /// Whether the Bench shows; nil while the Topics list has no Bench line.
+    /// Whether the Bench shows; nil while the Board has no Bench line.
     var isBenchShown: Bool? {
         list.lazy.compactMap { item -> Bool? in
             if case .benchLine(let shown) = item { return shown }
@@ -477,7 +477,7 @@ struct BoardModel {
         return list.filter { isPinned($0) == isPinned(dragged) }.map(\.dragSlot)
     }
 
-    /// What Move Up and Move Down do to a card of the Topics list, with the Bench as the Sidebar shows it now.
+    /// What Move Up and Move Down do to a card of the Board, with the Bench as the Sidebar shows it now.
     func steps(of id: BoardCardID) -> CardSteps {
         guard let inPlay = inPlayInTopicsMode else { return CardSteps(up: .hidden, down: .hidden) }
         let benchShown = isBenchShown == true
@@ -485,18 +485,18 @@ struct BoardModel {
                          down: TopicCards.step(id, .down, in: cards, inPlay: inPlay, benchShown: benchShown))
     }
 
-    /// The opened No Topic Session has no card until it is Locked, but Move Up makes it a Guest (`TopicCards.stepSessionWithoutCard`).
+    /// The opened No Topic Session has no card until it is a Board Session, but Move Up makes it a Guest (`TopicCards.stepSessionWithoutCard`).
     func steps(of id: TopicGroupID) -> CardSteps {
         if let listID = id.listID { return steps(of: listID) }
         guard id == .noTopic, openedNoTopicSession != nil, inPlayInTopicsMode != nil else { return CardSteps(up: .hidden, down: .hidden) }
         return CardSteps(up: TopicCards.stepSessionWithoutCard(.up), down: TopicCards.stepSessionWithoutCard(.down))
     }
 
-    /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.
+    /// Every live No Topic Session, on the Board or not. The Command Palette reaches each of them.
     let noTopicSessions: [Session]
-    /// The live Guest Sessions, by Session ID.
+    /// The live Board Sessions, by Session ID.
     let sessionIDsOnBoard: Set<String>
-    /// The Lock of each live Guest Session, by Session ID.
+    /// The id of each live Board Session, by Session ID.
     let boardSessionsBySession: [String: String]
     /// The No Topic Session of the selected Window. The Topic list shows it as one card after the open Topics, or under
     /// the Bench line.
@@ -506,7 +506,7 @@ struct BoardModel {
     let groups: [Group]
     /// Every Settled Topic, newest first.
     let settledTopicIDs: [String]
-    /// The group that lists the Active Topic. Nil for a Topic in the Topics list, a Locked Session and No Topic.
+    /// The group that lists the Active Topic. Nil for a Topic on the Board, a Board Session and No Topic.
     var activeTopicGroup: TopicGroup? {
         guard case .topic(let id)? = activeTopic else { return nil }
         return settledTopicIDs.contains(id) ? .settled : nil
@@ -530,7 +530,7 @@ struct BoardModel {
     let topicSessions: [String: Session]
     let activeTopic: TopicGroupID?
     /// The Active Topic when it has no live Session, which the terminal area shows in place of a Window: an empty
-    /// Topic, or a Dormant or Settled one, or a Dormant Guest Session, with its Reopen choice.
+    /// Topic, or a Dormant or Settled one, or a Dormant Board Session, with its Reopen choice.
     let emptyTopic: Row?
     let topicsEnabled: Bool
     let sessionsEnabled: Bool

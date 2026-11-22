@@ -44,7 +44,7 @@ def launch(test_case):
         {'id': 'empty', 'title': 'Empty', 'slug': 'empty', 'order': 3},
     ]
     (s.root/'state/muxify/topics.json').write_text(json.dumps({'records': records, 'open_places': []}))
-    TopicRecords(s.root/'state/muxify').put_lock({'id': GUEST, 'order': 4, 'session': {
+    TopicRecords(s.root/'state/muxify').put_board_session({'id': GUEST, 'order': 4, 'session': {
         'id': GUEST, 'name': 'notes', 'base_name': 'notes', 'directory': str(folder),
         'windows': [{'name': 'notes', 'directory': str(folder)}, {'name': 'scratch', 'directory': str(folder)}]}})
     (s.root/'config/muxify/config.yaml').write_text('topics:\n  reopen_at_launch: true\n')

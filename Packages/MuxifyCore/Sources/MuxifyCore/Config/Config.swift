@@ -170,9 +170,9 @@ public struct Config: Equatable {
         public enum TagPlacement: String {
             /// No Tags on the cards.
             case none
-            /// One Tag Mark per Tag in the right corner of the title's first line, after the Pin or Lock.
+            /// One Tag Mark per Tag in the right corner of the title's first line, after the Pin or the Guest mark.
             case corner
-            /// The first Tag as a chip, and "+N", in the right corner of the title's first line, after the Pin or Lock.
+            /// The first Tag as a chip, and "+N", in the right corner of the title's first line, after the Pin or the Guest mark.
             case title
             /// Chips on their own line under the title.
             case line

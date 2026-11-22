@@ -15,8 +15,8 @@ import Foundation
 ///
 /// The Host Server's publisher also reads its Mac's Client marker, so its `server` event names that Mac's own Client,
 /// and writes the Sessions that each read gives the Topics onto their records, so the Mac writes no record itself.
-/// Every publisher writes the live Guest Sessions onto their Locks, ends the Lock of a Guest Session that ended on its
-/// server, and imports a Lock that an older Muxify kept in tmux (`BoardSession.importLegacy`).
+/// Every publisher writes the live Board Sessions onto their rows, ends a Board Session whose Session ended on its
+/// server, and imports the card that an older Muxify kept in tmux (`BoardSession.importLegacy`).
 ///
 /// It also writes the Colour Reports of ADR 0098 through its Listener, while its App Window gives it colours, in the
 /// app or, on a Host, through the Host Server's `colours` request: to every Pane of the target's Session right before
@@ -429,14 +429,14 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         do {
             return try BoardSession.importLegacy(from: &snapshot, into: topics) { _ = try run($0) }
         } catch {
-            report("importing Locks: \(error)")
+            report("importing Board Sessions: \(error)")
             return false
         }
     }
 
     /// Writes the Sessions that `snapshot` gives each Topic onto its record, as `WorkspaceStore` does for the Local
-    /// Environment, and each live Guest Session onto its Lock: the last write wins (ADR 0080). A Guest Session that was
-    /// live in the last read of the same server and is gone now ends its Lock. True when it wrote.
+    /// Environment, and each live Board Session onto its row: the last write wins (ADR 0080). A Board Session that was
+    /// live in the last read of the same server and is gone now leaves the Board. True when it wrote.
     private func remember(_ snapshot: TmuxSnapshot) -> Bool {
         // A Window seen before counts only on the same server: on another, its id may name another Window.
         let continuous = snapshot.serverRunning && snapshot.serverID != nil && snapshot.serverID == rememberedServerID

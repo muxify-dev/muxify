@@ -256,7 +256,7 @@ enum CLIVerbs {
             return .request(try RequestInvocation(.kill(session: true), parsed: parsed))
         },
         CLIVerb(path: .sessionMove,
-                synopsis: "(up | down | --topic <id|label> | --new-topic [\"title\"]) [--session <name|id> | --guest-session <id> | --pane <id>] [--json]",
+                synopsis: "(up | down | --topic <id|label> | --new-topic [\"title\"]) [--session <name|id> | --board-session <id> | --pane <id>] [--json]",
                 options: [.value("--topic"), .flag("--new-topic"), .flag("--json")], targets: [.session, .boardSession, .pane],
                 help: """
                 Moves this Pane's Session, or the Session that --session or --pane names.
@@ -266,12 +266,13 @@ enum CLIVerbs {
                                          or exact label, as Move Session does
                   --new-topic ["title"]  the whole Session into a new Topic, Untitled without a
                                          title. A new Topic is a Guest at the end of the Guests;
-                                         from a Guest Session, it takes the Guest Session's place.
-                For a Guest Session, which is in no Topic, `up` and `down` move its card as Move
+                                         from a Board Session, it takes the card's place and
+                                         section.
+                For a Board Session, which is in no Topic, `up` and `down` move its card as Move
                 Topic Up and Down do: see `topic move`. At the end they fail. `up` on a Session
-                that is in no Topic and not a Guest makes it a Guest Session, at the end of the
+                that is in no Topic and has no card makes it a Board Session, at the end of the
                 Guests, as Make a Guest does. `down` on it fails: make it a Guest first.
-                --guest-session names a Guest Session by the id that environment show gives
+                --board-session names a Board Session by the id that environment show gives
                 it, also a Dormant one, whose Session tmux no longer has: `up` and `down`
                 move its card.
                 """) { parsed in
@@ -361,13 +362,14 @@ enum CLIVerbs {
     private static let environment: [CLIVerb] = [
         CLIVerb(path: .environmentShow, synopsis: "[--json]", options: [.flag("--json")],
                 help: """
-                Shows the Sessions and the Topics list of the Environment, in the order that
+                Shows the Sessions and the Board of the Environment, in the order that
                 Muxify shows them: the Sessions in tmux order, then the Pinned Topics, the
                 In Play places, the Guests and the Bench, each with its Sessions, and each
                 No Topic Session. JSON includes each Session's Windows in tmux index order,
                 with marks, and the Tags that the Config defines. JSON also has `sidebar`,
-                {"topics":bool,"sessions":bool}: which of the two lists the Config shows
-                (sidebar.topics, sidebar.sessions; both true when unset). For a Topic's
+                {"topics":bool,"sessions":bool}: which of the two views the Config shows, the
+                Board and the Sessions (sidebar.board, sidebar.sessions; both true when unset).
+                For a Topic's
                 Panes, use topic show. It changes nothing.
                   --json          print the full result as one line of JSON
                 """) { parsed in
@@ -645,27 +647,28 @@ enum CLIVerbs {
             default: throw CLIError.usage
             }
         },
-        CLIVerb(path: .topicReopen, synopsis: "(--topic <id|label> | --guest-session <id>) [--json]", options: [.flag("--json")],
+        CLIVerb(path: .topicReopen, synopsis: "(--topic <id|label> | --board-session <id>) [--json]", options: [.flag("--json")],
                 targets: [.topic, .boardSession, .window, .pane],
                 help: """
                 Makes the remembered Sessions, Windows, Tabs and Agents of a Dormant or
                 Settled Topic again, as Reopen Topic does.
-                With --guest-session, it makes the Session of a Dormant Guest Session again,
+                With --board-session, it makes the Session of a Dormant Board Session again,
                 with its Windows, Panes, Tabs and Agents, as a click on its card does. Its card
-                stays at its place among the Guests. environment show gives the id, on the
-                Guest Session's "dormant session" line. A live Guest Session does not change.
+                stays at its place, In Play or among the Guests. environment show gives the id,
+                on the Board Session's "dormant session" line. A live Board Session does not
+                change.
                 """) { parsed in
             .request(try RequestInvocation(try reopening(.reopen, parsed), parsed: parsed))
         },
-        CLIVerb(path: .topicStartFresh, synopsis: "(--topic <id|label> | --guest-session <id>) [--json]", options: [.flag("--json")],
+        CLIVerb(path: .topicStartFresh, synopsis: "(--topic <id|label> | --board-session <id>) [--json]", options: [.flag("--json")],
                 targets: [.topic, .boardSession, .window, .pane],
                 help: """
                 Makes one Session with one shell Window in each Session Path that a
                 Dormant or Settled Topic remembers, as Start Topic Fresh does.
-                With --guest-session, it makes the Session of a Dormant Guest Session again,
+                With --board-session, it makes the Session of a Dormant Board Session again,
                 with its name and folder and one shell Window, as Start Fresh on its card
-                does. Its card stays at its place among the Guests. A live Guest Session
-                does not change, and the command fails.
+                does. Its card stays at its place, In Play or among the Guests. A live Board
+                Session does not change, and the command fails.
                 """) { parsed in
             .request(try RequestInvocation(try reopening(.startFresh, parsed), parsed: parsed))
         },
@@ -687,30 +690,30 @@ enum CLIVerbs {
                   options: cardMoveOptions.map { .value($0) },
                   help: """
                   Moves the card of this Pane's Topic one place up or down among the cards that the
-                  Topics list shows now, with the same Pin, as Move Topic Up and Down do. At the end
+                  Board shows now, with the same Pin, as Move Topic Up and Down do. At the end
                   of the cards it fails.
                   A step that passes the Guests line or the Bench line changes the
                   section of the card, one section for each step. Down from the last In Play place
                   makes the card the top Guest, and leaves an Open Place. Up from the top Guest
                   fills the lowest Open Place, or trades with the last place when none is open.
                   Down from the last Guest is Bench. Up from the top of the Bench is Make a Guest.
-                  A Guest Session cannot take a place, so it has no Up from the top of the Guests.
-                  For a Session in no Topic that is not a Guest, see `session move`.
+                  For the card of a Board Session, or a Session in no Topic that has no card, see
+                  `session move`.
                   The command acts as if the Bench shows.
                   With --before or --after, the card goes next to the card that you name, as a drag
                   inside one section does. A card keeps its Pin: next to a card with the other Pin,
                   it goes to the edge of its own Pin group. The same command again changes nothing.
                     --before <id|label>, --after <id|label>             next to this open Topic
-                    --before-session, --after-session <name|id>         next to this Guest Session
+                    --before-session, --after-session <name|id>         next to this Board Session
                     --before-place <id>, --after-place <id>             next to this Open Place, by the
                                                                         id that environment show gives
                   With --trade-with, the two cards change places, as a drag across the Guests line
                   or the Bench line does, and no other card moves. Neither card can be Pinned.
                   Each card takes the mark of its new section: a card that comes into the Guests
-                  is a Guest, and a Guest that leaves them loses its mark. A Guest Session cannot
-                  take an In Play place, and a Guest Session that goes to the Bench stops being a Guest.
+                  is a Guest, and a Guest that leaves them loses its mark. The Bench holds only
+                  Topics: a Board Session that a trade sends there leaves the Board.
                     --trade-with <id|label>            the open Topic to trade places with
-                    --trade-with-session <name|id>     the Guest Session to trade places with
+                    --trade-with-session <name|id>     the Board Session to trade places with
                   """) { parsed in
             let named = parsed.values(of: cardMoveOptions)
             guard let (option, value) = named.first else { return .moveCard(try upOrDown(parsed) ? .up : .down) }
@@ -720,44 +723,50 @@ enum CLIVerbs {
             if option.hasPrefix("--trade-with") { return .tradeCard(with: card) }
             return .placeCard(next: card, after: option.hasPrefix("--after"))
         },
-        CLIVerb(path: .topicChooseInPlay, synopsis: "(--topic <id|label> | --session <name|id>)... [--json]",
-                options: [.value("--topic"), .value("--session"), .flag("--json")],
+        CLIVerb(path: .topicChooseInPlay, synopsis: "(--topic <id|label> | --session <name|id> | --board-session <id>)... [--json]",
+                options: [.value("--topic"), .value("--session"), .value("--board-session"), .flag("--json")],
                 help: """
                 Sets the cards In Play, as Choose In Play does. The cards that you name fill
                 the In Play places, in the order that you name them. When you name fewer
-                cards than places, the other places are Open Places. A Guest Topic that
-                fills a place loses its Guest mark. Of the cards after the last place, the
-                regular ones go to the top of the Bench, and a Guest stays a Guest. The
-                other cards keep their order.
-                  --topic <id|label>     an open Topic that is not Pinned; give one for each card
-                  --session <name|id>    a Guest Session: it cannot
-                                         fill a place
+                cards than places, the other places are Open Places. A Guest that fills a
+                place loses its Guest mark. Of the cards after the last place, a Topic goes
+                to the top of the Bench, and a Guest stays a Guest. A Board Session that held
+                a place and gets none leaves the Board, because the Bench holds only Topics.
+                The other cards keep their order.
+                  --topic <id|label>       an open Topic that is not Pinned; give one for each card
+                  --session <name|id>      the live Session of a Board Session
+                  --board-session <id>     a Board Session, also a Dormant one, by the id that
+                                           environment show gives
                 """) { parsed in
-            let cards = try parsed.values(of: ["--topic", "--session"]).map { option -> RequestInvocation.CardName in
+            let cards = try parsed.values(of: ["--topic", "--session", "--board-session"]).map { option -> RequestInvocation.CardName in
                 guard !option.value.isEmpty else { throw CLIError.usage }
-                return option.name == "--topic" ? .topic(option.value) : .session(option.value)
+                switch option.name {
+                case "--topic": return .topic(option.value)
+                case "--session": return .session(option.value)
+                default: return .boardSession(option.value)
+                }
             }
             guard !cards.isEmpty, parsed.operands.isEmpty else { throw CLIError.usage }
             return .request(try RequestInvocation(.chooseInPlay(cards), parsed: parsed))
         },
         CLIVerb(path: .topicReplaceFromBench,
-                synopsis: "(--with <id|label> | --with-session <name|id>)\n[--topic <id|label> | --session <name|id> | --window <id> | --pane <id>] [--json]",
-                options: [.value("--with"), .value("--with-session"), .flag("--json")], targets: [.topic, .session, .window, .pane],
+                synopsis: "--with <id|label>\n[--topic <id|label> | --session <name|id> | --board-session <id> | --window <id> | --pane <id>] [--json]",
+                options: [.value("--with"), .flag("--json")], targets: [.topic, .session, .boardSession, .window, .pane],
+                removed: [RemovedForm(options: [.value("--with-session")], matches: { !$0.values("--with-session").isEmpty }) { _ in
+                    "topic replace-from-bench no longer takes --with-session: the Bench holds only Topics, so no Board Session "
+                        + "is on the Bench. Name the Benched Topic with --with <id|label>."
+                }],
                 help: """
-                Puts a Benched card in the place of this Pane's card, which must be In Play,
+                Puts a Benched Topic in the place of this Pane's card, which must be In Play,
                 as Replace from Bench does. The replaced card goes to the end of the Bench.
-                When it is a Guest, the card that comes In Play gets its Guest mark: a Guest
-                Topic goes to the Bench without it, and a Guest Session stops being a Guest.
-                --session names a Guest Session.
+                When it is a Guest, the Topic that comes In Play gets its Guest mark, and a
+                Guest Topic goes to the Bench without it. A replaced Board Session leaves the
+                Board, because the Bench holds only Topics. --session and --board-session
+                name a Board Session.
                   --with <id|label>          the Benched Topic that comes In Play
-                  --with-session <name|id>   the Benched Guest Session that comes In Play
                 """) { parsed in
-            let benched: RequestInvocation.CardName
-            switch (try parsed.value("--with"), try parsed.value("--with-session")) {
-            case (let topic?, nil) where !topic.isEmpty: benched = .topic(topic)
-            case (nil, let session?) where !session.isEmpty: benched = .session(session)
-            default: throw CLIError.usage
-            }
+            guard let topic = try parsed.value("--with"), !topic.isEmpty else { throw CLIError.usage }
+            let benched = RequestInvocation.CardName.topic(topic)
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .request(try RequestInvocation(.replaceFromBench(with: benched), parsed: parsed))
         },
@@ -766,35 +775,37 @@ enum CLIVerbs {
                 help: """
                 Makes this Pane's Benched Topic a Guest, as Make a Guest does: its card goes
                 to the end of the Guests, and no other card goes to the Bench. A Session in
-                no Topic becomes a Guest Session: it gets a card at the end of the Guests. A
-                Guest does not change.
+                no Topic that has no card becomes a Board Session: it gets a card at the end
+                of the Guests. A Guest does not change.
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .request(try RequestInvocation(.makeGuest, parsed: parsed))
         },
-        CLIVerb(path: .topicBench, synopsis: "[--topic <id|label> | --session <name|id> | --guest-session <id> | --window <id> | --pane <id>] [--json]",
+        CLIVerb(path: .topicBench, synopsis: "[--topic <id|label> | --session <name|id> | --board-session <id> | --window <id> | --pane <id>] [--json]",
                 options: [.flag("--json")], targets: [.topic, .session, .boardSession, .window, .pane],
                 help: """
                 Puts this Pane's In Play Topic at the top of the Bench, as Bench does.
-                It keeps its Sessions and Agents. A Topic from an In Play place leaves an
+                It keeps its Sessions and Agents. A card from an In Play place leaves an
                 Open Place there, and no Benched card moves up. A Guest Topic loses its
-                Guest mark and leaves no Open Place. A Guest Session stops being a Guest:
-                its card goes, the Session stays in No Topic, and the other Guests keep
-                their positions. --guest-session names a Guest Session by the id that
-                environment show gives it, also a Dormant one: its card goes.
+                Guest mark and leaves no Open Place. The Bench holds only Topics, so a
+                Board Session's card leaves the Board: its Session stays in No Topic, and
+                the other cards keep their positions. --board-session names a Board Session
+                by the id that environment show gives it, also a Dormant one.
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .request(try RequestInvocation(.benchTopic, parsed: parsed))
         },
-        topicVerb(.topicFillPlace, synopsis: "<place> \(topicTarget) [--json]",
-                  help: """
-                  Puts this Pane's Guest Topic or Benched Topic in the Open Place at In Play
-                  place <place>, counted from 1 after the Pinned Topics, as a click on the
-                  Open Place card does. A Guest Topic loses its Guest mark. No other card
-                  moves.
-                  """) { parsed in
+        CLIVerb(path: .topicFillPlace,
+                synopsis: "<place> [--topic <id|label> | --session <name|id> | --board-session <id> | --window <id> | --pane <id>] [--json]",
+                options: [.flag("--json")], targets: [.topic, .session, .boardSession, .window, .pane],
+                help: """
+                Puts this Pane's Guest or Benched Topic in the Open Place at In Play place
+                <place>, counted from 1 after the Pinned Topics, as a pick on the Open Place
+                page does. A Guest loses its Guest mark. No other card moves. --session and
+                --board-session name a Board Session, also a Dormant one.
+                """) { parsed in
             guard parsed.operands.count == 1, let place = Int(parsed.operands[0]), place >= 1 else { throw CLIError.usage }
-            return .fillPlace(place)
+            return .request(try RequestInvocation(.fillPlace(place), parsed: parsed))
         },
         topicVerb(.topicSortSessions, synopsis: "\(topicTarget) [--json]",
                   help: """
@@ -807,7 +818,7 @@ enum CLIVerbs {
         topicVerb(.topicList, synopsis: "[--json]",
                   help: """
                   Prints each open Topic's id, label and Tags without starting Muxify, in the order of
-                  the Topics list: Pinned Topics first. With --json, also whether each is Pinned.
+                  the Board: Pinned Topics first. With --json, also whether each is Pinned.
                   """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .list
@@ -868,12 +879,11 @@ enum CLIVerbs {
         },
     ]
 
-    /// A Dormant or Settled Topic has no Pane, so Reopen and Start Fresh name it, or a Dormant Guest Session by its
-    /// Lock id.
+    /// A Dormant or Settled Topic has no Pane, so Reopen and Start Fresh name it, or a Dormant Board Session by its id.
     private static func reopening(_ command: RequestInvocation.Command, _ parsed: ParsedArguments) throws -> RequestInvocation.Command {
         guard parsed.operands.isEmpty else { throw CLIError.usage }
         guard parsed.targets.chosen != nil else {
-            throw CLIError("\(command.phrase) takes the Topic: --topic <id|label>, or the Guest Session: --guest-session <id>. "
+            throw CLIError("\(command.phrase) takes the Topic: --topic <id|label>, or the Board Session: --board-session <id>. "
                            + "A Dormant or Settled Topic has no Pane.", exitCode: 2)
         }
         return command

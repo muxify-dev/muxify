@@ -42,7 +42,7 @@ struct SessionCardState: Equatable {
     let session: SessionGroup
     let isOpen: Bool
     let mark: CardMark?
-    /// A Locked Session is a Guest Session.
+    /// A Board Session is a Board Session.
     let isGuest: Bool
     let formatted: SidebarFormats.Text
     let items: [BoardModel.SessionChildren.Item]
@@ -95,7 +95,7 @@ extension WorkspaceStore {
     }
 }
 
-/// What a Topic card or a Locked card shows.
+/// What a Topic card or a Board Session card shows.
 struct TopicCardState: Equatable {
     let topic: BoardModel.Row
     let titles: [String: String]

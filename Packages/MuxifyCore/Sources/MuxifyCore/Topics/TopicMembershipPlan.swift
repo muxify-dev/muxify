@@ -32,8 +32,8 @@ public struct TopicMembershipPlan: Sendable {
 
     public let record: TopicRecord?
     public let commands: [TopicPlan.Command]
-    /// The Lock that the move ends, when the source is a Guest Session that goes into a Topic or ends. A Session in no
-    /// Topic may have no Lock, and the write that ends this one then changes nothing.
+    /// The Board Session that the move ends, when the source is a Board Session that goes into a Topic or ends. A Session in no
+    /// Topic may have no card, and the write that ends this one then changes nothing.
     private(set) var endedSession: String? = nil
     private(set) var leftTopic: TopicRecord? = nil
 
@@ -109,7 +109,7 @@ public struct TopicMembershipPlan: Sendable {
             }
         }
         let ends = Self.ends(source, windows: windows)
-        // A new Topic takes the place of the Guest Session that the move ends.
+        // A new Topic takes the place of the Board Session that the move ends.
         if ends, sourceTopic == nil, !window.savedSessionID.isEmpty { endedSession = window.savedSessionID }
         if ends, let sourceTopic,
            let left = sourceTopic.forgetting(window) {

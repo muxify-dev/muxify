@@ -977,7 +977,7 @@ final class TopicServiceCardTests: TopicServiceTestCase {
 
         _ = try change(service().handle(EnvironmentRequest(.benchTopic, target: .boardSession(lock.id))))
         let gone = try failure(service().handle(EnvironmentRequest(.renameSession(name: "x"), target: .boardSession(lock.id))))
-        XCTAssertEqual(gone.message, "No Guest Session has the id \(lock.id).")
+        XCTAssertEqual(gone.message, "No Board Session has the id \(lock.id).")
     }
 
     func testADormantGuestSessionReopensWithItsWindowsAtItsPlaceAndBenchEndsIt() throws {

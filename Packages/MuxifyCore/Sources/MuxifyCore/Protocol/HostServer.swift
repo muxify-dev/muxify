@@ -322,10 +322,10 @@ final class HostEnvironment: @unchecked Sendable {
     private var state = EnvironmentState()
     private var hasState = false
     private var subscribers: [Int: ProtocolIncomingRequest] = [:]
-    /// The `environment` and `snapshot` subscribers whose client declared `guest-sessions`.
+    /// The `environment` and `snapshot` subscribers whose client declared `board`.
     private var boardSubscribers: Set<Int> = []
     /// The `snapshot` subscribers, the Config their items are computed with once it was read, and the JSON of the
-    /// last item computed of each view, keyed by whether the client declared `guest-sessions`, so an item goes out
+    /// last item computed of each view, keyed by whether the client declared `board`, so an item goes out
     /// only when the view that its client gets differs.
     private var snapshotSubscribers: [Int: ProtocolIncomingRequest] = [:]
     private var snapshotConfig: Config?
@@ -540,7 +540,7 @@ final class HostEnvironment: @unchecked Sendable {
         if !snapshotSubscribers.isEmpty { sendSnapshot() }
     }
 
-    /// `changes` as the subscriber's client reads them: a client that did not declare `guest-sessions` gets them as
+    /// `changes` as the subscriber's client reads them: a client that did not declare `board` gets them as
     /// `EnvironmentState.olderClientChanges` gives them.
     private func send(_ changes: [EnvironmentChange], to id: Int, first: Bool) {
         guard let request = subscribers[id] else { return }
@@ -639,7 +639,7 @@ final class HostEnvironment: @unchecked Sendable {
 
     /// On `delivery`: computes the view once the state and the Config are there, and sends it to every subscriber whose
     /// view differs from the last one, and to the subscriber `first` in any case. A newer item replaces an unsent one.
-    /// A client that did not declare `guest-sessions` gets the view without its Dormant Guest Sessions, so a change
+    /// A client that did not declare `board` gets the view without its Dormant Board Sessions, so a change
     /// of only those sends it nothing.
     private func sendSnapshot(first: Int? = nil) {
         guard hasState, let config = snapshotConfig, let tmux = state.snapshot else { return }

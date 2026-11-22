@@ -141,8 +141,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var topicRequests: [TopicIntent] = []
     /// The card whose queued step is running; a failure of it drops that card's other queued steps.
     @ObservationIgnored private var stepInFlight: GuestCard?
-    /// A Topic change ended and no snapshot after it is applied yet. A Session points at its Lock with a tmux option,
-    /// so until then the model can show a new Guest Session as Dormant, and a queued step waits.
+    /// A Topic change ended and no snapshot after it is applied yet. A Session points at its Board Session with a tmux option,
+    /// so until then the model can show a new Board Session as Dormant, and a queued step waits.
     @ObservationIgnored private var topicSnapshotPending = false
     private static let queuedMoveLimit = 4
 
@@ -212,7 +212,7 @@ final class WorkspaceStore {
     }
 
     /// Goes to the Topic because the user asked to: a click, a Hint key, ↩ on its palette row, Go to Topic or Next
-    /// Topic. A Dormant Topic that remembers a Session and a Dormant Guest Session are Reopened at once; any other card
+    /// Topic. A Dormant Topic that remembers a Session and a Dormant Board Session are Reopened at once; any other card
     /// shows as in `showTopic`.
     func goToTopic(_ id: TopicGroupID) {
         if entryWindow(of: id) == nil, !changingTopic {
@@ -477,7 +477,7 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.makeGuest, target: target))
     }
 
-    /// Whether Move Topic Up (`previous`) or Down (`next`) can move the card of the Active Topic or Locked Session, as
+    /// Whether Move Topic Up (`previous`) or Down (`next`) can move the card of the Active Topic or Board Session, as
     /// the card's own Move Up and Move Down do. Not at that end of the cards with its Pin, for a Settled
     /// Topic, and outside Topics mode, where the cards do not show. The opened No Topic Session has Up only: Make a
     /// Guest.
@@ -668,7 +668,7 @@ final class WorkspaceStore {
         return nil
     }
 
-    /// A Locked Session that an older Muxify kept among the Topics becomes a Guest in the Guests (ADR 0061). The order of
+    /// A Board Session that an older Muxify kept among the Topics becomes a Guest in the Guests (ADR 0061). The order of
     /// the list says when there is one to gather, so a list that is already in its three sections is not written again.
     private func gatherGuests() {
         guard link.features.contains(.topics), topics.topicsEnabled, !changingTopic else { return }
@@ -725,7 +725,7 @@ final class WorkspaceStore {
         reopen(.topic(.id(id)), choice)
     }
 
-    /// Creates the Session of a Dormant Guest Session again and shows it: with its Windows, Panes, Tabs and Agents for
+    /// Creates the Session of a Dormant Board Session again and shows it: with its Windows, Panes, Tabs and Agents for
     /// Reopen, with one shell Window for Start Fresh.
     func reopenBoardSession(_ id: String, _ choice: TopicReopening.Choice) {
         reopen(.boardSession(id), choice)
@@ -788,7 +788,7 @@ final class WorkspaceStore {
     @ObservationIgnored private var launchReopens: Set<BoardCardID> = []
 
     /// `topics.reopen_at_launch`: the first snapshot of this launch Reopens every Dormant open Topic and every Dormant
-    /// Guest Session, one after another through the Topic request path, as going to each would, without moving the
+    /// Board Session, one after another through the Topic request path, as going to each would, without moving the
     /// Location. A Remote Environment has no Topics: they stay on this Mac (ADR 0062).
     private func reopenDormantTopicsAtLaunch() {
         guard link.features.contains(.topics) else { return }
@@ -1030,7 +1030,7 @@ final class WorkspaceStore {
         (try? visitStore.times(environment: environment?.name)) ?? [:]
     }
 
-    /// The Topic records, the Open Places and the Locks, as the link's last `topics` event left them.
+    /// The Topic records, the Open Places and the Board Sessions, as the link's last `topics` event left them.
     private(set) var records: [TopicRecord] = []
     private(set) var openPlaces: [OpenPlace] = []
     private(set) var boardSessions: [BoardSession] = []
@@ -1086,7 +1086,7 @@ final class WorkspaceStore {
         return items.isEmpty ? nil : CardTags(placement: config.sidebar.tagPlacement, items: items, identifier: row.id.accessibilityID)
     }
 
-    /// Shows or hides the Bench, while the Topics list has one.
+    /// Shows or hides the Bench, while the Board has one.
     func toggleBench() {
         guard topics.isBenchShown != nil else { return }
         benchPeek = nil
@@ -1094,7 +1094,7 @@ final class WorkspaceStore {
     }
 
     /// Choose In Play needs a card that is not Pinned. In Sessions mode too: In Play is a place in
-    /// the Topics list, which both modes share.
+    /// the Board, which both modes share.
     var canChooseInPlay: Bool {
         link.features.contains(.topics) && !changingTopic && topics.topicsEnabled && topics.rows.contains { !$0.isPinned }
     }
@@ -1112,7 +1112,7 @@ final class WorkspaceStore {
     }
 
     /// The card of the Location while it is In Play and the Bench has a card for Replace from Bench to put in its place.
-    /// In Sessions mode too: In Play is a place in the Topics list, which both modes share.
+    /// In Sessions mode too: In Play is a place on the Board, which both modes share.
     private var replaceableCard: TopicGroupID? {
         guard link.features.contains(.topics), !changingTopic, topics.topicsEnabled, let active = topics.activeTopic else { return nil }
         let cards = topics.split

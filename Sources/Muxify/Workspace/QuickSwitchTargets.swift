@@ -63,7 +63,7 @@ enum StepDirection {
 }
 
 enum QuickSwitchTarget: Hashable {
-    /// `locked` is a Guest Session's card in Topics mode, by its Lock id. `openPlace` is an Open Place, by its In Play
+    /// `boardSession` is a Board Session's card on the Board, by its id. `openPlace` is an Open Place, by its In Play
     /// place counted from 1: going there shows its Open Place page.
     case topic(String), boardSession(String), openPlace(Int), session(String), window(String), tab(UUID), terminal
 
@@ -91,7 +91,7 @@ struct QuickSwitchTargets {
     let tabs: [QuickSwitchTarget]
     /// The Sessions a Session step goes through: every Session in Sessions mode, the Active Topic's in Topics mode.
     let sessions: [QuickSwitchTarget]
-    /// The rows of the Topics list, Locked Sessions included, in either Sidebar mode. A Topic step skips an Open Place.
+    /// The rows of the Board, Board Sessions included, in either Sidebar mode. A Topic step skips an Open Place.
     let topics: [QuickSwitchTarget]
 
     func target(for selection: QuickSwitchSelection) -> QuickSwitchTarget? {
@@ -131,8 +131,8 @@ struct QuickSwitchTargets {
 
 extension QuickSwitchTargets {
     init(model: BoardModel, sessions: [SessionGroup], windows: [TmuxWindow], tabIDs: [UUID]) {
-        // No Topic Sessions get no number: the Topics list shows at most one of them, and only while it is open.
-        // A Locked Session's card is numbered by its place among the Topics. A hidden Benched card gets no number,
+        // No Topic Sessions get no number: the Board shows at most one of them, and only while it is open.
+        // A Board Session's card is numbered by its place among the Topics. A hidden Benched card gets no number,
         // and a Topic step skips it, so repeated steps do not go through the whole Bench.
         let numbered: [QuickSwitchTarget] = model.list.compactMap { item in
             if case .openPlace(_, let place) = item { return .openPlace(place) }
@@ -149,7 +149,7 @@ extension QuickSwitchTargets {
     }
 
     /// The Sessions the Active Topic's card shows. No Topic has no card, so it gives its Sessions that have no
-    /// Locked Session card of their own.
+    /// Board Session card of their own.
     private static func sessions(of model: BoardModel) -> [BoardModel.Session] {
         let shown: [BoardModel.Session]
         switch model.activeTopic {

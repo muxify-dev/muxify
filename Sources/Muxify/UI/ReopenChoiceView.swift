@@ -1,7 +1,7 @@
 import SwiftUI
 import MuxifyCore
 
-/// The choice that a Dormant or Settled Topic, or a Dormant Guest Session, shows in place of the terminal: Reopen or
+/// The choice that a Dormant or Settled Topic, or a Dormant Board Session, shows in place of the terminal: Reopen or
 /// Start Fresh, each with the Sessions it will create.
 struct ReopenChoiceView: View {
     let store: WorkspaceStore

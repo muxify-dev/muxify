@@ -51,7 +51,7 @@ public struct Router: Equatable {
         public var entryWindows: [TopicGroupID: WindowID]
         /// The ids of the Open Places that hold an In Play place.
         public var openPlaces: Set<String>
-        /// The Lock ids of the Guest Sessions, live or Dormant.
+        /// The ids of the Board Sessions, live or Dormant.
         public var boardSessions: Set<String>
         public var hasTerminal: Bool
         public var allowAttach: Bool
@@ -205,7 +205,7 @@ public struct Router: Equatable {
         return effects + attachIfNeeded(facts)
     }
 
-    /// The page's Topic or Guest Session is gone, or its Open Place closed (a fill from elsewhere, or a lower
+    /// The page's Topic or Board Session is gone, or its Open Place closed (a fill from elsewhere, or a lower
     /// `topics.in_play`): the Location goes to the Window that the Client shows, or to none. Nil while the page stays.
     private mutating func leaveGonePage(_ facts: Facts) -> [Effect]? {
         guard intent == nil else { return nil }
@@ -290,8 +290,8 @@ public struct Router: Equatable {
 }
 
 private extension TopicGroupID {
-    /// The page of a card with no Window: its own, as a Dormant Guest Session's offers Reopen and Start Fresh, or No
-    /// Topic's for a Guest Session whose Lock is gone.
+    /// The page of a card with no Window: its own, as a Dormant Board Session's offers Reopen and Start Fresh, or No
+    /// Topic's for a Board Session whose card is gone.
     func page(_ facts: Router.Facts) -> TopicGroupID {
         if case .session(let lock) = self, !facts.boardSessions.contains(lock) { return .noTopic }
         return self

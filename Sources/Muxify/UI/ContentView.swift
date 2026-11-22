@@ -461,7 +461,7 @@ private struct TerminalArea: View {
                 case (.success(let reopen)?, .success(let startFresh)?):
                     ReopenChoiceView(store: store, reopen: [reopen], startFresh: [startFresh]) { store.reopenBoardSession(lock, $0) }
                 case (.failure(let error)?, _):
-                    Text("This Guest Session cannot be reopened. \(String(describing: error))")
+                    Text("This Board Session cannot be reopened. \(String(describing: error))")
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("reopen-choice-failure")
                 default:
@@ -477,7 +477,7 @@ private struct TerminalArea: View {
         .environment(\.colorScheme, store.theme.map { $0.isDark ? .dark : .light } ?? systemColorScheme)
     }
 
-    /// A Settled Topic, a Dormant one that remembers a Session, or a Dormant Guest Session offers Reopen; an empty open
+    /// A Settled Topic, a Dormant one that remembers a Session, or a Dormant Board Session offers Reopen; an empty open
     /// Topic offers Add a Session.
     private func offersReopen(_ topic: BoardModel.Row) -> Bool {
         if case .settled = topic.kind { return true }

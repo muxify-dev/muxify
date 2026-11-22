@@ -130,7 +130,7 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         return await EnvironmentLinks.run(request, client: client, local: service)
     }
 
-    /// No Topic records, so no Locked Sessions to gather.
+    /// No Topic records, so no Board Sessions to gather.
     func gatherGuests(local: EnvironmentService?) async -> TopicFailure? { nil }
 
     func worktreeStarts(from folder: String, local: EnvironmentService?) async -> Result<[WorktreeStartChoice], TopicFailure>? {

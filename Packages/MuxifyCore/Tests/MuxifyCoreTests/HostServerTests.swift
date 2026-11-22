@@ -159,7 +159,7 @@ final class HostServerTests: XCTestCase {
         let client = try await connect()
         let session = try await client.connect()
         XCTAssertEqual(session.peerCapabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs",
-                                                  "status-line", "guest-sessions"])
+                                                  "status-line", "board"])
         let recorder = subscribe(client)
         try await wait("no first item") { !recorder.items.isEmpty }
         let before = try windows(of: "work")
@@ -398,7 +398,7 @@ final class HostServerTests: XCTestCase {
         let dormant = BoardSession(id: "gone", order: 0, isGuest: true, session: .object(["name": .string("notes"), "directory": .string("/tmp")]))
         try TopicStore(paths: paths).write { $0.addToBoard(dormant) }
 
-        let newer = try await connect(capabilities: ["snapshot", "guest-sessions"])
+        let newer = try await connect(capabilities: ["snapshot", "board"])
         let boardSessions = subscribe(newer)
         let shown = subscribeSnapshot(newer)
         let older = try await connect(capabilities: ["snapshot"])
@@ -406,8 +406,8 @@ final class HostServerTests: XCTestCase {
         let olderShown = subscribeSnapshot(older)
         try await wait("no first items") { !boardSessions.items.isEmpty && !plain.items.isEmpty && !shown.items.isEmpty && !olderShown.items.isEmpty }
 
-        XCTAssertTrue(boardSessions.keys.contains("guest_sessions"))
-        XCTAssertFalse(plain.keys.contains("guest_sessions"), "an older Mac shows a Guest Session as a No Topic Session")
+        XCTAssertTrue(boardSessions.keys.contains("board_sessions"))
+        XCTAssertFalse(plain.keys.contains("board_sessions"), "an older Mac shows a Guest Session as a No Topic Session")
         XCTAssertEqual(shown.items.last?.snapshot.cards, [.dormantSession(id: "gone", name: "notes")])
         XCTAssertEqual(olderShown.items.last?.snapshot.cards, [], "an older phone gets no card that it does not know")
 
@@ -422,7 +422,7 @@ final class HostServerTests: XCTestCase {
         let order = try XCTUnwrap(TopicStore(paths: paths).read().boardSessions.first).order
         let work = try sessionID("work")
         let older = subscribeLockOrders(try await connect())
-        let newer = subscribeLockOrders(try await connect(capabilities: ["guest-sessions"]))
+        let newer = subscribeLockOrders(try await connect(capabilities: ["board"]))
         try await wait("the older Mac got no lock_order for the Guest Session") { older.lastOrder(of: work) == order }
         try await wait("the newer Mac got no first item") { newer.events(of: work) > 0 }
 
@@ -433,12 +433,12 @@ final class HostServerTests: XCTestCase {
         try await wait("an ended Lock left the older Mac its lock_order", seconds: 5) {
             older.events(of: work) > moved && older.lastOrder(of: work) == nil
         }
-        XCTAssertEqual(newer.orders(of: work), [], "a Mac that declared guest-sessions reads the Locks, never lock_order")
+        XCTAssertEqual(newer.orders(of: work), [], "a Mac that declared board reads the Locks, never lock_order")
     }
 
     func testAnOlderPhoneGetsNoSnapshotItemForAChangeOfOnlyTheDormantGuestSessions() async throws {
         let older = subscribeSnapshot(try await connect(capabilities: ["snapshot"]))
-        let newer = subscribeSnapshot(try await connect(capabilities: ["snapshot", "guest-sessions"]))
+        let newer = subscribeSnapshot(try await connect(capabilities: ["snapshot", "board"]))
         try await wait("no first items") { !older.items.isEmpty && !newer.items.isEmpty }
 
         let dormant = BoardSession(id: "gone", order: 0, isGuest: true, session: .object(["name": .string("notes")]))

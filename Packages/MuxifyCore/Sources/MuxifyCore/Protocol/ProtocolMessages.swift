@@ -47,12 +47,13 @@ public enum HostCapability: String, CaseIterable, Sendable {
     case browserTabs = "browser-tabs"
     /// `status_line`: the Host Server's Listener hides tmux's status line in the Terminal's Sessions (ADR 0099).
     case statusLine = "status-line"
-    /// The Guest Sessions that a tmux restart keeps: the `guest_sessions` event of the `environment` subscription,
-    /// `dormant_session` cards in `snapshot` items and `environment_show` answers, and the `guest_session` target and
-    /// card of an `environment` request, which `reopen`, `start_fresh`, `bench_topic` and the card moves take. A client
-    /// that did not declare it gets no `guest_sessions` event, and no card for a Dormant Guest Session; it still gets a
-    /// live one as a `session` card.
-    case board = "guest-sessions"
+    /// The Board Sessions, which take an In Play place or are Guests, and which a tmux restart keeps: the
+    /// `board_sessions` event of the `environment` subscription, `dormant_session` cards in `snapshot` items and
+    /// `environment_show` answers, and the `board_session` target and card of an `environment` request, which `reopen`,
+    /// `start_fresh`, `bench_topic`, `fill_open_place` and the card moves take. A client
+    /// that did not declare it gets no `board_sessions` event, and no card for a Dormant Board Session; it still gets a
+    /// live one as a `session` card, and an Open Place card for a Dormant one in an In Play place.
+    case board
 }
 
 /// The `kind` of a frame.

@@ -23,12 +23,12 @@ class PaletteInPlay(PaletteFixture):
 
     def base_lock(self):
         """The Lock of the fixture's base Session in the state database, or None."""
-        return next((lock for lock in self.store.locks() if lock['session'].get('name') == 'base'), None)
+        return next((lock for lock in self.store.board_sessions() if lock['session'].get('name') == 'base'), None)
 
     def unlock_base(self):
-        for lock in self.store.locks():
+        for lock in self.store.board_sessions():
             if lock['session'].get('name') == 'base':
-                self.store.remove_lock(lock['id'])
+                self.store.remove_board_session(lock['id'])
 
     def order(self, prefix):
         """The ids of the check's Topics in the order of the Topics list."""

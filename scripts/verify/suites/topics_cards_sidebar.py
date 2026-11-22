@@ -53,7 +53,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         # As an older Muxify Locked it; the app imports the Lock, and the Session then points at it.
         self.s.tmux('set-option', '-t', sid, '@muxify_lock', '2')
         lock_id = wait(lambda: self.s.tmux('show-options', '-qv', '-t', sid, '@muxify_session_id'), 'the Lock was not imported')
-        self.addCleanup(self.store.remove_lock, lock_id)
+        self.addCleanup(self.store.remove_board_session, lock_id)
         guest = 'locked-' + lock_id
         self.find(guest)
         key = 'topic-' + self.create_topic('Inserted as a Guest')['id']

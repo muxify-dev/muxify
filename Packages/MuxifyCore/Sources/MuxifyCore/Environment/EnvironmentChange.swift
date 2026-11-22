@@ -7,20 +7,20 @@ public enum EnvironmentChange: Equatable {
     case session(String, EnvironmentSession?)
     /// One Topic record, or nil when it is gone.
     case topic(String, TopicRecord?)
-    /// The Open Places of the Topics list.
+    /// The Open Places of the Board.
     case openPlaces([OpenPlace])
-    /// The Locks of the Topics list, live or Dormant.
+    /// The Board Sessions, live or Dormant.
     case boardSessions([BoardSession])
     /// The server as a whole: its Clients, the last Window, whether it runs, its socket and home.
     case server(EnvironmentServer)
 
-    /// What the event replaces: `session <id>`, `topic <id>`, `open_places`, `guest_sessions` or `server`.
+    /// What the event replaces: `session <id>`, `topic <id>`, `open_places`, `board_sessions` or `server`.
     public var key: String {
         switch self {
         case .session(let id, _): "session \(id)"
         case .topic(let id, _): "topic \(id)"
         case .openPlaces: "open_places"
-        case .boardSessions: "guest_sessions"
+        case .boardSessions: "board_sessions"
         case .server: "server"
         }
     }
@@ -31,9 +31,9 @@ public struct EnvironmentSession: Equatable {
     public var windows: [TmuxWindow]
     public var panes: [TmuxPane]
     public var commandLines: PaneCommandLines
-    /// The order of the Lock whose live Guest Session this is, set only on an event for a client that did not declare
-    /// `guest-sessions` (`EnvironmentState.olderClientChanges`). Each Window goes out with it as `lock_order`, where
-    /// an older Mac finds its Locks. No decoder sets it.
+    /// The order of the Board Session whose live Session this is, set only on an event for a client that did not declare
+    /// `board` (`EnvironmentState.olderClientChanges`). Each Window goes out with it as `lock_order`, where
+    /// an older Mac finds its Locks, as it calls the cards. No decoder sets it.
     public var lockOrder: Double?
 
     public init(windows: [TmuxWindow], panes: [TmuxPane], commandLines: PaneCommandLines = PaneCommandLines(), lockOrder: Double? = nil) {
@@ -86,7 +86,7 @@ public struct EnvironmentState: Equatable {
 
     public init() {}
 
-    /// The Topic records in id order, as the state database lists them, the Open Places and the Locks.
+    /// The Topic records in id order, as the state database lists them, the Open Places and the Board Sessions.
     public var topicContents: TopicContents {
         TopicContents(records: topics.values.sorted { $0.id < $1.id }, openPlaces: openPlaces, boardSessions: boardSessions)
     }
@@ -152,7 +152,7 @@ public struct EnvironmentState: Equatable {
     }
 
     /// The events that bring this state to `contents`: a record that differs, one that is gone, and the Open Places
-    /// and the Locks when they differ. With `all`, every record, the Open Places and the Locks.
+    /// and the Board Sessions when they differ. With `all`, every record, the Open Places and the Board Sessions.
     public func changes(to contents: TopicContents, all: Bool = false) -> [EnvironmentChange] {
         var changes: [EnvironmentChange] = []
         let ids = Set(contents.records.map(\.id))
@@ -167,16 +167,16 @@ public struct EnvironmentState: Equatable {
         return changes
     }
 
-    /// The order of each live Guest Session's Lock, by the Session's tmux id.
+    /// The order of each live Board Session, by its Session's tmux id.
     public var lockOrders: [String: Double] {
         boardSessions.bySession(in: orderedSessions.flatMap(\.windows), open: Array(topics.values).openTopicIDs).mapValues(\.order)
     }
 
-    /// `changes`, which this state applied last, as a client that did not declare `guest-sessions` reads them, so an
-    /// older Mac still shows each live Guest Session (ADR 0086: no key leaves a protocol). It gets no `guest_sessions`
-    /// event, and each Window of a live Guest Session has its Lock's order as `lock_order`, as an older Host sent the
-    /// Session's `@muxify_lock`. A Session whose Lock order differs from `before`, the `lockOrders` before `changes`,
-    /// goes out again, so a move, a new Lock and an ended one reach that client too.
+    /// `changes`, which this state applied last, as a client that did not declare `board` reads them, so an
+    /// older Mac still shows each live Board Session (ADR 0086: no key leaves a protocol). It gets no `board_sessions`
+    /// event, and each Window of a live Board Session has its card's order as `lock_order`, as an older Host sent the
+    /// Session's `@muxify_lock`. A Session whose order differs from `before`, the `lockOrders` before `changes`,
+    /// goes out again, so a move, a new card and an ended one reach that client too.
     public func olderClientChanges(_ changes: [EnvironmentChange], lockOrdersBefore before: [String: Double]) -> [EnvironmentChange] {
         let orders = lockOrders
         var sent: Set<String> = []

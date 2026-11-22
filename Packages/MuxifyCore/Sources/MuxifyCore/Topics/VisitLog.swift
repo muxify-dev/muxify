@@ -10,7 +10,7 @@ public enum VisitKey: Hashable, Sendable {
     public var stored: String {
         switch self {
         case .topic(.topic(let id)): return "topic:" + id
-        // A Locked Session is a No Topic Session, and its Session visits are kept by name.
+        // A Board Session is a No Topic Session, and its Session visits are kept by name.
         case .topic(.noTopic), .topic(.session): return "topic:-"
         case .session(let name): return "session:" + name
         case .directory(let path): return "path:" + path

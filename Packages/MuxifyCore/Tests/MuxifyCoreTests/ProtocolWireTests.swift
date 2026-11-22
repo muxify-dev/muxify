@@ -9,21 +9,25 @@ final class ProtocolWireTests: XCTestCase {
 
     private static let requestID = RequestID("3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c")!
 
-    /// This release's messages, in the order of the newest fixtures folder: the Guest Sessions that a tmux restart keeps
-    /// (`guest-sessions`). The Mac declares the capability, gets the Locks, Reopens a Dormant Guest Session by its Lock
-    /// id and drops a card next to it; the phone gets the Dormant one as a `dormant_session` card; Start Fresh takes the
-    /// same `guest_session` target.
+    /// This release's messages, in the order of the newest fixtures folder: the Board Sessions that a tmux restart keeps
+    /// (`board`). The Mac declares the capability, gets the Board Sessions, one among the Guests and one in an In Play
+    /// place, Reopens a Dormant one by its id and drops a card next to it; the phone gets each Dormant one as a
+    /// `dormant_session` card in its section; Start Fresh takes the same `board_session` target.
     private func thisReleasesFrames() throws -> [Data] {
-        let lock = BoardSession(id: "s1", order: 3, isGuest: true, session: .object(["id": .string("s1"), "name": .string("notes"), "base_name": .string("notes"),
-                                                                     "directory": .string("/work/notes"), "windows": .array([])]))
-        let shown = EnvironmentShown(contents: TopicContents(records: [], boardSessions: [lock]),
+        func remembered(_ id: String, _ name: String) -> JSONValue {
+            .object(["id": .string(id), "name": .string(name), "base_name": .string(name), "directory": .string("/work/" + name),
+                     "windows": .array([])])
+        }
+        let guest = BoardSession(id: "s1", order: 3, isGuest: true, session: remembered("s1", "notes"))
+        let placed = BoardSession(id: "s2", order: 1, isGuest: false, session: remembered("s2", "scratch"))
+        let shown = EnvironmentShown(contents: TopicContents(records: [], boardSessions: [guest, placed]),
                                      tmux: TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true), config: Config())
         return [
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: HostProtocol.capabilities)),
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, build: Self.build, capabilities: HostProtocol.macCapabilities,
                                                  nonce: "0a1b2c3d")),
             try ProtocolLine.request(id: 1, HostRequest.subscribe(.environment)),
-            try ProtocolLine.item(id: 1, EnvironmentItem(changes: [.boardSessions([lock])])),
+            try ProtocolLine.item(id: 1, EnvironmentItem(changes: [.boardSessions([guest, placed])])),
             try ProtocolLine.request(id: 2, HostRequest.environment(EnvironmentRequest(.reopen, target: .boardSession("s1")))),
             try ProtocolLine.ok(id: 2, EnvironmentResponse.changed(TopicChange(topicID: nil, session: SessionID(rawValue: "$4"), sessionName: "notes"))),
             try ProtocolLine.request(id: 3, HostRequest.environment(EnvironmentRequest(.moveCard(.after(.boardSession("s1"))),
@@ -398,7 +402,7 @@ final class ProtocolWireTests: XCTestCase {
     func testTheRequestCapabilityIsPinned() throws {
         func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
         XCTAssertEqual(HostProtocol.capabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs", "status-line",
-                                                   "guest-sessions"])
+                                                   "board"])
         let request = HostRequest.environment(EnvironmentRequest(.create(title: "T"), request: Self.requestID))
         let line = text(try ProtocolLine.request(id: 1, request))
         XCTAssertEqual(line, #"{"id":1,"kind":"request","request":{"environment":{"command":{"create":{"title":"T"}},"request":"3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c","version":2}}}"# + "\n")
@@ -510,7 +514,7 @@ final class ProtocolWireTests: XCTestCase {
             XCTAssertEqual(request.capability, .statusLine)
         }
         XCTAssertTrue(HostProtocol.capabilities.contains("status-line"), "the server declares it")
-        XCTAssertEqual(HostProtocol.macCapabilities, ["status-line", "guest-sessions"], "the Mac declares it, so the server serves it")
+        XCTAssertEqual(HostProtocol.macCapabilities, ["status-line", "board"], "the Mac declares it, so the server serves it")
     }
 
     func testAnUnknownRequestCaseThrowsUnsupported() {
@@ -526,7 +530,7 @@ final class ProtocolWireTests: XCTestCase {
         let folders = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
         XCTAssertEqual(folders.map(\.lastPathComponent).suffix(5), ["1-first-server", "2-phone", "3-colour-reports", "4-status-line",
-                                                                     "5-guest-sessions"])
+                                                                     "5-board"])
         for folder in folders {
             let text = try String(contentsOf: folder.appendingPathComponent("frames.jsonl"), encoding: .utf8)
             let lines = text.split(separator: "\n").map { Data($0.utf8) }

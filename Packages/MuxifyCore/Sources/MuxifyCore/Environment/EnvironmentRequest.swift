@@ -63,14 +63,14 @@ public enum EnvironmentTarget: Codable, Hashable, Sendable {
     case sessionName(String)
     case window(WindowID)
     case pane(PaneID)
-    /// A Guest Session, live or Dormant, by its Lock id: Reopen, Start Fresh, Bench and the card moves take it, also when
+    /// A Board Session, live or Dormant, by its id: Reopen, Start Fresh, Bench and the card moves take it, also when
     /// tmux has no Session for it.
     case boardSession(String)
 
     private enum CodingKeys: String, CodingKey {
         case topic, session, window, pane
         case sessionName = "session_name"
-        case boardSession = "guest_session"
+        case boardSession = "board_session"
     }
 
     public init(from decoder: Decoder) throws {
@@ -211,9 +211,9 @@ public struct WorktreeStartChoice: Codable, Equatable, Sendable {
     }
 }
 
-/// One move of a card of the Topics list.
+/// One move of a card of the Board.
 public enum CardMove: Codable, Hashable, Sendable {
-    /// One card up or down among the cards that the Topics list shows now, or into the next In Play section (`TopicCards`).
+    /// One card up or down among the cards that the Board shows now, or into the next In Play section (`TopicCards`).
     case up, down
     /// Next to another card, shown or not, as the Sidebar drag puts it.
     case before(BoardCardRef)
@@ -226,7 +226,7 @@ public enum CardMove: Codable, Hashable, Sendable {
     private enum TradeCodingKeys: String, CodingKey { case _0 = "card" }
 }
 
-/// A card on the wire: a Topic, a live Guest Session by its tmux id, a Guest Session, live or Dormant, by its Lock id, or
+/// A card on the wire: a Topic, a live Board Session by its tmux id, a Board Session, live or Dormant, by its id, or
 /// an Open Place by its id. An Open Place is only an anchor: the Sidebar drag puts a card before or after it.
 public enum BoardCardRef: Codable, Hashable, Sendable {
     case topic(TopicRef)
@@ -237,7 +237,7 @@ public enum BoardCardRef: Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case topic, openPlace
         case liveSession = "lock"
-        case boardSession = "guest_session"
+        case boardSession = "board_session"
     }
 
     private enum TopicCodingKeys: String, CodingKey { case _0 = "ref" }
@@ -292,7 +292,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case list
     /// The target's open Topic, with its live Sessions, Windows, Panes and Agents. It changes nothing.
     case show
-    /// Every live Session and the Topics list, in the order that Muxify shows them. It takes no target and changes
+    /// Every live Session and the Board, in the order that Muxify shows them. It takes no target and changes
     /// nothing.
     case environmentShow
     /// An Empty Topic. It starts no Session and reads no target or caller, so it works outside tmux. A Session comes
@@ -318,16 +318,16 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case removeAndKill(worktrees: [String])
     case rename(title: String)
     /// Creates the remembered Sessions, Windows, Tabs and Agents of a Dormant or Settled Topic again. With a
-    /// `guest_session` target, it creates the Session of a Dormant Guest Session again, and shows a live one.
+    /// `board_session` target, it creates the Session of a Dormant Board Session again, and shows a live one.
     case reopen
     /// Creates one Session with one shell Window in each SessionPath that a Dormant or Settled Topic remembers. With a
-    /// `guest_session` target, it creates the Session of a Dormant Guest Session again with one shell Window; a live
+    /// `board_session` target, it creates the Session of a Dormant Board Session again with one shell Window; a live
     /// one fails, as a live Topic does.
     case startFresh
     /// Puts the target Session before or after another Session of its Topic, or one place up or down. From then on
-    /// the Topic keeps its Sessions in the order the user gave them. `up` and `down` on a Guest Session, which is in
-    /// no Topic, move its card, as `moveCard` does, also when a `guest_session` target names a Dormant one. `up` on a
-    /// Session in no Topic that is not Locked Locks it, which makes it a Guest.
+    /// the Topic keeps its Sessions in the order the user gave them. `up` and `down` on a Board Session, which is in
+    /// no Topic, move its card, as `moveCard` does, also when a `board_session` target names a Dormant one. `up` on a
+    /// Session in no Topic that has no card makes it a Board Session among the Guests.
     case moveSession(to: TopicSessionPlacement)
     /// The target Topic lists its Sessions by when tmux created them again, in the Config's order.
     case sortSessions
@@ -360,26 +360,26 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// Pins or unpins the target's open Topic. A Topic that already has that Pin does not change.
     case pin
     case unpin
-    /// Moves the card of the target's Topic, or of the target's Guest Session, among the cards with its Pin, or across the In Play lines.
+    /// Moves the card of the target's Topic, or of the target's Board Session, among the cards with its Pin, or across the In Play lines.
     case moveCard(CardMove)
     /// Choose In Play: the first `topics.in_play` of `cards` fill the In Play places in this order, and the places after
-    /// the last of them are Open Places. A Guest Topic that fills a place loses its Guest mark. Of the other cards, the
-    /// regular ones go to the top of the Bench, and a Guest stays a Guest. A Guest Session cannot fill a place. It takes
-    /// no target.
+    /// the last of them are Open Places. A Guest that fills a place loses its Guest mark. Of the other cards, a Topic
+    /// goes to the top of the Bench, a Guest stays a Guest, and a Board Session that held a place leaves the Board. It
+    /// takes no target.
     case chooseInPlay([BoardCardRef])
-    /// The Benched card `with` takes the position of the target's card, which must be In Play. The target's card goes
-    /// to the end of the Bench.
+    /// The Benched Topic `with` takes the position of the target's card, which must be In Play. The target's card goes
+    /// to the end of the Bench, and a Board Session leaves the Board.
     case replaceFromBench(with: BoardCardRef)
     /// Make a Guest: the target's Benched Topic goes to the end of the Guests with the Guest mark, and no card goes to
-    /// the Bench for it. A target Session in no Topic gets a Lock in the state database, which makes it a Guest Session
-    /// at the end of the Guests (ADR 0061). A Guest does not change.
+    /// the Bench for it. A target Session in no Topic gets a row in the state database, which makes it a Board Session
+    /// at the end of the Guests. A Guest does not change.
     case makeGuest
-    /// Bench: the target's In Play Topic goes to the top of the Bench without a Guest mark. A Topic in an In Play
-    /// place leaves an Open Place there; a Guest Topic leaves none. Bench of a target Guest Session, live or Dormant,
-    /// ends its Lock, and the other Guests keep their positions.
+    /// Bench: the target's In Play Topic goes to the top of the Bench without a Guest mark. A card in an In Play place
+    /// leaves an Open Place there; a Guest leaves none. A target Board Session, live or Dormant, leaves the Board, and
+    /// the other cards keep their positions.
     case benchTopic
-    /// The target's Guest Topic or Benched Topic fills the Open Place at In Play place `place`, counted from 1, and
-    /// loses its Guest mark. No other card moves.
+    /// The target's Guest or Benched Topic fills the Open Place at In Play place `place`, counted from 1, and loses its
+    /// Guest mark. No other card moves.
     case fillOpenPlace(place: Int)
     /// Marks the `scope` of the target Read or Unread: the Topic Unread of a Topic, and each Agent there that
     /// `change` applies to. `topicMark` changes only the Topic Unread.
@@ -601,7 +601,7 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let cardNotInPlay = Kind(rawValue: "card_not_in_play")
         public static let cardNotBenched = Kind(rawValue: "card_not_benched")
         public static let cardPinned = Kind(rawValue: "card_pinned")
-        /// An older Host refused to give a Guest Session an In Play place. No Muxify sends it now; a reader still decodes it.
+        /// An older Host refused to give a Board Session an In Play place. No Muxify sends it now; a reader still decodes it.
         public static let cardGuest = Kind(rawValue: "card_guest")
         public static let placeNotOpen = Kind(rawValue: "place_not_open")
         public static let cardCannotFill = Kind(rawValue: "card_cannot_fill")

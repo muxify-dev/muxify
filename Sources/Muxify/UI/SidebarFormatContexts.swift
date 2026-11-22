@@ -7,7 +7,7 @@ struct SidebarFormatContexts {
 
     var topics: [TopicGroupID: Context] = [:]
     var sessions: [String: Context] = [:]
-    /// The Session that each Dormant Guest Session's Lock remembers, by Lock id. Its card shows it with the Session
+    /// The Session that each Dormant Board Session remembers, by its id. Its card shows it with the Session
     /// Formats, as a live one shows its Session.
     var dormantBoardSessions: [String: Context] = [:]
     var windows: [String: Context] = [:]
@@ -80,7 +80,7 @@ struct SidebarFormatContexts {
         }
         let boardSessionsByID = Dictionary(boardSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for topic in model.rows + model.groups.flatMap(\.topics) {
-            // A Locked card shows its Session's Formats: a live one its Session, a Dormant one the Session that its Lock
+            // A Board Session card shows its Session's Formats: a live one its Session, a Dormant one the Session that it
             // remembers.
             if case .session(let id) = topic.id, topic.state == .dormant, let lock = boardSessionsByID[id] {
                 dormantBoardSessions[id] = Context(values: [

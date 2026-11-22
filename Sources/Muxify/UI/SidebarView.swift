@@ -132,11 +132,11 @@ private struct TopicsSection: View {
     @State private var topHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
     @State private var lastBenchHeight: CGFloat = 0
-    /// The top of the Topics list's viewport in the window, where a lifted card's pointer is.
+    /// The top of the Board's viewport in the window, where a lifted card's pointer is.
     @State private var viewportTop: CGFloat = 0
     @State private var driver = ScrollDriver()
 
-    /// The coordinate space of the Topics list's content, from the top of its first item.
+    /// The coordinate space of the Board's content, from the top of its first item.
     static let contentSpace = "topics-content"
     static let contentSpacing: CGFloat = 6
     static let contentInset: CGFloat = 4
@@ -338,7 +338,7 @@ private struct TopicsSection: View {
     }
 }
 
-/// Hands a lifted card's pointer to `driver`, so the Topics list scrolls while the pointer rests at an edge: the edges
+/// Hands a lifted card's pointer to `driver`, so the Board scrolls while the pointer rests at an edge: the edges
 /// of the Bench area under the block that sticks, or of the whole list without a Bench line. A view of its own, so only
 /// it draws again as the pointer moves.
 private struct EdgeAutoScroller: View {
@@ -411,7 +411,7 @@ private struct MoreAbovePill: View {
     }
 }
 
-/// Where an item of the Topics list stands while the list has a Bench line. An item of the block at the top moves down
+/// Where an item of the Board stands while the list has a Bench line. An item of the block at the top moves down
 /// as far as the list scrolled, so it stays, and it stands on the Sidebar's chrome above the Benched cards, which pass
 /// under it. A Benched card's open header sticks under the block. Without a Bench line the item is as it was.
 private struct BoardPart: ViewModifier {
@@ -471,7 +471,7 @@ private struct BoardPart: ViewModifier {
 }
 
 private extension View {
-    /// Keeps the card's place against the edges of the Topics list in `scroll.places`, from the top of the visible part
+    /// Keeps the card's place against the edges of the Board in `scroll.places`, from the top of the visible part
     /// that `scrollTopInset` gives: under the block for a Benched card.
     func tracksEdges(_ id: TopicGroupID, in scroll: BoardScroll) -> some View {
         modifier(EdgeTracker(id: id, scroll: scroll))
@@ -685,17 +685,17 @@ private struct TopicItemRow: View {
     }
 }
 
-/// Where a Topic card sits. In the Topics list the card has a Hint, moves by a drag and by Move Up and Move Down, and
+/// Where a Topic card sits. In the Board the card has a Hint, moves by a drag and by Move Up and Move Down, and
 /// offers Settle. In the Settled group it has none of these, and tells how long ago, seen from `now`, it was Settled.
 enum TopicCardPlace: Equatable {
     case list(BoardPlace)
     case group(now: Date)
 }
 
-/// What a card in the Topics list needs to move among the cards with its Pin.
+/// What a card on the Board needs to move among the cards with its Pin.
 struct BoardPlace: Equatable {
     let drag: ListDrag<BoardCardID>
-    /// The Topic and Locked cards among which it moves, in list order, and the views between them that slide.
+    /// The Topic and Board Session cards among which it moves, in list order, and the views between them that slide.
     let order: [StackSlot<BoardCardID>]
     let steps: CardSteps
     let rename: (String) -> Void
@@ -777,7 +777,7 @@ struct TopicCard: View, Equatable {
             }
     }
 
-    /// The Topic's own action: Settle in the Topics list, Reopen in a group, which reopens the Topic at once.
+    /// The Topic's own action: Settle on the Board, Reopen in a group, which reopens the Topic at once.
     @ViewBuilder
     private var corner: some View {
         if case .topic(let id) = topic.id {
@@ -969,7 +969,7 @@ struct TopicCard: View, Equatable {
     private var listID: BoardCardID? { topic.id.listID }
 }
 
-/// The press on a Topic card's header: in the Topics list a click, or a drag that moves the card; in a group a click.
+/// The press on a Topic card's header: on the Board a click, or a drag that moves the card; in a group a click.
 private struct CardHandle: ViewModifier {
     let list: BoardPlace?
     let listID: BoardCardID?
@@ -987,7 +987,7 @@ private struct CardHandle: ViewModifier {
     }
 }
 
-/// A Topic card in the Topics list is an item of the list's drag; a card in a group does not move.
+/// A Topic card on the Board is an item of the list's drag; a card in a group does not move.
 private struct CardItem: ViewModifier {
     let list: BoardPlace?
     let listID: BoardCardID?
@@ -1001,7 +1001,7 @@ private struct CardItem: ViewModifier {
     }
 }
 
-/// Move Up and Move Down of a Topic or Locked card: the Sidebar's own order change, which the palette does not show.
+/// Move Up and Move Down of a Topic or Board Session card: the Sidebar's own order change, which the palette does not show.
 private struct CardMoveButtons: View {
     let store: WorkspaceStore
     let id: BoardCardID
@@ -1193,7 +1193,7 @@ private struct SessionsSection: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    // Not lazy, for the same reason as the Topics list.
+                    // Not lazy, for the same reason as the Board.
                     VStack(alignment: .leading, spacing: 6) {
                         // Read here, not in each card: see SidebarCardState.swift.
                         let cards = store.sessions.map { store.sessionCardState($0, showsAllRows: showingAllRows.contains($0.id)) }

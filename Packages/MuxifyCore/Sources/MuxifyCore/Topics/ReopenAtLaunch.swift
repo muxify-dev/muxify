@@ -1,4 +1,4 @@
-/// Reopen at launch (`topics.reopen_at_launch`): the Dormant open Topics and the Dormant Guest Sessions that Muxify
+/// Reopen at launch (`topics.reopen_at_launch`): the Dormant open Topics and the Dormant Board Sessions that Muxify
 /// Reopens by itself when it launches, for example after a computer restart left tmux with none of the user's Sessions.
 /// Each Environment gets one answer per launch, so a tmux restart while Muxify runs Reopens nothing.
 public struct ReopenAtLaunch: Sendable {
@@ -15,7 +15,7 @@ public struct ReopenAtLaunch: Sendable {
 
     /// Every Dormant open Topic, in record order, whether Pinned, In Play, a Guest or on the Bench: not Settled,
     /// remembering a Session, and with no live Session. An Empty Topic remembers none, so Reopen would create nothing.
-    /// Then every Dormant Guest Session, in Lock id order: a Lock with no live Session.
+    /// Then every Dormant Board Session, in id order: a Board Session with no live Session.
     public static func dormant(contents: TopicContents, windows: [TmuxWindow]) -> [BoardCardID] {
         let live = Set(windows.compactMap(\.topicID))
         let open = contents.records.openTopicIDs

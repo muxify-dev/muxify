@@ -228,7 +228,7 @@ struct CardHeader<Details: View>: View {
 
     private var showsSummary: Bool { !isOpen && !summary.isEmpty }
 
-    /// Tag Marks and Tag chips sit in the right corner of the title's first line, after the Pin or Lock.
+    /// Tag Marks and Tag chips sit in the right corner of the title's first line, after the Pin or the Guest mark.
     private var tagsInTitleLine: CardTags? {
         guard let tags, tags.placement == .corner || tags.placement == .title else { return nil }
         return tags

@@ -100,17 +100,17 @@ extension BoardSession {
         self.init(id: window.sessionRecordID, order: order, isGuest: isGuest, session: .object(fields))
     }
 
-    /// What a read of the server changes in a Lock.
+    /// What a read of the server changes in a Board Session.
     public enum Memory: Equatable, Sendable {
-        /// The live Session's layout, to save as the Lock's Remembered Session.
+        /// The live Session's layout, to save as the Board Session's Remembered Session.
         case remembered(JSONValue)
         /// The Session ended on the same server: the user closed it, or it went into a Topic.
         case ended
     }
 
-    /// What `snapshot` changes in the Lock, by the rule of `TopicRecord.remembering`: a live Session's layout replaces
+    /// What `snapshot` changes in the Board Session, by the rule of `TopicRecord.remembering`: a live Session's layout replaces
     /// the remembered one, and only a confirmed end, a Session live in `previously`, an earlier read of the same server,
-    /// and gone now, ends the Lock. Startup, server loss and a reconnect end nothing, so after a tmux restart the Guest
+    /// and gone now, ends the Board Session. Startup, server loss and a reconnect end nothing, so after a tmux restart the Guest
     /// Session is Dormant. `open` are the open Topics. Nil when nothing changes.
     public func remembering(_ snapshot: TmuxSnapshot, open: Set<String>, previously: [TmuxWindow] = []) -> Memory? {
         guard snapshot.serverRunning else { return nil }

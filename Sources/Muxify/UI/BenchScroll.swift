@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import MuxifyCore
 
-/// The Topics list's one scroll offset, split into what the block at its top does and what the Bench under it does.
+/// The Board's one scroll offset, split into what the block at its top does and what the Bench under it does.
 /// The block (the Pinned and In Play cards, the Bench line and the opened No Topic Session) sticks to the top of the
 /// viewport, and the Benched cards scroll under it. A block taller than the viewport leaves room for first scrolls with
 /// the content until `leastAreaHeight` of the Bench shows under it, and sticks there.
@@ -97,7 +97,7 @@ enum EdgeAutoScroll {
     }
 }
 
-/// Where the Location's Benched card stands in the Topics list's viewport, at one layout.
+/// Where the Location's Benched card stands on the Board's viewport, at one layout.
 struct BenchedLocationPlace: Equatable {
     /// The card's top, in the viewport's points.
     var top: CGFloat

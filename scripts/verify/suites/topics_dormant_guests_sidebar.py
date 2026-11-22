@@ -36,7 +36,7 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
         self.find(card, 'the selected No Topic Session %s has no card' % name)
         s.act('action', card, 'Make a Guest')
         lock_id = wait(lambda: s.tmux('show-options', '-qv', '-t', sid, '@muxify_session_id'), 'Make a Guest gave %s no Lock' % name)
-        self.addCleanup(self.store.remove_lock, lock_id)
+        self.addCleanup(self.store.remove_board_session, lock_id)
         self.find('locked-' + lock_id, 'Make a Guest gave %s no card' % name)
         return lock_id
 

@@ -6,7 +6,7 @@ struct PaletteItem: Equatable {
     enum Ref: Equatable {
         /// Nil `window`: Dormant or Settled, so ↩ shows the Topic's Reopen choice.
         case topic(id: String, window: TmuxWindow?)
-        /// A Dormant Guest Session, by its Lock id: ↩ creates its Session again.
+        /// A Dormant Board Session, by its id: ↩ creates its Session again.
         case boardSession(lock: String)
         case session(SessionGroup)
         case sessionPath(OpenDirectory)
@@ -169,7 +169,7 @@ struct PaletteCatalog {
             pick: .available(PaletteItem(ref: .topic(id: id, window: window))))
     }
 
-    /// A Dormant Guest Session: its card is among the Topics, and it has no Session for the Sessions section to list.
+    /// A Dormant Board Session: its card is among the Topics, and it has no Session for the Sessions section to list.
     /// A live one is a row of that section.
     private func dormantSessionCandidate(_ row: BoardModel.Row, lock: String) -> PickCandidate<PaletteItem>? {
         guard row.state == .dormant else { return nil }

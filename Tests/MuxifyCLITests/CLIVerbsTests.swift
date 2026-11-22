@@ -35,9 +35,9 @@ final class CLIVerbsTests: XCTestCase {
             (["topic", "open"], request(.open)),
             (["topic", "open", "--topic", "Fix"], request(.open, target: .topic(.named("Fix")))),
             (["topic", "reopen", "--topic", "Fix"], request(.reopen, target: .topic(.named("Fix")))),
-            (["topic", "reopen", "--guest-session", "lock-1"], request(.reopen, target: .boardSession("lock-1"))),
+            (["topic", "reopen", "--board-session", "lock-1"], request(.reopen, target: .boardSession("lock-1"))),
             (["topic", "start-fresh", "--topic", "Fix"], request(.startFresh, target: .topic(.named("Fix")))),
-            (["topic", "start-fresh", "--guest-session", "lock-1"], request(.startFresh, target: .boardSession("lock-1"))),
+            (["topic", "start-fresh", "--board-session", "lock-1"], request(.startFresh, target: .boardSession("lock-1"))),
             (["session", "remove-from-topic"], request(.removeSessionFromTopic(kill: false, removeWorktree: false))),
             (["session", "remove-from-topic", "--kill", "--remove-worktree", "--session", "$4"],
              request(.removeSessionFromTopic(kill: true, removeWorktree: true), target: .session(SessionID(rawValue: "$4")!))),
@@ -59,11 +59,11 @@ final class CLIVerbsTests: XCTestCase {
             (["topic", "rename"], CLIVerbs.usage(for: ["topic", "rename"])),
             (["topic", "rename", " "], CLIVerbs.usage(for: ["topic", "rename"])),
             (["topic", "reopen"],
-             "topic reopen takes the Topic: --topic <id|label>, or the Guest Session: --guest-session <id>. A Dormant or Settled Topic has no Pane."),
-            (["topic", "reopen", "--pane", "%3"], "topic reopen does not take --pane; name the target with --topic <id|label> or --guest-session <id>"),
+             "topic reopen takes the Topic: --topic <id|label>, or the Board Session: --board-session <id>. A Dormant or Settled Topic has no Pane."),
+            (["topic", "reopen", "--pane", "%3"], "topic reopen does not take --pane; name the target with --topic <id|label> or --board-session <id>"),
             (["topic", "start-fresh"],
-             "topic start-fresh takes the Topic: --topic <id|label>, or the Guest Session: --guest-session <id>. A Dormant or Settled Topic has no Pane."),
-            (["topic", "start-fresh", "--pane", "%3"], "topic start-fresh does not take --pane; name the target with --topic <id|label> or --guest-session <id>"),
+             "topic start-fresh takes the Topic: --topic <id|label>, or the Board Session: --board-session <id>. A Dormant or Settled Topic has no Pane."),
+            (["topic", "start-fresh", "--pane", "%3"], "topic start-fresh does not take --pane; name the target with --topic <id|label> or --board-session <id>"),
             (["session", "remove-from-topic", "--remove-worktree"], CLIVerbs.usage(for: ["session", "remove-from-topic"])),
             (["session", "remove-from-topic", "--window", "@1"], CLIVerbs.usage(for: ["session", "remove-from-topic"])),
             (["window", "move", "--topic", "Fix", "--session", "notes", "--new-session"], CLIVerbs.usage(for: ["window", "move"])),
@@ -146,11 +146,16 @@ final class CLIVerbsTests: XCTestCase {
             (["topic", "fill-place", "1", "--topic", "Fix"], request(.fillPlace(1), target: .topic(.named("Fix")))),
             (["topic", "choose-in-play", "--topic", "B", "--session", "notes", "--topic", "A"],
              request(.chooseInPlay([.topic("B"), .session("notes"), .topic("A")]))),
-            (["topic", "replace-from-bench", "--with-session", "notes", "--session", "chores"],
-             request(.replaceFromBench(with: .session("notes")), target: .sessionName("chores"))),
+            (["topic", "replace-from-bench", "--with", "Next", "--board-session", "g1"],
+             request(.replaceFromBench(with: .topic("Next")), target: .boardSession("g1"))),
+            (["topic", "fill-place", "1", "--board-session", "g1"], request(.fillPlace(1), target: .boardSession("g1"))),
+            (["topic", "choose-in-play", "--board-session", "g1", "--topic", "A"], request(.chooseInPlay([.boardSession("g1"), .topic("A")]))),
         ]
         for (arguments, expected) in cases {
             XCTAssertEqual(try CLICommand(arguments: arguments, environment: inside), expected, "\(arguments)")
+        }
+        XCTAssertThrowsError(try CLICommand(arguments: ["topic", "replace-from-bench", "--with-session", "notes"], environment: inside)) {
+            XCTAssertTrue("\($0)".contains("no Board Session is on the Bench"), "\($0)")
         }
         for arguments in [["topic", "pin", "now"], ["topic", "move"], ["topic", "move", "left"], ["topic", "move", "up", "down"],
                           ["topic", "move", "up", "--trade-with", "Next"], ["topic", "move", "--trade-with", ""],

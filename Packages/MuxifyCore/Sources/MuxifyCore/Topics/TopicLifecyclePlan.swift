@@ -349,9 +349,9 @@ extension TopicReopenPlan {
 }
 
 extension TopicReopening.Session {
-    /// The Session that Reopen or Start Fresh creates for a Dormant Guest Session, which the app shows before the user
-    /// chooses: its Lock's name, +2 when a live Session has it, in its folder, with the Windows that `choice` gives. A
-    /// Guest Session has no Topic, so it makes no Worktree again.
+    /// The Session that Reopen or Start Fresh creates for a Dormant Board Session, which the app shows before the user
+    /// chooses: its remembered name, +2 when a live Session has it, in its folder, with the Windows that `choice` gives. A
+    /// Board Session has no Topic, so it makes no Worktree again.
     public init(guest lock: BoardSession, windows: [TmuxWindow], choice: TopicReopening.Choice) throws {
         guard let directory = lock.session["directory"]?.string, !directory.isEmpty else { throw TopicEditFailure.invalidSessionPath }
         try SessionNaming.validate(lock.name)
@@ -361,8 +361,8 @@ extension TopicReopening.Session {
     }
 }
 
-/// What Reopen or Start Fresh creates for a Dormant Guest Session: the Session of `TopicReopening.Session(guest:)`,
-/// pointing at its Lock with `@muxify_session_id`. Reopen of a live Guest Session only shows it. Start Fresh of a live
+/// What Reopen or Start Fresh creates for a Dormant Board Session: the Session of `TopicReopening.Session(guest:)`,
+/// pointing at its row with `@muxify_session_id`. Reopen of a live Board Session only shows it. Start Fresh of a live
 /// one fails, as it does for a live Topic.
 struct BoardSessionReopenPlan {
     let edit: TopicEdit
