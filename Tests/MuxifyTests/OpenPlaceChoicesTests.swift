@@ -13,8 +13,8 @@ final class OpenPlaceChoicesTests: XCTestCase {
         return record
     }
 
-    /// In Play (2 places): "a" and an Open Place. Guests: the Topics "g2" and "g1" and a Guest Session. Bench: "c", "b"
-    /// and "d", which the Sidebar hides. A Pinned Topic is neither.
+    /// In Play (2 places): "a" and an Open Place. Guests: the Topic "g2", the Board Session "$2" and the Topic "g1".
+    /// Bench: "c", "b" and "d", which the Sidebar hides. A Pinned Topic is neither.
     private func model() -> BoardModel {
         var config = Config()
         config.topics.inPlay = 2
@@ -36,18 +36,25 @@ final class OpenPlaceChoicesTests: XCTestCase {
                            selection: TopicSelection(), location: .openPlace("open"))
     }
 
+    /// Each row's card: a Topic by its id, a Board Session as `~` and its id.
     private func ids(_ choices: OpenPlaceChoices, _ section: OpenPlaceChoices.Section? = nil) -> [String] {
-        (section.map(choices.choices(in:)) ?? choices.choices).map(\.id)
+        (section.map(choices.choices(in:)) ?? choices.choices).map { choice in
+            switch choice.card {
+            case .topic(let id): id
+            case .session(let id): "~" + id
+            case .openPlace(let id): "_" + id
+            }
+        }
     }
 
-    func testThePageListsTheGuestTopicsThenTheWholeBenchInTheOrderOfTheTopicsList() {
+    func testThePageListsTheGuestsThenTheWholeBenchInTheOrderOfTheBoard() {
         let topics = model()
         XCTAssertEqual(topics.isBenchShown, false, "the Sidebar hides the Bench")
         let choices = OpenPlaceChoices(topics.split, query: "")
-        XCTAssertEqual(ids(choices, .guests), ["g2", "g1"], "the Guest Topics, without the Guest Session")
+        XCTAssertEqual(ids(choices, .guests), ["g2", "~$2", "g1"], "the Guests, a Board Session among them")
         XCTAssertEqual(ids(choices, .bench), ["c", "b", "d"], "the whole Bench, also while the Sidebar hides it")
-        XCTAssertEqual(ids(choices), ["g2", "g1", "c", "b", "d"], "never ranked, and no In Play or Pinned Topic")
-        XCTAssertEqual(choices.total, 5)
+        XCTAssertEqual(ids(choices), ["g2", "~$2", "g1", "c", "b", "d"], "never ranked, and no In Play or Pinned Topic")
+        XCTAssertEqual(choices.total, 6)
     }
 
     func testAQueryHidesTheRowsThatDoNotMatchAndKeepsTheOrderOfTheOthers() {
@@ -58,7 +65,7 @@ final class OpenPlaceChoicesTests: XCTestCase {
         XCTAssertEqual(kept, all.filter(kept.contains), "the rows that stay keep the list order, not a rank by match")
         let narrow = OpenPlaceChoices(topics.split, query: "rollover")
         XCTAssertEqual(ids(narrow), ["d"])
-        XCTAssertEqual(narrow.total, 5, "the count of every Topic stays for the page's header")
+        XCTAssertEqual(narrow.total, 6, "the count of every card stays for the page's header")
         XCTAssertFalse(narrow.choices[0].title.marks.isEmpty, "the row marks what matched in its title")
 
         let byNote = OpenPlaceChoices(topics.split, query: "clips")
@@ -76,13 +83,13 @@ final class OpenPlaceChoicesTests: XCTestCase {
 
     func testTheSelectionFallsToTheFirstRowAndMovesRoundTheEnds() {
         let choices = OpenPlaceChoices(model().split, query: "")
-        XCTAssertEqual(choices.selected(nil)?.id, "g2", "the first row is selected on arrival")
-        XCTAssertEqual(choices.selected("b")?.id, "b")
-        XCTAssertEqual(OpenPlaceChoices(model().split, query: "rollover").selected("b")?.id, "d",
+        XCTAssertEqual(choices.selected(nil)?.card, .topic("g2"), "the first row is selected on arrival")
+        XCTAssertEqual(choices.selected("topic-b")?.card, .topic("b"))
+        XCTAssertEqual(OpenPlaceChoices(model().split, query: "rollover").selected("topic-b")?.card, .topic("d"),
                        "a row that the query hides gives the selection to the first row")
-        XCTAssertEqual(choices.moving(from: "g2", by: 1)?.id, "g1", "down goes from the Guests into the Bench in order")
-        XCTAssertEqual(choices.moving(from: "g1", by: 1)?.id, "c")
-        XCTAssertEqual(choices.moving(from: "g2", by: -1)?.id, "d", "up from the first row goes to the last")
+        XCTAssertEqual(choices.moving(from: "topic-g2", by: 1)?.card, .session("$2"), "down goes through the Guests in order")
+        XCTAssertEqual(choices.moving(from: "topic-g1", by: 1)?.card, .topic("c"), "and from the Guests into the Bench")
+        XCTAssertEqual(choices.moving(from: "topic-g2", by: -1)?.card, .topic("d"), "up from the first row goes to the last")
     }
 
     func testTheOpenPlacePageIsTheLocationOfItsPlaceAndATopicStepGoesBesideIt() {

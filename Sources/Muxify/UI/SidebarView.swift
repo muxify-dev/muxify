@@ -293,8 +293,8 @@ private struct TopicsSection: View {
     private func listCard(_ topic: BoardModel.Row, order: [StackSlot<BoardCardID>]) -> some View {
         let state = store.topicCardState(topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
                                          showsAllRows: showingAllRows.contains(topic.id), showsTags: true)
-        if case .session(let lock) = topic.id {
-            LockedCard(store: store, state: state, lock: lock,
+        if case .session(let boardSession) = topic.id {
+            BoardSessionCard(store: store, state: state, boardSession: boardSession,
                        onShowAllRows: { showingAllRows.insert(topic.id) },
                        drag: drag, order: order, steps: model.steps(of: topic.id))
                 .equatable()
@@ -1015,15 +1015,15 @@ private struct CardMoveButtons: View {
     }
 }
 
-/// A Locked Session among the Topic cards (ADR 0018). It has a Topic card's shape and its place in the order, but it
-/// is a No Topic Session: its title and Summary come from the Session card Formats, its rows are its Windows with no
-/// SessionPath heading, and it offers only what a Session can do.
-private struct LockedCard: View, Equatable {
+/// A Board Session among the Topic cards. It has a Topic card's shape and its place in the order, In Play or among the
+/// Guests, but it is a No Topic Session: a terminal glyph leads its title, its title and Summary come from the Session
+/// card Formats, its rows are its Windows with no SessionPath heading, and it offers only what a Session can do.
+private struct BoardSessionCard: View, Equatable {
     let store: WorkspaceStore
     /// What the card shows, which its list reads from the store: see SidebarCardState.swift.
     let state: TopicCardState
-    /// The id of the Guest Session's Lock.
-    let lock: String
+    /// The Board Session's id.
+    let boardSession: String
     let onShowAllRows: () -> Void
     let drag: ListDrag<BoardCardID>
     let order: [StackSlot<BoardCardID>]
@@ -1031,7 +1031,7 @@ private struct LockedCard: View, Equatable {
     @Environment(\.interfaceFontSize) private var fontSize
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.store === rhs.store && lhs.state == rhs.state && lhs.lock == rhs.lock && lhs.drag === rhs.drag
+        lhs.store === rhs.store && lhs.state == rhs.state && lhs.boardSession == rhs.boardSession && lhs.drag === rhs.drag
             && lhs.order == rhs.order && lhs.steps == rhs.steps
     }
 
@@ -1040,7 +1040,7 @@ private struct LockedCard: View, Equatable {
     private var holdsSelection: Bool { state.holdsSelection }
     private var showsAllRows: Bool { state.showsAllRows }
 
-    private var id: BoardCardID { .session(lock) }
+    private var id: BoardCardID { .session(boardSession) }
     private var window: TmuxWindow? { row.sessions.first?.windows.first }
     /// tmux has no Session for it, as after a tmux restart: a press creates the Session again.
     private var isDormant: Bool { row.state == .dormant }
@@ -1073,8 +1073,9 @@ private struct LockedCard: View, Equatable {
     }
 
     private var header: some View {
-        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isGuest: true,
-                   hintTarget: .boardSession(lock), notes: ["Guest"] + (row.idleLabel.map { [$0] } ?? []), summary: formatted.summary) {
+        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isGuest: row.isGuest, isBoardSession: true,
+                   hintTarget: .boardSession(boardSession), notes: (row.isGuest ? ["Guest"] : []) + (row.idleLabel.map { [$0] } ?? []),
+                   summary: formatted.summary) {
             if let label = row.idleLabel { Text(label).font(fontSize.font(10)).foregroundStyle(.secondary) }
             if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
                 BellMark()
@@ -1093,16 +1094,16 @@ private struct LockedCard: View, Equatable {
         }
     }
 
-    /// The Actions of a Guest Session. It is not a Topic, so it has no Settle, Pin or Forget. A Dormant one has no
-    /// Session to rename, move or kill, and offers Start Fresh beside Reopen.
+    /// The Actions of a Board Session. It is not a Topic, so it has no Settle, Pin or Forget. Bench takes its card off
+    /// the Board. A Dormant one has no Session to rename, move or kill, and offers Start Fresh beside Reopen.
     @ViewBuilder
     private var actions: some View {
         if isDormant {
-            Button("Start Fresh") { store.reopenBoardSession(lock, .startFresh) }
+            Button("Start Fresh") { store.reopenBoardSession(boardSession, .startFresh) }
                 .accessibilityIdentifier("start-fresh-" + row.id.accessibilityID)
                 .disabled(store.changingTopic)
         }
-        Button("Bench") { store.bench(.boardSession(lock)) }
+        Button("Bench") { store.bench(.boardSession(boardSession)) }
             .disabled(store.changingTopic)
         if let window {
             Button("Rename Session…") { store.palette.begin(.text(.renameSession(window)), text: window.sessionName) }

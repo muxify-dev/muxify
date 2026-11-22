@@ -12,15 +12,16 @@ struct OrderDraft: Equatable {
     let cards: [TopicGroupID]
     /// The In Play places.
     let places: Int
-    /// The checked Guest Topics. A Guest that no place takes stays a Guest, so it has no place on the Bench to choose.
-    var guests: Set<TopicGroupID> = []
+    /// The checked cards that never wait on the Bench: a Guest that no place takes stays a Guest, and a Board Session
+    /// that no place takes leaves the Board. Neither has a place on the Bench to choose.
+    var benchless: Set<TopicGroupID> = []
     /// The card chosen for each place so far.
     var placed: [TopicGroupID] = []
 
     /// The rows of the next place: the cards not placed yet, in list order, so ↩ on each place keeps the order. Once
-    /// the In Play places are full, without the Guests.
+    /// the In Play places are full, without the cards that never wait on the Bench.
     var remaining: [TopicGroupID] {
-        cards.filter { !placed.contains($0) && (placed.count < places || !guests.contains($0)) }
+        cards.filter { !placed.contains($0) && (placed.count < places || !benchless.contains($0)) }
     }
 
     var place: Int { placed.count + 1 }
@@ -60,7 +61,7 @@ extension CommandPalette {
                                                   candidates: candidates)], query: FuzzyQuery(query), rules: PickRules())
     }
 
-    /// A row for a card of the Topics list: a Topic, or a Locked Session. A query such as `#work` narrows by Tag. A step
+    /// A row for a card of the Board: a Topic, or a Board Session. A query such as `#work` narrows by Tag. A step
     /// that follows another one with the same cards gives its rows a `prefix`: SwiftUI keeps the accessibility action of
     /// a row with the same id, so a press there would still check the card.
     func cardCandidate(_ row: BoardModel.Row, choice: PaletteChoice, prefix: String = "") -> PickCandidate<PaletteItem> {
@@ -72,7 +73,7 @@ extension CommandPalette {
                              pick: .available(PaletteItem(ref: .choice(choice))))
     }
 
-    /// The title of a card of the Topics list.
+    /// The title of a card of the Board.
     func cardTitle(_ id: TopicGroupID) -> String {
         if case .topic(let topic) = id { return topicTitle(id: topic) }
         return store?.topics.rows.first { $0.id == id }?.title ?? ""

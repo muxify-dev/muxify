@@ -194,6 +194,9 @@ struct CardHeader<Details: View>: View {
     var isPinned = false
     /// A Guest's card shows the Guest mark where a Pinned Topic's card shows its pin.
     var isGuest = false
+    /// A Board Session's card on the Board shows a small terminal glyph before its title, so it reads as a Session
+    /// among the Topic cards. The Sessions view's cards have none.
+    var isBoardSession = false
     var hintTarget: QuickSwitchTarget? = nil
     /// Words for the accessibility value after the open state, such as "Dormant".
     var notes: [String] = []
@@ -243,6 +246,7 @@ struct CardHeader<Details: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .titleLine, spacing: 5) {
+                if isBoardSession { BoardSessionGlyph() }
                 ZStack(alignment: .topLeading) {
                     if !titleMarks.isEmpty {
                         Text(Highlighted(text: title, marks: titleMarks).attributed)
@@ -314,7 +318,8 @@ struct CardHeader<Details: View>: View {
     }
 
     private var accessibilityValue: String {
-        ([isOpen ? "expanded" : "collapsed"] + notes + [mark?.rawValue, note.map { "Note: " + $0 }].compactMap { $0 }).joined(separator: ", ")
+        ([isOpen ? "expanded" : "collapsed"] + (isBoardSession ? ["Board Session"] : []) + notes
+            + [mark?.rawValue, note.map { "Note: " + $0 }].compactMap { $0 }).joined(separator: ", ")
     }
 }
 
@@ -356,6 +361,15 @@ struct PinMark: View {
 
     var body: some View {
         Image(systemName: "pin.fill").font(fontSize.font(9)).foregroundStyle(.secondary)
+    }
+}
+
+/// The glyph before a Board Session's title on the Board.
+struct BoardSessionGlyph: View {
+    @Environment(\.interfaceFontSize) private var fontSize
+
+    var body: some View {
+        Image(systemName: "terminal").font(fontSize.font(9)).foregroundStyle(.secondary)
     }
 }
 

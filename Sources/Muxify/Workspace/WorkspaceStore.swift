@@ -317,7 +317,7 @@ final class WorkspaceStore {
     /// the Sidebar folds it in.
     func tradeCard(_ id: BoardCardID, with other: BoardCardID) {
         let cut = topics.cut
-        if case .openPlace(let place) = other, case .topic(let topic) = id { return fillOpenPlace(place, with: topic) }
+        if case .openPlace(let place) = other { return fillOpenPlace(place, with: id) }
         guard let target = Self.target(of: id), let ref = Self.ref(of: other) else { return }
         let rows = cut.compactMap(\.row)
         if !benchShown, benchPeek != .all, rows.bench.contains(where: { $0.id.listID == id || $0.id.listID == other }) {
@@ -328,11 +328,10 @@ final class WorkspaceStore {
     }
 
     /// Fill an Open Place goes through the Topic service, as `muxify topic fill-place` does. With `opening`, the
-    /// Location then goes to the Topic, as a fill from the Open Place page does.
-    func fillOpenPlace(_ placeID: String, with topic: String, opening: Bool = false) {
-        guard let place = topics.place(ofOpenPlace: placeID) else { return }
-        perform(EnvironmentRequest(.fillOpenPlace(place: place), target: .topic(.id(topic))),
-                presenting: opening ? .goTo(.topic(topic)) : .edit)
+    /// Location then goes to the card, as a fill from the Open Place page does.
+    func fillOpenPlace(_ placeID: String, with card: BoardCardID, opening: Bool = false) {
+        guard let place = topics.place(ofOpenPlace: placeID), let target = Self.target(of: card), let group = TopicGroupID(card) else { return }
+        perform(EnvironmentRequest(.fillOpenPlace(place: place), target: target), presenting: opening ? .goTo(group) : .edit)
     }
 
     /// Goes to the Open Place page (ADR 0095): the Open Place becomes the Location, and the page's search field takes
@@ -352,15 +351,13 @@ final class WorkspaceStore {
 
     /// The Open Place page's rows, with the titles that the Sidebar cards show.
     var openPlaceChoices: OpenPlaceChoices {
-        OpenPlaceChoices(topics.split, query: openPlacePage.query) { row in
-            sidebarText(.topic, context: sidebarFormatContexts.topics[row.id]).title
-        }
+        OpenPlaceChoices(topics.split, query: openPlacePage.query) { cardText($0).title }
     }
 
-    /// ↩ on the Open Place page: the selected Topic fills the place and opens.
-    func fillOpenPlaceFromPage(with topic: String) {
+    /// ↩ on the Open Place page: the selected card fills the place and opens.
+    func fillOpenPlaceFromPage(with card: BoardCardID) {
         guard case .openPlace(let place) = location else { return }
-        fillOpenPlace(place, with: topic, opening: true)
+        fillOpenPlace(place, with: card, opening: true)
     }
 
     /// Move Up and Move Down: MuxifyCore decides the step (`TopicCards.step`) with the Bench as the Sidebar shows it.
@@ -376,8 +373,8 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.moveCard(step == .up ? .up : .down), target: target))
     }
 
-    /// A Guest Session's card goes by its Lock id, live or Dormant. Only a server that sends Locks gives the Sidebar a
-    /// Guest Session's card, and such a server takes the `guest_session` target and card.
+    /// A Board Session's card goes by its id, live or Dormant. Only a server that sends Board Sessions gives the Sidebar
+    /// such a card, and such a server takes the `board_session` target and card.
     private static func target(of card: BoardCardID) -> EnvironmentTarget? {
         switch card {
         case .topic(let id): return .topic(.id(id))
@@ -398,8 +395,8 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(pinned ? .pin : .unpin, target: .topic(.id(id))))
     }
 
-    /// A card that Make a Guest and Bench act on: a Topic, a live No Topic Session by its tmux id, which is a Guest
-    /// through its Lock, or a Guest Session, live or Dormant, by its Lock id.
+    /// A card that Make a Guest and Bench act on: a Topic, a live No Topic Session by its tmux id, which has a card when
+    /// it is a Board Session, or a Board Session, live or Dormant, by its id.
     enum GuestCard: Equatable {
         case topic(String)
         case session(String)
@@ -414,7 +411,7 @@ final class WorkspaceStore {
         }
     }
 
-    /// The card that `card` is in the Topics list; a No Topic Session that is not a Guest has none of its own.
+    /// The card that `card` is on the Board; a No Topic Session that is not a Board Session has none of its own.
     private func group(of card: GuestCard) -> TopicGroupID {
         switch card {
         case .topic(let id): .topic(id)
@@ -423,8 +420,10 @@ final class WorkspaceStore {
         }
     }
 
-    /// Whether the card is a Guest; nil when Make a Guest does not apply to it: the card is a Topic that is not on the
-    /// Bench or a Session in an open Topic, or Topics are off or Remote. A Guest leaves through Bench.
+    /// Whether Make a Guest has made the card's Guest already: false for a Benched Topic or a No Topic Session with no
+    /// card, which Make a Guest takes, and true for a Board Session, which has its card, in a place or among the Guests.
+    /// Nil when Make a Guest does not apply: a Topic that is not on the Bench, a Session in an open Topic, or Topics
+    /// are off or Remote. A card leaves through Bench.
     func guestState(of card: GuestCard) -> Bool? {
         guard link.features.contains(.topics), topics.topicsEnabled else { return nil }
         switch card {
@@ -437,8 +436,8 @@ final class WorkspaceStore {
         }
     }
 
-    /// Bench applies to a card In Play: a Topic in an In Play place, a Guest Topic or a Guest Session. Not to a
-    /// Benched or Pinned Topic.
+    /// Bench applies to a card In Play: a Topic in an In Play place, a Guest Topic or a Board Session, which is always
+    /// In Play. Not to a Benched or Pinned Topic.
     func canBench(_ card: GuestCard) -> Bool {
         guard link.features.contains(.topics), topics.topicsEnabled else { return false }
         switch card {
@@ -448,7 +447,7 @@ final class WorkspaceStore {
     }
 
     /// Bench goes through the Topic service, as `muxify topic bench` does. A Topic goes to the top of the Bench; a
-    /// Session has no record to wait there, so it leaves its Lock and waits in No Topic. When the
+    /// Board Session has no record to wait there, so its card leaves the Board and a live one waits in No Topic. When the
     /// user is on the card, the Next Topic opens, as after Settle, but only when it shows: the card's Sessions stay, so
     /// with no other card In Play the user stays on it rather than on another Benched card.
     func bench(_ card: GuestCard) {
@@ -471,8 +470,8 @@ final class WorkspaceStore {
         return selectedWindow.map { .session($0.sessionID) }
     }
 
-    /// Make a Guest goes through the Topic service, as `muxify topic make-guest` does (ADR 0032). A Session is a Guest
-    /// through its Lock.
+    /// Make a Guest goes through the Topic service, as `muxify topic make-guest` does (ADR 0032). A No Topic Session
+    /// becomes a Board Session among the Guests.
     func makeGuest(_ card: GuestCard) {
         guard guestState(of: card) == false, let target = card.target else { return }
         perform(EnvironmentRequest(.makeGuest, target: target))
@@ -1100,11 +1099,10 @@ final class WorkspaceStore {
         link.features.contains(.topics) && !changingTopic && topics.topicsEnabled && topics.rows.contains { !$0.isPinned }
     }
 
-    /// The check step of Choose In Play, with the In Play Topics and the Guest Topics checked.
+    /// The check step of Choose In Play, with the cards In Play checked: the places and the Guests.
     func presentChooseInPlay(keepingHistory: Bool = false) {
         guard canChooseInPlay else { return }
-        let topics = self.topics.split.inPlay.filter { if case .topic = $0.id { return true } else { return false } }
-        let draft = CheckDraft(action: .chooseInPlay(places: topicConfig.inPlay), checked: Set(topics.map(\.id)))
+        let draft = CheckDraft(action: .chooseInPlay(places: topicConfig.inPlay), checked: Set(topics.split.inPlay.map(\.id)))
         palette.begin(.check(draft), keepingHistory: keepingHistory)
     }
 
@@ -3401,7 +3399,7 @@ final class WorkspaceStore {
             openPlacePage.selectedID = choices.moving(from: choices.selected(openPlacePage.selectedID)?.id, by: delta)?.id
             return true
         case .jumpTo?:
-            if let choice = choices.selected(openPlacePage.selectedID) { fillOpenPlaceFromPage(with: choice.topicID) }
+            if let choice = choices.selected(openPlacePage.selectedID) { fillOpenPlaceFromPage(with: choice.card) }
             return true
         default:
             return false

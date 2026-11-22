@@ -137,10 +137,10 @@ final class BenchTests: XCTestCase {
     func testAGuestIsInPlayAndDoesNotCountTowardInPlay() {
         let lock = model(inPlay: 2, windows: [.fixture(id: "@2", sessionID: "$2", savedSessionID: "$2")], boardSessions: [BoardSession(id: "$2", order: 0.5, isGuest: true)])
         XCTAssertEqual(shown(lock), ["topic-pinned", "topic-a", "topic-b", "guests-line", "locked-$2", "bench-line"],
-                       "a Locked Session is a Guest, under the Guests line and never between two places")
+                       "a Board Session in the Guests is under the Guests line, never between two places")
         XCTAssertEqual(lock.rows.filter(\.isGuest).map(\.id), [.session("$2")])
-        XCTAssertEqual(CheckAction.chooseInPlay(places: 2).listed(lock).map(\.id), [.topic("a"), .topic("b"), .topic("c"), .topic("d")],
-                       "Choose In Play does not list a Guest Session")
+        XCTAssertEqual(CheckAction.chooseInPlay(places: 2).listed(lock).map(\.id),
+                       [.topic("a"), .session("$2"), .topic("b"), .topic("c"), .topic("d")], "Choose In Play lists a Board Session")
 
         var records = self.records
         records[4].isGuest = true

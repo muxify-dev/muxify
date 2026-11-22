@@ -121,24 +121,23 @@ extension WorkspaceStore {
             return []
         }
         let selected = selectedWindowID.flatMap { id in items.contains { $0.window.id == id } ? id : nil }
-        let formatted: SidebarFormats.Text
         var guest: Bool?
         var canBench = false
-        switch topic.id {
-        case .session(let lock):
-            // A Dormant Guest Session has no live Session to read: its card shows the Session that its Lock remembers.
-            let live = topic.sessions.first.flatMap { sidebarFormatContexts.sessions[$0.id.session] }
-            formatted = sidebarText(.session, context: live ?? sidebarFormatContexts.dormantBoardSessions[lock])
-        default:
-            formatted = sidebarText(.topic, context: sidebarFormatContexts.topics[topic.id])
-            if case .topic(let id) = topic.id {
-                guest = guestState(of: .topic(id))
-                canBench = self.canBench(.topic(id))
-            }
+        if case .topic(let id) = topic.id {
+            guest = guestState(of: .topic(id))
+            canBench = self.canBench(.topic(id))
         }
-        return TopicCardState(topic: topic, titles: titles, formatted: formatted, tags: showsTags ? cardTags(topic) : nil,
+        return TopicCardState(topic: topic, titles: titles, formatted: cardText(topic), tags: showsTags ? cardTags(topic) : nil,
                               holdsSelection: holdsSelection, showsAllRows: showsAllRows, selectedWindowID: selected,
                               rows: sidebarRowStates(items), guestState: guest, canBench: canBench,
                               changingTopic: changingTopic)
+    }
+
+    /// The title and Summary of a card on the Board, from the Topic card Formats, or from the Session card Formats for a
+    /// Board Session. A Dormant Board Session has no live Session to read: its card shows the Session it remembers.
+    func cardText(_ row: BoardModel.Row) -> SidebarFormats.Text {
+        guard case .session(let id) = row.id else { return sidebarText(.topic, context: sidebarFormatContexts.topics[row.id]) }
+        let live = row.sessions.first.flatMap { sidebarFormatContexts.sessions[$0.id.session] }
+        return sidebarText(.session, context: live ?? sidebarFormatContexts.dormantBoardSessions[id])
     }
 }

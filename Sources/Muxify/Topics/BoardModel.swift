@@ -10,7 +10,12 @@ extension TopicGroupID {
         }
     }
 
-    /// The card's place in the Topic order; No Topic has none.
+    var isBoardSession: Bool {
+        if case .session = self { return true }
+        return false
+    }
+
+    /// The card's place in the Board's order; No Topic has none.
     var listID: BoardCardID? {
         switch self {
         case .topic(let id): return .topic(id)
