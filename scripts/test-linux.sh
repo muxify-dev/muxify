@@ -17,6 +17,13 @@
 # such as --dns 1.1.1.1 when the host's resolver does not answer for the Ubuntu
 # mirrors that apt needs. MUXIFY_TEST_TIME_SCALE, which stretches the tests'
 # waits (docs/testing.md), reaches the tests as it is set here.
+#
+# STRESS=1 is the stress mode (docs/testing.md): the time scale 3, a CPU hog on
+# every core of the container (scripts/with-cpu-hog.sh), and STRESS_ITERATIONS
+# (default 5) runs of swift test that stop at the first failure, with no retries.
+# STRESS_FILTER passes swift test's --filter; STRESS_PACKAGE (core, cli or both,
+# the default) chooses MuxifyCore, the CLI or both. scripts/test-linux-swift.sh
+# runs the swift test calls.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,11 +42,27 @@ fi
 # shellcheck disable=SC2206 # the extra options split on spaces
 options+=(${TEST_LINUX_DOCKER_ARGS:-})
 
-docker run --rm ${options[@]+"${options[@]}"} \
+stress="${STRESS:-}"
+time_scale="${MUXIFY_TEST_TIME_SCALE:-}"
+if [ -n "$stress" ]; then
+  time_scale=3
+fi
+
+# The docker client neither stops nor stops its container on a signal, so docker runs in the background, and an
+# interrupted run removes the container, the CPU hog of a stress run with it.
+container="muxify-test-linux-$$"
+cleanup() {
+  docker rm -f "$container" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+docker run --rm --name "$container" ${options[@]+"${options[@]}"} \
   -v "$ROOT:/src" -v "$CACHE_VOLUME:/cache" -w /src \
   -e TMUX_VERSION="$TMUX_VERSION" -e TMUX_SHA256="$TMUX_SHA256" \
   -e OWNER_UID="$(id -u)" -e OWNER_GID="$(id -g)" \
-  -e MUXIFY_TEST_TIME_SCALE="${MUXIFY_TEST_TIME_SCALE:-}" \
+  -e MUXIFY_TEST_TIME_SCALE="$time_scale" -e STRESS="$stress" -e STRESS_ITERATIONS="${STRESS_ITERATIONS:-5}" \
+  -e STRESS_FILTER="${STRESS_FILTER:-}" -e STRESS_PACKAGE="${STRESS_PACKAGE:-both}" \
   "$HOST_CLI_SWIFT_IMAGE" bash -euo pipefail -c '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null
@@ -62,11 +85,12 @@ docker run --rm ${options[@]+"${options[@]}"} \
     mkdir -p /cache/home /cache/build
     chown "$OWNER_UID:$OWNER_GID" /cache/home /cache/build
 
-    runuser -u tester -- env HOME=/cache/home MUXIFY_REQUIRE_TMUX=1 MUXIFY_TEST_TIME_SCALE="$MUXIFY_TEST_TIME_SCALE" bash -uo pipefail -c "
-      build=/cache/build/\$(uname -m)
-      status=0
-      swift test --package-path Packages/MuxifyCore --scratch-path \$build/core || status=1
-      swift test --scratch-path \$build/cli || status=1
-      exit \$status
-    "
-  '
+    hog=()
+    if [ -n "$STRESS" ]; then
+      hog=(scripts/with-cpu-hog.sh)
+    fi
+    runuser -u tester -- env HOME=/cache/home MUXIFY_REQUIRE_TMUX=1 MUXIFY_TEST_TIME_SCALE="$MUXIFY_TEST_TIME_SCALE" \
+      STRESS="$STRESS" STRESS_ITERATIONS="$STRESS_ITERATIONS" STRESS_FILTER="$STRESS_FILTER" STRESS_PACKAGE="$STRESS_PACKAGE" \
+      ${hog[@]+"${hog[@]}"} scripts/test-linux-swift.sh
+  ' &
+wait $!
