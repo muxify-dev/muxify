@@ -53,6 +53,35 @@ Give it a bound that the buggy behaviour cannot meet, not one tuned to an idle
 machine: "two 2 s runs at the same time" stays below the 4 s they take one after
 the other.
 
+## Wait for a signal, with the shared wait
+
+A test waits for what it asserts, never for a fixed time: a busy machine can
+overrun any sleep. Wait with the shared waits of `MuxifyTestSupport`, which all
+three test bundles import, never with a private polling loop:
+
+- `eventually("the hook did not run") { … }` looks at its condition every
+  20 ms for up to 10 s (`timeout:` names another time) and fails the test with
+  the message if it never holds. Called on the main thread, the sync form runs
+  the main run loop between looks, so main-queue work can happen. An async test
+  gets the async form.
+- `settled("the subscription did not settle") { recorder.items }` waits until
+  no new item has come for a quiet period (1.2 s, `quiet:`), up to a deadline,
+  and returns the items it saw.
+
+Both report a timeout through `fail:`, which defaults to `XCTFail`; a test of
+the waits themselves passes its own.
+
+### The time scale
+
+`MUXIFY_TEST_TIME_SCALE` multiplies every deadline and quiet period of the
+shared waits. Unset, empty, not a number or below 1 means 1, so a local run
+fails fast. CI's test steps set it to 3, as a CI runner is slower and busier
+than a Mac. `make test` forwards it to the test process (as
+`TEST_RUNNER_MUXIFY_TEST_TIME_SCALE`), and `make test-linux` passes it into
+Docker, so `MUXIFY_TEST_TIME_SCALE=3 make test` waits as CI waits. A bound on
+elapsed time that a test keeps, where speed is the behaviour under test, goes
+through `scaled(_:)` too.
+
 ## Live SSH test
 
 The live tests (`LiveSSHTests` and `LiveHostCLITests`) skip unless
