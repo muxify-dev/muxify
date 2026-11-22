@@ -76,6 +76,8 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
                          'the Guest Session has no Dormant card after the tmux restart', seconds=15)
         self.assertIn('Guest', s.row(key, rs).get('accessibilityValue', ''), self.describe(key, rs))
         self.assertIn('dormant-notes', s.row(key, rs).get('accessibilityLabel', ''), self.describe(key, rs))
+        self.assertEqual(s.row(key, rs).get('accessibilityHelp'), '2 Windows',
+                         'the closed Dormant card does not show the Windows that it remembers: ' + self.describe(key, rs))
         self.assertTrue(self.above('topics-guests-line', key, rs) and self.above(key, later_key, rs),
                         'the Dormant card left its place: %s' % [self.describe(k, rs) for k in (key, later_key)])
 

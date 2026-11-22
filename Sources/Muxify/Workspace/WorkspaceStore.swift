@@ -1052,7 +1052,7 @@ final class WorkspaceStore {
     var sidebarFormatContexts: SidebarFormatContexts { sidebarFormatsCache.value }
     @ObservationIgnored private lazy var sidebarFormatsCache = ObservedCache { [unowned self] in
         SidebarFormatContexts(model: topics, windows: windows, panes: panes, agents: agents,
-                              branches: topicBranches, records: records, sessionPaths: sessionPaths,
+                              branches: topicBranches, records: records, locks: locks, sessionPaths: sessionPaths,
                               tabCounts: Dictionary(windows.map { ($0.id, tabCount(for: $0)) },
                                                     uniquingKeysWith: { first, _ in first }),
                               isOnThisMac: link.isOnThisMac, features: link.features)

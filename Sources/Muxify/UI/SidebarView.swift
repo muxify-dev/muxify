@@ -1028,6 +1028,7 @@ private struct LockedCard: View, Equatable {
     let drag: ListDrag<TopicListID>
     let order: [StackSlot<TopicListID>]
     let steps: CardSteps
+    @Environment(\.interfaceFontSize) private var fontSize
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.store === rhs.store && lhs.state == rhs.state && lhs.lock == rhs.lock && lhs.drag === rhs.drag
@@ -1074,6 +1075,7 @@ private struct LockedCard: View, Equatable {
     private var header: some View {
         CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isGuest: true,
                    hintTarget: .locked(lock), notes: ["Guest"] + (row.idleLabel.map { [$0] } ?? []), summary: formatted.summary) {
+            if let label = row.idleLabel { Text(label).font(fontSize.font(10)).foregroundStyle(.secondary) }
             if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
                 BellMark()
             }

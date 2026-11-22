@@ -30,6 +30,18 @@ final class SidebarFormatContextTests: XCTestCase {
         XCTAssertEqual(try SidebarFormat("#{pane_count}/#{agent_count}/#{agents_working}/#{agents_unread}").expand(in: topic), "1/1/1/1")
     }
 
+    func testADormantGuestSessionShowsTheSessionThatItsLockRemembers() throws {
+        let windows: [JSONValue] = [.object(["name": .string("shell")]), .object(["name": .string("logs")])]
+        let lock = SessionLock(id: "g1", order: 0, session: .object(["name": .string("notes"), "base_name": .string("notes"),
+                                                                     "windows": .array(windows)]))
+        let model = TopicsModel(records: [], locks: [lock], windows: [], config: Config(), selection: TopicSelection())
+        let contexts = SidebarFormatContexts(model: model, windows: [], panes: [], agents: [], branches: TopicBranches(), records: [],
+                                             locks: [lock], sessionPaths: [], tabCounts: [:])
+        let text = SidebarFormats.defaults.text(for: .session, in: try XCTUnwrap(contexts.dormantGuestSessions["g1"]), mode: .topics)
+        XCTAssertEqual(text.title, "notes")
+        XCTAssertEqual(text.summary, "2 Windows")
+    }
+
     func testAgentDefaultsKeepGroupTextAndHideItInScopedSections() throws {
         for hasTopic in [true, false] {
             var window = window()
