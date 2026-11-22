@@ -1,5 +1,7 @@
 # A Guest is In Play above the limit and keeps its position
 
+> **Partly superseded by [ADR-0102](0102-a-board-session-can-take-an-in-play-place.md):** a Locked Session is a Board Session, and it can take an In Play place. Bench takes its card off the Board. A Trade or Replace from Bench that would send it to the Bench takes it off the Board too.
+
 > **Partly superseded by [ADR-0094](0094-a-new-topic-is-a-guest.md):** a new Topic is a Guest, at the end of the Guests.
 
 > **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** every Locked Session is a Guest Session, and Lock Session and Unlock Session are gone. The app gathers the Locks into the Guests when the order on disk is not the order of the sections, and it keeps no flag. The text below about a Config without `in_play` does not apply.

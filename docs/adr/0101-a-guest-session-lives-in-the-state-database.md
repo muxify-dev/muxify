@@ -1,5 +1,7 @@
 # A Guest Session lives in the state database
 
+> **Partly superseded by [ADR-0102](0102-a-board-session-can-take-an-in-play-place.md):** a Guest Session is a Board Session, which can take an In Play place. The table is `board_sessions`, with a `guest` column, the capability is `board`, the event is `board_sessions` and the target is `board_session`. A Dormant Board Session offers Start Fresh as well as Reopen.
+
 > Supersedes in part [ADR-0018](0018-a-lock-lives-on-the-tmux-session.md): the Lock is no longer the tmux option `@muxify_lock`.
 
 A Guest Session was only the tmux Session option `@muxify_lock` (ADR 0018). When tmux restarted, the Lock ended with the Session, so the user lost the card, the Session, its Windows and its place among the Guests. A Guest Topic came back, because its record is outside tmux. The user wants a Guest Session to come back too.
