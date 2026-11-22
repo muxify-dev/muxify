@@ -142,7 +142,7 @@ To mark a Topic as done. It leaves the Sidebar, its Sessions are killed or leave
 _Avoid_: close, archive, resolve, complete
 
 **Reopen**:
-To bring a Settled or Dormant Topic back and create its remembered Sessions again, with their Windows, Panes, Tabs and Agents.
+To bring a Settled or Dormant Topic, or a Dormant Guest Session, back and create its remembered Sessions again, with their Windows, Panes, Tabs and Agents.
 _Avoid_: restore (also for bringing back every Topic after a restart, which is Reopen done by Muxify at launch; it never Reopens a Settled Topic), unsettle, resume
 
 **Remembered Session**:
@@ -162,7 +162,7 @@ A Command that Forgets, in one step, every Settled Topic that was Settled more t
 _Avoid_: prune, clean up, auto-forget
 
 **Dormant**:
-An open Topic that has no live Sessions but remembers Sessions, for example after a tmux restart. It stays Dormant in the Sidebar until the user goes to it, which Reopens it, or Settles it. With `topics.reopen_at_launch`, Muxify Reopens every Dormant Topic by itself when it launches.
+An open Topic that has no live Sessions but remembers Sessions, or a Guest Session whose Lock has no live Session, for example after a tmux restart. Its card stays at its place in the Sidebar, dimmed, until the user goes to it, which Reopens it. A Dormant Topic can also be Settled, and a Dormant Guest Session Benched. With `topics.reopen_at_launch`, Muxify Reopens every Dormant Topic and Dormant Guest Session by itself when it launches.
 _Avoid_: inactive, sleeping, suspended
 
 **Empty**:
@@ -190,15 +190,15 @@ To keep a Topic above every Topic that is not Pinned, in each list of Topics, un
 _Avoid_: favorite, star, sticky, keep on top
 
 **Lock**:
-The tmux option that makes a No Topic Session a Guest Session. Make a Guest sets it. It stays until Bench ends it, the Session ends, or the Session goes into a Topic. It is a word of the code and of tmux: the user sees Guest Session, Make a Guest and Bench.
-_Avoid_: pin, keep, dock, sticky, Lock Session (as a Command or an Action)
+The record in the state database that makes a No Topic Session a Guest Session. It keeps the Guest Session's place among the Guests and its Remembered Session, and the live Session points at it with `@muxify_session_id`. Make a Guest writes it. It stays until Bench ends it, the user ends the Session, or the Session goes into a Topic; a tmux restart does not end it. It is a word of the code: the user sees Guest Session, Make a Guest and Bench.
+_Avoid_: pin, keep, dock, sticky, Lock Session (as a Command or an Action), `@muxify_lock` (the tmux option of an older Muxify)
 
 **Locked Session**:
-A No Topic Session that has a Lock. It has a card among the Guests, but it is not a Topic: it cannot be Settled, Pinned or Forgotten. Every Locked Session is a Guest, and the user sees it as a Guest Session.
+A No Topic Session that has a Lock, live or Dormant. It has a card among the Guests, but it is not a Topic: it cannot be Settled, Pinned or Forgotten. Every Locked Session is a Guest, and the user sees it as a Guest Session. When tmux has no Session for its Lock, it is a Dormant Guest Session: its card stays at its place, and opening it creates the Session again with its Windows, Panes and Agents.
 _Avoid_: kept Session, pinned Session, Topic (when you mean the Session)
 
 **Unlock**:
-To end a Lock, which Bench of a Guest Session does. The Session stays, as a No Topic Session. It is a word of the code: the user sees Bench.
+To end a Lock, which Bench of a Guest Session does. A live Session stays, as a No Topic Session. It is a word of the code: the user sees Bench.
 _Avoid_: unpin, release, Unlock Session (as a Command or an Action)
 
 **Guest**:
@@ -206,11 +206,11 @@ A card In Play above the number that the Config gives: a Topic with the Guest ma
 _Avoid_: visitor, temporary Topic, extra slot, Pin (when you mean a Guest)
 
 **Make a Guest**:
-An Action on a Benched Topic or a No Topic Session. The card goes to the end of the Guests, directly above the Bench line, as a Guest. No other card goes to the Bench. For a Session, it sets the Lock.
+An Action on a Benched Topic or a No Topic Session. The card goes to the end of the Guests, directly above the Bench line, as a Guest. No other card goes to the Bench. For a Session, it writes the Lock.
 _Avoid_: put In Play, promote, Lock Session
 
 **Bench (the Action)**:
-The Action that takes a card out of In Play: an In Play Topic, a Guest Topic or a Guest Session. A Topic goes to the top of the Bench and keeps its Sessions and Agents. From an In Play place it leaves an Open Place there. A Guest Topic loses its Guest mark and leaves no Open Place. A Guest Session has no record to wait on the Bench, so Bench Unlocks it: it waits in No Topic, and its card ends. When the user is on the card, the Next Topic opens if the Sidebar shows it.
+The Action that takes a card out of In Play: an In Play Topic, a Guest Topic or a Guest Session, live or Dormant. A Topic goes to the top of the Bench and keeps its Sessions and Agents. From an In Play place it leaves an Open Place there. A Guest Topic loses its Guest mark and leaves no Open Place. A Guest Session has no Topic record to wait on the Bench, so Bench Unlocks it: its card ends, and a live one waits in No Topic. When the user is on the card, the Next Topic opens if the Sidebar shows it.
 _Avoid_: End Guest, Bench Topic, Snooze, hide, demote
 
 **Open Place**:
