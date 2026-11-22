@@ -45,9 +45,11 @@ test: project
 	./scripts/check-palette-structure.sh
 	# The verify runner's own tests (scripts/verify/test_run.py). They never launch the app, so they run here, not in make verify.
 	python3 -m unittest scripts.verify.test_run
-	# xcodebuild gives a test only the variables named TEST_RUNNER_<name>, as <name>.
+	# xcodebuild gives a test only the variables named TEST_RUNNER_<name>, as <name>. Its parallel output names a failed
+	# test but not why, so a failed run prints each failure's message and line from the result bundle.
 	TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
-		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) $(XCODEBUILD_EXTRA_SETTINGS) test
+		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) $(XCODEBUILD_EXTRA_SETTINGS) test \
+		|| { status=$$?; ./scripts/print-test-failures.py; exit $$status; }
 
 # swift test for the CLI and MuxifyCore on Linux, in Docker (OrbStack on a Mac) with the Swift image of make host-cli,
 # tmux and git, and MUXIFY_REQUIRE_TMUX=1. TEST_LINUX_PLATFORM=linux/amd64 picks another architecture than the host's.
