@@ -113,13 +113,13 @@ final class GhosttyRuntime {
     }
 
     /// Must run before any surface is created.
-    func start(ghosttyConfigFile: String?) {
+    func start(ghosttyConfigFile: String?, theme: String?) {
         guard app == nil else { return }
         if ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) != GHOSTTY_SUCCESS {
             Diagnostics.report("ghostty_init failed")
             return
         }
-        config = Self.loadConfig(ghosttyConfigFile: ghosttyConfigFile)
+        config = Self.loadConfig(ghosttyConfigFile: ghosttyConfigFile, theme: theme)
 
         var runtime = ghostty_runtime_config_s(
             userdata: Unmanaged.passUnretained(self).toOpaque(),
@@ -179,8 +179,8 @@ final class GhosttyRuntime {
 
     /// Re-reads the config files. libghostty answers with CONFIG_CHANGE,
     /// which carries the resolved theme colors.
-    func reloadConfig(ghosttyConfigFile: String?) {
-        guard let app, let fresh = Self.loadConfig(ghosttyConfigFile: ghosttyConfigFile) else { return }
+    func reloadConfig(ghosttyConfigFile: String?, theme: String?) {
+        guard let app, let fresh = Self.loadConfig(ghosttyConfigFile: ghosttyConfigFile, theme: theme) else { return }
         ghostty_app_update_config(app, fresh)
         // Free the old config only after libghostty has switched to the new one.
         if let old = config { ghostty_config_free(old) }
@@ -208,18 +208,35 @@ final class GhosttyRuntime {
 
     /// The user's normal Ghostty config (~/.config/ghostty/config etc.), so
     /// fonts, themes and keybinds match their standalone Ghostty, with the
-    /// file the Config names on top, as `ghostty --config-file=` does.
-    private static func loadConfig(ghosttyConfigFile: String?) -> ghostty_config_t? {
+    /// file the Config names on top, as `ghostty --config-file=` does. The
+    /// Config's `ghostty.theme` goes over them all; without it, Muxify's
+    /// default theme goes under them, so a theme from a Ghostty config wins.
+    private static func loadConfig(ghosttyConfigFile: String?, theme: String?) -> ghostty_config_t? {
         guard let config = ghostty_config_new() else { return nil }
+        if theme == nil { load(theme: Config.defaultGhosttyTheme, into: config) }
         ghostty_config_load_default_files(config)
         if let ghosttyConfigFile { ghostty_config_load_file(config, ghosttyConfigFile) }
         ghostty_config_load_recursive_files(config)
+        if let theme { load(theme: theme, into: config) }
         ghostty_config_finalize(config)
         for i in 0..<ghostty_config_diagnostics_count(config) {
             let diagnostic = ghostty_config_get_diagnostic(config, i)
             if let message = diagnostic.message { Diagnostics.report("ghostty config: \(String(cString: message))") }
         }
         return config
+    }
+
+    /// Loads a Ghostty config file that sets only `theme`, as libghostty reads settings only from files.
+    private static func load(theme: String, into config: ghostty_config_t) {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-\(getpid())-theme.ghostty")
+        do {
+            try "theme = \(theme)\n".write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            Diagnostics.report("ghostty theme: \(error.localizedDescription)")
+            return
+        }
+        ghostty_config_load_file(config, file.path)
+        try? FileManager.default.removeItem(at: file)
     }
 
     // MARK: - Actions

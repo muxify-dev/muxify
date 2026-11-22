@@ -261,6 +261,14 @@ public struct Config: Equatable {
     /// The Ghostty config file the terminal loads on top of Ghostty's
     /// default files, as an absolute path.
     public var ghosttyConfigFile: String?
+    /// `ghostty.theme`: the Terminal's Ghostty `theme`, spelled as Ghostty spells it, which wins over every Ghostty
+    /// config file. Nil: `defaultGhosttyTheme`, under the Ghostty config files.
+    public var ghosttyTheme: String?
+    /// The Ghostty themes that apply when neither the Config nor a Ghostty config file sets one.
+    public static let defaultGhosttyThemes = (light: "iTerm2 Solarized Light", dark: "Dracula")
+    /// `defaultGhosttyThemes` as Ghostty spells the pair.
+    public static var defaultGhosttyTheme: String { ghosttyTheme(light: defaultGhosttyThemes.light, dark: defaultGhosttyThemes.dark) }
+    static func ghosttyTheme(light: String, dark: String) -> String { "light:\(light),dark:\(dark)" }
     /// `override`: the Config Override paths the Config names, resolved, in list order, missing ones included
     /// (ADR 0075).
     public var overrides: [String] = []
@@ -316,6 +324,12 @@ public struct Config: Equatable {
         #   # files. ~/ is the home directory; a relative path starts at the
         #   # directory of this file.
         #   config_file: ~/.config/ghostty/config
+        #   # The Terminal's Ghostty theme, over any theme a Ghostty config
+        #   # sets: one theme, or one for light appearance and one for dark.
+        #   # Without it, a theme from a Ghostty config applies, else this one.
+        #   theme:
+        #     light: iTerm2 Solarized Light
+        #     dark: Dracula
         #
         # ui:
         #   # The Interface font size: the size in points, like Ghostty's
@@ -1202,10 +1216,43 @@ private struct ConfigReader {
                 // Kept although missing, so the watcher sees the file appear.
                 config.ghosttyConfigFile = file
                 if read(file) == nil { problem(at: value, "ghostty.config_file \(file): not found") }
+            case "theme":
+                if let theme = ghosttyTheme(value) { config.ghosttyTheme = theme }
             default:
                 problem(at: key, "unknown key \"ghostty.\(name)\"")
             }
         }
+    }
+
+    /// A theme name, or a mapping with a theme name for `light`, `dark` or both, as Ghostty spells the pair. A
+    /// side the mapping leaves out keeps its default.
+    private mutating func ghosttyTheme(_ node: Node) -> String? {
+        func name(_ node: Node, _ place: String, pair: Bool) -> String? {
+            let name = string(node)?.trimmingCharacters(in: .whitespaces)
+            // A comma or a colon would end a theme name of Ghostty's light:dark pair; a newline would end the line.
+            let forbidden = CharacterSet.controlCharacters.union(pair ? CharacterSet(charactersIn: ",:") : [])
+            guard let name, !name.isEmpty, name.rangeOfCharacter(from: forbidden) == nil else {
+                problem(at: node, "\(place): expected a theme name")
+                return nil
+            }
+            return name
+        }
+        guard node.mapping != nil else { return name(node, "ghostty.theme", pair: false) }
+        var (light, dark) = Config.defaultGhosttyThemes
+        var valid = true
+        for (key, keyNode, value) in entries(of: node, "ghostty.theme") {
+            guard key == "light" || key == "dark" else {
+                problem(at: keyNode, "unknown key \"ghostty.theme.\(key)\"")
+                valid = false
+                continue
+            }
+            guard let theme = name(value, "ghostty.theme.\(key)", pair: true) else {
+                valid = false
+                continue
+            }
+            if key == "light" { light = theme } else { dark = theme }
+        }
+        return valid ? Config.ghosttyTheme(light: light, dark: dark) : nil
     }
 
     public mutating func readRemoteEnvironments(_ node: Node) {

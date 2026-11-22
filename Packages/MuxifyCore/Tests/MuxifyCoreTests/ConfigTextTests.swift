@@ -99,7 +99,7 @@ final class ConfigSettingTests: XCTestCase {
     /// Each setting the template shows, set alone, gives the Config that leaves it out. Only these show an example.
     func testTheTemplateShowsTheDefaultOfEverySettingButItsExamples() {
         XCTAssertEqual(Config.settings.filter { !$0.isDefault }.map(\.id), [
-            "override", "ghostty.config_file", "git_view.editor", "sessions.paths", "sessions.aliases", "worktrees.root_path",
+            "override", "ghostty.config_file", "ghostty.theme.light", "ghostty.theme.dark", "git_view.editor", "sessions.paths", "sessions.aliases", "worktrees.root_path",
             "command_palettes", "pick_lists", "remote_environments", "sidebar.agents", "sidebar.panes",
             "sidebar.formats.topic.summary", "sidebar.formats.window.summary", "sidebar.formats.window.left",
             "sidebar.formats.window.right", "sidebar.formats.agent.title", "update.channel", "topics.tags",

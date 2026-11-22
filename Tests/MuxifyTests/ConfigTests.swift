@@ -823,7 +823,7 @@ final class ConfigTests: XCTestCase {
         fonts:
           size: 12
         ghostty:
-          theme: dark
+          font_size: 14
         # comment
         keybindings:
           toggle_everything: cmd+e
@@ -835,7 +835,7 @@ final class ConfigTests: XCTestCase {
         """)
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 1, message: "unknown section \"fonts\""),
-            ConfigProblem(path: root, line: 4, message: "unknown key \"ghostty.theme\""),
+            ConfigProblem(path: root, line: 4, message: "unknown key \"ghostty.font_size\""),
             ConfigProblem(path: root, line: 7, message: "unknown action \"toggle_everything\""),
             ConfigProblem(path: root, line: 8, message: "bad trigger \"hyper+s\": unknown modifier \"hyper\""),
             ConfigProblem(path: root, line: 11, message: "toggle_browser: expected a trigger or a list of triggers"),
@@ -892,6 +892,41 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 2, message: "ghostty.config_file /nowhere: not found"),
         ])
+    }
+
+    func testAGhosttyThemeIsOneThemeOrALightAndDarkPair() throws {
+        XCTAssertNil(try load("").ghosttyTheme)
+
+        let one = try load("ghostty:\n  theme: Builtin Solarized Dark")
+        XCTAssertEqual(one.ghosttyTheme, "Builtin Solarized Dark")
+        XCTAssertEqual(one.problems, [])
+
+        let pair = try load("ghostty:\n  theme:\n    light: iTerm2 Solarized Light\n    dark: Dracula")
+        XCTAssertEqual(pair.ghosttyTheme, "light:iTerm2 Solarized Light,dark:Dracula")
+        XCTAssertEqual(pair.problems, [])
+
+        let lightOnly = try load("ghostty:\n  theme: {light: Nord Light}")
+        XCTAssertEqual(lightOnly.ghosttyTheme, "light:Nord Light,dark:Dracula")
+        XCTAssertEqual(lightOnly.problems, [])
+    }
+
+    func testAnInvalidGhosttyThemeIsAProblemAndKeepsTheDefault() throws {
+        let config = try load("""
+        ghostty:
+          theme:
+            light: Nord Light
+            dark: "a,b"
+            dusk: Nord
+        """)
+        XCTAssertNil(config.ghosttyTheme)
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 4, message: "ghostty.theme.dark: expected a theme name"),
+            ConfigProblem(path: root, line: 5, message: "unknown key \"ghostty.theme.dusk\""),
+        ])
+
+        let empty = try load("ghostty:\n  theme: ''")
+        XCTAssertNil(empty.ghosttyTheme)
+        XCTAssertEqual(empty.problems, [ConfigProblem(path: root, line: 2, message: "ghostty.theme: expected a theme name")])
     }
 
     func testASyntaxErrorFailsTheWholeRead() {

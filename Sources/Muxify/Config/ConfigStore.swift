@@ -33,7 +33,7 @@ final class ConfigStore {
 
     /// Must run before any terminal is created.
     func start() {
-        GhosttyRuntime.shared.start(ghosttyConfigFile: config.ghosttyConfigFile)
+        GhosttyRuntime.shared.start(ghosttyConfigFile: config.ghosttyConfigFile, theme: config.ghosttyTheme)
         watcher = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.reloadIfFilesChanged()
         }
@@ -52,7 +52,7 @@ final class ConfigStore {
         let stamp = stampFiles()
         load()
         problemsDismissed = false
-        GhosttyRuntime.shared.reloadConfig(ghosttyConfigFile: config.ghosttyConfigFile)
+        GhosttyRuntime.shared.reloadConfig(ghosttyConfigFile: config.ghosttyConfigFile, theme: config.ghosttyTheme)
         filesStamp = stamp
     }
 

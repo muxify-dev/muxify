@@ -77,6 +77,33 @@ The banner lists problems by file, the Config first and then each Override in
 list order, and then by line. A syntax error in a Config Override keeps the last
 good Config, like one in the Config.
 
+## Terminal theme
+
+The Terminal follows the App Window's appearance: Ghostty's
+`iTerm2 Solarized Light` theme in light appearance and `Dracula` in dark. This
+default applies only when no Ghostty config file sets `theme`, so the theme of
+your own Ghostty config wins over it.
+
+To choose the theme in the Config, set `ghostty.theme`. It wins over any theme
+a Ghostty config file sets. Write one theme name, or a mapping with a theme
+name for `light` and one for `dark`:
+
+```yaml
+ghostty:
+  theme:
+    light: Nord Light
+    dark: Nord
+```
+
+A name is one of Ghostty's themes (`ghostty +list-themes`), a theme file in
+`~/.config/ghostty/themes`, or an absolute path, as for Ghostty's own `theme`.
+Muxify's own colours, such as the Command Palette's, follow the theme. A
+mapping that leaves out `light` or `dark` keeps that side's default. A mapping
+with another key, or an empty name, is a Config problem, and the theme stays as
+if `ghostty.theme` were left out. A theme name
+that Ghostty cannot find leaves Ghostty's built-in colours, and Muxify writes
+Ghostty's message to Diagnostics. Changes apply live.
+
 ## Terminal environment
 
 Muxify sets `MUXIFY_TERMINAL=1` for its terminal processes, locally and on the
