@@ -2077,6 +2077,12 @@ final class WorkspaceStore {
         select(siblings[targetIndex])
     }
 
+    /// `toggle_last_window`: the current Session's Last Window, as tmux marks it. Selecting it makes tmux mark the
+    /// Window just left, so the action goes back and forth. Nothing marked, or one Window, does nothing.
+    private func selectLastWindow() {
+        if let last = quickSwitchWindows.first(where: { $0.isLastWindow && $0.id != selectedWindowID }) { select(last) }
+    }
+
     /// Shows what a `muxify://select` URL names (`muxify session open`, `window open`, `topic open`).
     func select(_ request: SelectRequest) {
         route(.request(request, at: Date()))
@@ -3209,6 +3215,7 @@ final class WorkspaceStore {
              .selectTab1, .selectTab2, .selectTab3, .selectTab4, .selectTab5,
              .selectTab6, .selectTab7, .selectTab8, .selectTab9:
             if let selection = action.quickSwitchSelection { quickSwitch(selection) }
+        case .toggleLastWindow: selectLastWindow()
         case .selectNextWindow, .selectPrevWindow, .selectNextTopicWindow, .selectPrevTopicWindow,
              .selectNextSession, .selectPrevSession, .selectNextTopic, .selectPrevTopic:
             guard let step = action.step else { return }

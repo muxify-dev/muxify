@@ -172,6 +172,19 @@ class Panels(unittest.TestCase):
         wait(lambda: len(panes()) == 2, 'split_pane_right did not split the current Pane')
         self.assertEqual(len({pane.split()[0] for pane in panes()}), 2, 'the new Pane is not beside the current one: %s' % panes())
 
+    def test_the_toggle_last_window_keybind_goes_back_to_the_last_window_and_forth_again(self):
+        # The sandbox's tmux server runs with no config, so no key of tmux's runs last-window; Muxify reads tmux's
+        # window_last_flag and selects that Window as any other Window change.
+        a = self.window
+        b = self.new_window('toggle-last-b')
+        last = lambda: self.s.tmux('list-windows', '-t', self.session, '-F', '#{window_id} #{window_last_flag}').split('\n')
+        wait(lambda: a + ' 1' in last(), 'tmux does not mark %s as the Last Window: %s' % (a, last()))
+        for expected, left in ((a, b), (b, a)):
+            time.sleep(SETTLE)  # the app reads the flag with the Windows
+            self.assertTrue(self.s.keybind('toggle_last_window'), 'toggle_last_window did not act')
+            self.s.wait_shown(expected)
+            wait(lambda: left + ' 1' in last(), 'tmux does not mark %s, the Window just left, as the Last Window: %s' % (left, last()))
+
     def surround_the_current_pane(self):
         """Splits the Window's Pane so that a Pane is left, right, above and below it, and keeps it active. Returns its
         id, the id of the Pane on each side, and the Window's Pane ids in tmux's order."""

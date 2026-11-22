@@ -747,7 +747,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         let session = fields(["session_id", "session_name", "session_activity", "session_path", "@muxify_topic",
                               "@muxify_lock", "@muxify_session_id"])
         let window = fields(["window_id", "window_index", "window_name", "window_active", "window_panes",
-                             "window_bell_flag", "window_layout", "window_zoomed_flag", Tmux.tabsOption,
+                             "window_bell_flag", "window_layout", "window_zoomed_flag", "window_last_flag", Tmux.tabsOption,
                              Tmux.activeTabOption, Tmux.shownOption, Tmux.maximizeOption, Tmux.openOption,
                              Tmux.lastWindowOption, Tmux.agentOption])
         let pane = fields(["pane_id", "pane_index", "pane_active", "pane_title", "pane_current_path",

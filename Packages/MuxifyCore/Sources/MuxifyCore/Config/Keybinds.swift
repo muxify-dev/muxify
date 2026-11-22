@@ -127,6 +127,7 @@ public enum ConfigAction: String, KeybindAction {
     case selectWindow9 = "select_window_9"
     case selectNextWindow = "select_next_window"
     case selectPrevWindow = "select_prev_window"
+    case toggleLastWindow = "toggle_last_window"
     case selectNextTopicWindow = "select_next_topic_window"
     case selectPrevTopicWindow = "select_prev_topic_window"
     case selectNextSession = "select_next_session"
@@ -222,6 +223,7 @@ public enum ConfigAction: String, KeybindAction {
         .selectWindow9: ["cmd+9"],
         .selectNextWindow: [],
         .selectPrevWindow: [],
+        .toggleLastWindow: [],
         .selectNextTopicWindow: [],
         .selectPrevTopicWindow: [],
         .selectNextSession: [],

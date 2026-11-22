@@ -170,6 +170,32 @@ final class ProtocolWireTests: XCTestCase {
         before.ownClient = nil
         XCTAssertTrue(text(try ProtocolLine.item(id: 2, EnvironmentItem(changes: [.server(before)]))).contains(#""own_client":null"#),
                       "own_client is null before the marker names a Client")
+
+        // The Window's keys. `last_window` is optional (ADR 0086 change rule 1): absent when false, and absent decodes as false.
+        var window = TmuxWindow.fixture(id: "@2", sessionID: "$1", sessionName: "work", index: 1, sessionActivity: 7)
+        func session(_ window: TmuxWindow) throws -> String {
+            text(try ProtocolLine.item(id: 2, EnvironmentItem(changes: [.session("$1", EnvironmentSession(windows: [window], panes: []))])))
+        }
+        func line(last: String) -> String {
+            #"{"id":2,"item":{"changes":[{"session":"$1","value":{"command_lines":{},"panes":[],"windows":[{"active":true,"active_pane_id":"","#
+                + #""agent":"","bell":false,"browser":{"active_tab":0,"shown":"terminal","tabs":[]},"command":"zsh","id":"@2","index":1,"# + last
+                + #""layout":"","name":"shell","open_requests":[],"pane_count":1,"pane_title":"","path":"/work","saved_session_id":"","#
+                + #""session_activity":7,"session_created":0,"session_id":"$1","session_name":"work","session_path":"","start_command":"","#
+                + #""zoomed":false}]}}]},"kind":"item"}"# + "\n"
+        }
+        let absent = try session(window)
+        XCTAssertEqual(absent, line(last: ""))
+        window.isLastWindow = true
+        let present = try session(window)
+        XCTAssertEqual(present, line(last: #""last_window":true,"#))
+        func decoded(_ line: String) throws -> TmuxWindow? {
+            let item = try XCTUnwrap(try ProtocolFrame.decode(Data(line.utf8).dropLast())).payload(EnvironmentItem.self)
+            guard case .session(_, let session?) = item.changes.first else { return nil }
+            return session.windows.first
+        }
+        XCTAssertEqual(try decoded(present)?.isLastWindow, true)
+        XCTAssertEqual(try decoded(absent)?.isLastWindow, false)
+
         XCTAssertEqual(text(try ProtocolLine.item(id: 2, EnvironmentItem(changes: [.session("$1", nil), .topic("t1", nil)]))),
                        #"{"id":2,"item":{"changes":[{"session":"$1","value":null},{"topic":"t1","value":null}]},"kind":"item"}"# + "\n")
     }

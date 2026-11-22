@@ -620,6 +620,9 @@ public struct Config: Equatable {
         #   # ninth Windows in the current Session, not their tmux indices.
         #   # select_next_window and select_prev_window wrap within the Session
         #   # and have no keybindings until you assign them.
+        #   # toggle_last_window selects the Session's Last Window, the one it
+        #   # showed before, as tmux's last-window does; again, it goes back. It
+        #   # acts whatever has Focus and is unbound.
         #   # select_next_topic_window and select_prev_topic_window step
         #   # through every Window of the Active Topic in Topics mode, and
         #   # wrap within the Session in Sessions mode. They are unbound.

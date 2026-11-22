@@ -86,6 +86,7 @@ listed below.
 | `select_window_9` | ⌘9 | Select the ninth Window, not the last one |
 | `select_next_window` | Unbound | Select the next Window, wrapping to the first |
 | `select_prev_window` | Unbound | Select the previous Window, wrapping to the last |
+| `toggle_last_window` | Unbound | Select the current Session's Last Window, the one it showed before, as tmux's `last-window` does; again, go back. Muxify reads the Last Window from tmux, so it works with no tmux config. It does nothing in a Session with one Window, or with an older Host Server. Acts whatever has Focus |
 | `select_next_topic_window` | Unbound | Select the next Window of the Active Topic, wrapping to the first. In Topics mode, every Window of the Active Topic's Sessions takes part, in the order the Sidebar shows them; for No Topic, the Windows of the No Topic Sessions. In Sessions mode, only the current Session's Windows take part |
 | `select_prev_topic_window` | Unbound | Select the previous Window of the Active Topic, wrapping to the last |
 

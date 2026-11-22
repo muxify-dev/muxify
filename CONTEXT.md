@@ -53,6 +53,10 @@ _Avoid_: Session Path name, repository name (when you mean the Session's name)
 A tmux window: the item you pick in the sidebar. Opening it shows all of its Panes.
 _Avoid_: tab, workspace
 
+**Last Window**:
+The Window its Session showed before its current one, as tmux's `last-window` means it. Each Session has its own.
+_Avoid_: previous Window, back, last-visited Window
+
 **Pane**:
 One split of a Window, laid out by tmux.
 _Avoid_: split, terminal
