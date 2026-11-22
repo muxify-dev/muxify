@@ -122,7 +122,7 @@ The Topic of the App Window's Location: the Topic of its Window or of its Empty 
 _Avoid_: current Topic, selected Topic, focused Topic
 
 **Next Topic**:
-The Topic or Board Session that Muxify opens when the card that the user is on leaves the Sidebar by Settle, Forget or Bench: the nearest card below it that the Sidebar shows. With no such card, the first In Play card, also when the Bench is empty. Else the nearest row below it on the Board that stays, else the nearest such row above it, else No Topic. It is never a Pinned Topic.
+The Topic or Board Session that Muxify opens when the card that the user is on leaves the Sidebar by Settle, Forget or Bench: the nearest card below it that the Sidebar shows. With no such card, the first In Play card, also when the Bench is empty. Else the nearest row below it on the Board that stays, else the nearest such row above it, else No Topic. It is never a Pinned card.
 _Avoid_: following Topic, previous Topic, last Topic
 
 **Tag**:
@@ -170,7 +170,7 @@ An open Topic that has no live Session and remembers no Session: the user stoppe
 _Avoid_: Dormant (when it remembers no Session), blank, cleared
 
 **In Play**:
-The In Play places and the Guests. It is the only way the Board lists its cards. The number of places is the number that the Config gives, and 5 when the Config gives none. Each place holds an open Topic or a Board Session that is not Pinned and is not a Guest. A place that holds no card is an Open Place. The Sidebar shows the Pinned Topics, then the places, then the Guests line and the Guests, then the Bench line. A Guest never shows between two places.
+The In Play places and the Guests. It is the only way the Board lists its cards. The number of places is the number that the Config gives, and 5 when the Config gives none. Each place holds an open Topic or a Board Session that is not Pinned and is not a Guest. A place that holds no card is an Open Place. The Sidebar shows the Pinned cards, then the places, then the Guests line and the Guests, then the Bench line. A Guest never shows between two places.
 _Avoid_: active Topics, focus Topics, front Topics, WIP limit
 
 **Bench**:
@@ -186,7 +186,7 @@ An Action on an In Play card. A Benched Topic that the user chooses takes its po
 _Avoid_: Done, Switch Topic Places, swap, Snooze
 
 **Pin**:
-To keep a Topic above every Topic that is not Pinned, in each list of Topics, until you unpin it. A Pinned Topic is neither In Play nor Benched.
+To keep a card, a Topic or a Board Session, above every card that is not Pinned, in each list of Topics, until you Unpin it. A Pinned card is neither In Play nor Benched. Unpin puts it at the end of the Guests, as a Guest.
 _Avoid_: favorite, star, sticky, keep on top
 
 **Guest**:
@@ -214,11 +214,11 @@ A key step of one card on the Board: Move Topic Up and Move Topic Down, the Move
 _Avoid_: shift, nudge, Trade (when you mean a key step)
 
 **Board**:
-The cards of an Environment's open Topics and Board Sessions in one order, and the Sidebar view that shows them: the Pinned Topics, the In Play places, the Guests and the Bench. Switch to Board shows it, and `muxify environment show` lists it.
+The cards of an Environment's open Topics and Board Sessions in one order, and the Sidebar view that shows them: the Pinned cards, the In Play places, the Guests and the Bench. Switch to Board shows it, and `muxify environment show` lists it.
 _Avoid_: Topics list, Topics view, Topics mode, list of Topics
 
 **Board Session**:
-A No Topic Session that has a card on the Board, live or Dormant. Its card takes an In Play place or is a Guest, by the rules of a Topic's card, but it is never Pinned and never on the Bench, and it cannot be Settled, Forgotten, Noted or Tagged. Make a Guest of a No Topic Session makes one, and Bench takes its card off the Board. The state database keeps its place and its Remembered Session, and the live Session points at it with `@muxify_session_id`, so a tmux restart does not end it: it is Dormant until the user opens it. When its Session goes into a Topic or ends while Muxify watches, its card leaves the Board.
+A No Topic Session that has a card on the Board, live or Dormant. Its card is Pinned, takes an In Play place or is a Guest, by the rules of a Topic's card, but it is never on the Bench, and it cannot be Settled, Forgotten, Noted or Tagged. Make a Guest of a No Topic Session makes one, and Bench takes its card off the Board. The state database keeps its place and its Remembered Session, and the live Session points at it with `@muxify_session_id`, so a tmux restart does not end it: it is Dormant until the user opens it. When its Session goes into a Topic or ends while Muxify watches, its card leaves the Board.
 _Avoid_: Lock, Locked Session, Guest Session (say a Board Session in the Guests), Session card (the Config key `sidebar.session_cards`), `@muxify_lock` (the tmux option of an older Muxify)
 
 ### Browser
