@@ -12,6 +12,8 @@ final class EnvironmentPublisherTests: XCTestCase {
     private var clientProcess: Process?
     /// The Clients attached after the Terminal's: other terminals.
     private var otherProcesses: [Process] = []
+    /// What the publisher of `startTerminal` sent its Listeners, and their connections.
+    private let sent = SentLines()
     private var socket: String { directory.appendingPathComponent("s").path }
 
     override func setUpWithError() throws {
@@ -32,9 +34,13 @@ final class EnvironmentPublisherTests: XCTestCase {
         publishers = []
         for process in [clientProcess].compactMap({ $0 }) + otherProcesses where process.isRunning {
             process.terminate()
-            // `waitUntilExit` can miss the exit and wait for ever, as in HostServerTests: wait for the pid, a while at most.
-            let deadline = Date().addingTimeInterval(5)
-            while kill(process.processIdentifier, 0) == 0, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+            // `waitUntilExit` can miss the exit and wait for ever, as in HostServerTests: wait for the pid, a while at
+            // most, then kill it.
+            let pid = process.processIdentifier
+            if !eventually("", timeout: 5, fail: { _, _, _ in }, until: { kill(pid, 0) != 0 }) {
+                kill(pid, SIGKILL)
+                eventually("a Client's process outlived SIGKILL") { kill(pid, 0) != 0 }
+            }
         }
         otherProcesses = []
         if let actual = try? server?.run(["display-message", "-p", "#{socket_path}"]),
@@ -53,7 +59,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         try TopicStore(paths: paths).write { try $0.create(TopicRecord(id: "first", title: "First")) }
         let recorder = start()
 
-        try await wait("no first item") { !recorder.items.isEmpty }
+        await eventually("no first item") { !recorder.items.isEmpty }
         let first = try XCTUnwrap(recorder.items.first)
         XCTAssertEqual(Set(first.map(\.key)), ["session \(try sessionID("work"))", "session \(try sessionID("other"))",
                                                "topic first", "open_places", "board_sessions", "server"])
@@ -62,12 +68,12 @@ final class EnvironmentPublisherTests: XCTestCase {
         XCTAssertEqual(state.socketPath, socket)
 
         try await settle(recorder, controlClients: 1)
+        // It returns once the read's events were delivered.
         await publishers[0].read()
-        try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(recorder.keys, [], "a read of an unchanged server and database sent events")
     }
 
-    func testEachChangeSendsOnlyItsKeyWithinTwoSeconds() async throws {
+    func testEachChangeSendsOnlyItsKeySoonAfterIt() async throws {
         try server.run(["new-session", "-d", "-s", "work", "-x", "80", "-y", "24"])
         try server.run(["new-session", "-d", "-s", "other"])
         let work = "session " + (try sessionID("work"))
@@ -115,16 +121,16 @@ final class EnvironmentPublisherTests: XCTestCase {
         let terminal = try attachClient(to: "work")
         let value = [String(terminal.pid), terminal.tty, "/Users/u", "mac", "local"].joined(separator: Tmux.separator)
         try server.run(["set-option", "-sq", marker, value])
-        try await wait("the Listener did not move to the marked Client's Session") { try self.controlClients() == ["work"] }
+        try await eventually("the Listener did not move to the marked Client's Session") { try self.controlClients() == ["work"] }
         // tmux answers a Pane's background question from the first Client of its Session, and a control Client's as black.
         XCTAssertEqual(try server.run(["list-clients", "-F", "#{client_control_mode}"]).split(separator: "\n"), ["0", "1"],
                        "the Listener came before the Terminal's Client")
 
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
-        try await wait("the Listener did not follow a switch-client from outside Muxify") { try self.controlClients() == ["other"] }
+        try await eventually("the Listener did not follow a switch-client from outside Muxify") { try self.controlClients() == ["other"] }
 
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=third"])
-        try await wait("the Listener did not follow the next switch") { try self.controlClients() == ["third"] }
+        try await eventually("the Listener did not follow the next switch") { try self.controlClients() == ["third"] }
     }
 
     func testTheListenerIsAttachedAgainWithinHalfASecondAfterItsSessionIsKilled() async throws {
@@ -135,11 +141,12 @@ final class EnvironmentPublisherTests: XCTestCase {
 
         let killed = Date()
         try server.run(["kill-session", "-t", "=" + sitting])
-        try await wait("the Listener was not attached again") {
+        try await eventually("the Listener was not attached again") {
             let clients = try self.controlClients()
             return clients.count == 1 && clients[0] != sitting
         }
-        XCTAssertLessThan(Date().timeIntervalSince(killed), 0.5, "the Listener waited before it attached again")
+        // A Listener that never attached waits a second before it starts again; one that did starts in a twentieth.
+        XCTAssertLessThan(Date().timeIntervalSince(killed), scaled(0.5), "the Listener waited before it attached again")
     }
 
     func testALeftoverWatchSessionIsKilledOnConnect() async throws {
@@ -154,20 +161,16 @@ final class EnvironmentPublisherTests: XCTestCase {
     func testTheServerExitsAfterTheLastSessionClosesAndBothListenersComeBackWithTheNext() async throws {
         try server.run(["new-session", "-d", "-s", "work"])
         let first = start(), second = start()
-        try await wait("both publishers did not attach") { try self.controlClients() == ["work", "work"] }
+        try await eventually("both publishers did not attach") { try self.controlClients() == ["work", "work"] }
 
         try server.run(["kill-session", "-t", "=work"])
-        try await wait("the server outlived the last Session") {
-            do { _ = try self.server.run(["display-message", "-p", "#{pid}"]); return false } catch {
-                return (error as? TmuxError)?.indicatesNoServer == true
-            }
-        }
+        try await serverExited("the server outlived the last Session")
         for recorder in [first, second] {
-            try await wait("a publisher did not say the server stopped") { recorder.server?.isRunning == false }
+            await eventually("a publisher did not say the server stopped") { recorder.server?.isRunning == false }
         }
 
         try server.run(["new-session", "-d", "-s", "again"])
-        try await wait("a new Session did not bring both publishers back") {
+        try await eventually("a new Session did not bring both publishers back") {
             try self.controlClients() == ["again", "again"]
         }
         XCTAssertEqual(try sessions(), ["again"])
@@ -180,21 +183,21 @@ final class EnvironmentPublisherTests: XCTestCase {
         let third = try probe(session: "third")
         let unvisited = try probe(session: "unvisited")
         let terminal = try startTerminal(in: "work", colours: Self.light)
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try await listenerFollowsTheTerminal(in: "work")
 
         // A switch that Muxify starts runs this same command on the Terminal's Client.
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
-        try await wait("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
+        try await eventually("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=third"])
-        try await wait("the Listener did not follow the next switch") { try self.controlClients() == ["third"] }
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await eventually("the Listener did not follow the next switch") { try self.controlClients() == ["third"] }
+        try await tmuxRanTheListenersCommands()
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
         for answer in [work.0, other.0, other.1, third.0] {
-            try await wait("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
+            await eventually("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
-        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: unvisited.0) }
+        await eventually("no answer from the probe") { FileManager.default.fileExists(atPath: unvisited.0) }
         XCTAssertNotEqual(try String(contentsOfFile: unvisited.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
                           "a Session that the Terminal never showed got the Colour Report")
     }
@@ -203,42 +206,39 @@ final class EnvironmentPublisherTests: XCTestCase {
         let work = try probe(session: "work")
         try server.run(["split-window", "-d", "-t", "work:", probeCommand(work.1)])
         _ = try startTerminal(in: "work", colours: Self.light)
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await listenerFollowsTheTerminal(in: "work")
 
         try await screenWritesAndDetaches(in: "work", flags: nil)
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
         for answer in [work.0, work.1] {
-            try await wait("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
+            await eventually("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
     }
 
     func testAListenersDetachWritesNothing() async throws {
         let work = try probe(session: "work")
-        let sent = SentLines()
-        _ = try startTerminal(in: "work", colours: Self.light, sent: sent)
+        _ = try startTerminal(in: "work", colours: Self.light)
         // The Listener sits in `work` before the Terminal attaches, then starts again after it and reports there: the
-        // screen writes after that report, or a slow start again writes over the screen's colours.
-        try await wait("the Listener did not start again after the Terminal's Client") {
-            try self.server.run(["list-clients", "-F", "#{client_control_mode}"]).split(separator: "\n") == ["0", "1"]
-        }
-        try await wait("the Listener's start in the Terminal's Session did not report") {
-            sent.lines.contains { $0.hasPrefix("refresh-client -r") }
-        }
-        try await Task.sleep(nanoseconds: 300_000_000)
+        // screen writes after tmux ran that report, or a slow start again writes over the screen's colours. Sent is
+        // not run: tmux can run the screen's report before a report still on the Listener's connection.
+        try await listenerFollowsTheTerminal(in: "work")
+        XCTAssertEqual(try server.run(["list-clients", "-F", "#{client_control_mode}"]).split(separator: "\n"), ["0", "1"],
+                       "the Listener came before the Terminal's Client")
+        XCTAssertTrue(sent.lines.contains { $0.hasPrefix("refresh-client -r") }, "the Listener's start in the Terminal's Session did not report")
 
+        // The publisher has handled the detach, and tmux ran anything that it sent for it, before the probe asks.
         try await screenWritesAndDetaches(in: "work", flags: "ignore-size,no-output")
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
-        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: work.0) }
+        await eventually("no answer from the probe") { FileManager.default.fileExists(atPath: work.0) }
         XCTAssertEqual(try String(contentsOfFile: work.0, encoding: .utf8), "rgb:1010/1010/1010",
                        "a Listener's detach made the publisher write")
     }
 
     func testAPaneOfANewSessionThatNoClientShowsAnswersOnlyAfterTheReportBeforeTyping() async throws {
-        let recorder = start()
+        let recorder = start(sent: sent)
         try server.run(["new-session", "-d", "-s", "other"])
         try await settle(recorder, controlClients: 1)
         publishers[0].reportColours(Self.light)
@@ -246,9 +246,10 @@ final class EnvironmentPublisherTests: XCTestCase {
         let pane = try server.run(["display-message", "-p", "-t", "made:", "#{pane_id}"]).trimmingCharacters(in: .whitespacesAndNewlines)
 
         publishers[0].reportColours(beforeTypingInto: pane)
+        try await tmuxRanTheListenersCommands()
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
-        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: probes.0) }
+        await eventually("no answer from the probe") { FileManager.default.fileExists(atPath: probes.0) }
         XCTAssertEqual(try String(contentsOfFile: probes.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7")
     }
 
@@ -259,7 +260,10 @@ final class EnvironmentPublisherTests: XCTestCase {
         _ = try probes(session: "big", panes: 11)
         let answers = try probes(session: "small", panes: 8)
         let terminal = try startTerminal(in: "small", colours: Self.light)
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["small"] }
+        try await listenerFollowsTheTerminal(in: "small")
+        let listener = try XCTUnwrap(sent.latest)
+        let moves = { listener.heard.filter { $0.hasPrefix("%client-session-changed \(terminal.tty) ") }.count }
+        let movesBefore = moves()
         let tmux = ColourReportingTmux(server: server, publisher: publishers[0])
         let pid = try XCTUnwrap(pid_t(try server.run(["list-clients", "-f", "#{client_control_mode}", "-F", "#{client_pid}"])
             .trimmingCharacters(in: .whitespacesAndNewlines)), "no control Client")
@@ -273,12 +277,15 @@ final class EnvironmentPublisherTests: XCTestCase {
         }
         kill(pid, SIGCONT)
 
-        XCTAssertLessThan(slowest, 0.5, "a switch waited for its Colour Report")
-        // The Listener reads what waited for it; the probes ask after that.
-        try await Task.sleep(nanoseconds: 1_000_000_000)
+        // A switch takes a few thousandths of a second; one that waits for its Colour Report took a second.
+        XCTAssertLessThan(slowest, scaled(0.5), "a switch waited for its Colour Report")
+        // The Listener reads what waited for it, and the publisher reports to the Session of the last move; the probes
+        // ask after tmux ran that.
+        await eventually("the Listener did not hear every move") { moves() == movesBefore + 12 }
+        try await tmuxRanTheListenersCommands()
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
         for answer in answers {
-            try await wait("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
+            await eventually("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
     }
@@ -287,14 +294,14 @@ final class EnvironmentPublisherTests: XCTestCase {
         let probes = try probe(session: "work")
         try server.run(["new-session", "-d", "-s", "spare"])
         let terminal = try startTerminal(in: "spare", colours: nil)
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["spare"] }
+        try await listenerFollowsTheTerminal(in: "spare")
 
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=work"])
-        try await wait("the Listener did not follow the Terminal") { try self.controlClients() == ["work"] }
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await eventually("the Listener did not follow the Terminal") { try self.controlClients() == ["work"] }
+        try await tmuxRanTheListenersCommands()
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
-        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: probes.0) }
+        await eventually("no answer from the probe") { FileManager.default.fileExists(atPath: probes.0) }
         XCTAssertNotEqual(try String(contentsOfFile: probes.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7")
     }
 
@@ -305,20 +312,20 @@ final class EnvironmentPublisherTests: XCTestCase {
     func testAProgramThatAsksAtTheSwitchsNoticeGetsTheReportedColours() async throws {
         let notices = try themeProbe(session: "other")
         // tmux tells only a program that has turned mode 2031 on, and the other screen's report sends no notice later.
-        try await wait("the probe did not turn on mode 2031") { self.lines(notices).first == "ready" }
+        try await colourProbes.themeProbeIsReady(notices, in: "other")
         try server.run(["new-session", "-d", "-s", "work"])
         let terminal = try startTerminal(in: "work", colours: Self.light)
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try await listenerFollowsTheTerminal(in: "work")
         try terminalSays(.light)
-        try await screenWritesAndDetaches(in: "other", flags: "ignore-size,no-output")
-        try await wait("the probe was not told dark") { self.lines(notices).last == "dark" }
+        try await screenWritesAndDetaches(in: "other", flags: "ignore-size,no-output", hearingTheDetach: false)
+        await eventually("the probe was not told dark") { self.lines(notices).last == "dark" }
 
         XCTAssertTrue(try publishers[0].switchClient(terminal.tty, to: "=other:"), "no Listener took the switch")
 
-        try await wait("the Terminal did not move") { try self.clientSession(terminal.tty) == "other" }
-        try await wait("the probe was not told light") { self.lines(notices).last?.hasPrefix("light") == true }
+        try await eventually("the Terminal did not move") { try self.clientSession(terminal.tty) == "other" }
+        await eventually("the probe was not told light") { self.lines(notices).last?.hasPrefix("light") == true }
         XCTAssertEqual(lines(notices).last, "light rgb:fbfb/f1f1/c7c7", "the program at the notice got other colours")
-        try await wait("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
+        try await eventually("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
     }
 
     /// The report goes before the switch, on one connection, and the Terminal's move that follows does not write the
@@ -327,15 +334,14 @@ final class EnvironmentPublisherTests: XCTestCase {
         let other = try probe(session: "other")
         try server.run(["split-window", "-d", "-t", "other:", probeCommand(other.1)])
         try server.run(["new-session", "-d", "-s", "work"])
-        let sent = SentLines()
-        let terminal = try startTerminal(in: "work", colours: Self.light, sent: sent)
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
-        try await Task.sleep(nanoseconds: 300_000_000)
+        let terminal = try startTerminal(in: "work", colours: Self.light)
+        try await listenerFollowsTheTerminal(in: "work")
         sent.clear()
 
         XCTAssertTrue(try publishers[0].switchClient(terminal.tty, to: "=other:"))
-        try await wait("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
-        try await Task.sleep(nanoseconds: 500_000_000)
+        try await eventually("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
+        // The publisher has handled the Terminal's move, and tmux ran what it sent for it.
+        try await tmuxRanTheListenersCommands()
 
         let panes = try server.run(["list-panes", "-s", "-t", "=other", "-F", "#{pane_id}"]).split(separator: "\n").map(String.init)
         let report = ColourReport.commands(panes: panes, colours: Self.light)
@@ -344,12 +350,12 @@ final class EnvironmentPublisherTests: XCTestCase {
         XCTAssertEqual(sent.lines.filter { $0.hasPrefix("refresh-client -r") }, report, "the move wrote the Session again")
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
         for answer in [other.0, other.1] {
-            try await wait("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
+            await eventually("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
 
         publishers[0].stop()
-        try await wait("the Listener did not detach") { try self.controlClients().isEmpty }
+        try await eventually("the Listener did not detach") { try self.controlClients().isEmpty }
         XCTAssertFalse(try publishers[0].switchClient(terminal.tty, to: "=work:"), "a switch went to no Listener")
     }
 
@@ -362,15 +368,17 @@ final class EnvironmentPublisherTests: XCTestCase {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let news = NewsLog()
         _ = try startTerminal(in: "work", colours: Self.light, news: news)
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
-        try await Task.sleep(nanoseconds: 500_000_000)
+        try await listenerFollowsTheTerminal(in: "work")
+        // The news of the Terminal's and the Listener's arrival.
+        await settled("the news did not stop") { news.lines }
         let shown = try windowID("work:")
         news.clear()
 
         try server.run(["select-pane", "-t", second])
-        try await wait("the focus change did not reach the subscriber") { news.lines.contains("focus " + shown) }
+        await eventually("the focus change did not reach the subscriber") { news.lines.contains("focus " + shown) }
 
         try server.run(["select-pane", "-t", otherPane])
+        // absence: no focus news follows a focus change in a Session that the Terminal does not show.
         try await Task.sleep(nanoseconds: 500_000_000)
         XCTAssertEqual(news.lines.filter { $0.hasPrefix("focus") }, ["focus " + shown],
                        "a focus change in a Session that the Terminal does not show reached the subscriber")
@@ -378,23 +386,21 @@ final class EnvironmentPublisherTests: XCTestCase {
         let added = try server.run(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "work:"])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         try server.run(["select-window", "-t", added])
-        try await wait("the Session's new Window did not reach the subscriber") { news.lines.contains("focus " + added) }
+        await eventually("the Session's new Window did not reach the subscriber") { news.lines.contains("focus " + added) }
     }
 
     func testAnotherClientThatMovesIntoTheTerminalsSessionTakesTheShownWindow() async throws {
         try server.run(["new-session", "-d", "-s", "work", "-x", "80", "-y", "24"])
         let news = NewsLog()
         _ = try startTerminal(in: "work", colours: Self.light, news: news)
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
-        try await Task.sleep(nanoseconds: 500_000_000)
-        await publishers[0].read()
+        try await listenerFollowsTheTerminal(in: "work")
         let shown = try windowID("work:")
         news.clear()
 
         let screen = try controlClient(attachingTo: "work")
         defer { screen.terminate() }
 
-        try await wait("another Client's move into the Terminal's Session did not reach the subscriber") {
+        await eventually("another Client's move into the Terminal's Session did not reach the subscriber") {
             news.lines.contains("taken " + shown)
         }
     }
@@ -406,18 +412,18 @@ final class EnvironmentPublisherTests: XCTestCase {
         let unpainted = directory.appendingPathComponent("paint-3").path
         try server.run(["new-window", "-d", "-t", "paint:", probeCommand(unpainted)])
         _ = try startTerminal(in: "work", colours: Self.light)
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
-        try await Task.sleep(nanoseconds: 300_000_000)
+        // A report sent to a Listener that then starts again can be lost with it.
+        try await listenerFollowsTheTerminal(in: "work")
 
         publishers[0].reportColours(toWindow: try windowID("paint:^"))
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await tmuxRanTheListenersCommands()
         try "".write(toFile: directory.appendingPathComponent("go").path, atomically: true, encoding: .utf8)
 
         for answer in [painted.0, painted.1] {
-            try await wait("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
+            await eventually("no answer from a probe") { FileManager.default.fileExists(atPath: answer) }
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8), "rgb:fbfb/f1f1/c7c7", answer)
         }
-        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: unpainted) }
+        await eventually("no answer from the probe") { FileManager.default.fileExists(atPath: unpainted) }
         XCTAssertNotEqual(try String(contentsOfFile: unpainted, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
                           "a Pane of another Window got the colours")
     }
@@ -461,13 +467,48 @@ final class EnvironmentPublisherTests: XCTestCase {
         return process
     }
 
-    /// What the Listener sent, line by line.
+    /// What the Listener sent, line by line, and each of its connections.
     private final class SentLines: @unchecked Sendable {
         private let lock = NSLock()
         private var log: [String] = []
+        private var connections: [ListenerConnection] = []
         var lines: [String] { lock.lock(); defer { lock.unlock() }; return log }
         func add(_ line: String) { lock.lock(); log.append(line); lock.unlock() }
         func clear() { lock.lock(); log = []; lock.unlock() }
+        /// The connection that the publisher started last.
+        var latest: ListenerConnection? { lock.lock(); defer { lock.unlock() }; return connections.last }
+        func started(_ connection: ListenerConnection) { lock.lock(); connections.append(connection); lock.unlock() }
+    }
+
+    /// One control connection of the Listener: how the publisher attached it, and every line that tmux wrote it.
+    private final class ListenerConnection: @unchecked Sendable {
+        let arguments: [String]
+        private let lock = NSLock()
+        private var log: [String] = []
+        private var client: TmuxControlClient?
+
+        init(arguments: [String]) { self.arguments = arguments }
+
+        var heard: [String] { lock.lock(); defer { lock.unlock() }; return log }
+        func hear(_ lines: [String]) { lock.lock(); log += lines; lock.unlock() }
+        func connect(_ client: TmuxControlClient) { lock.lock(); self.client = client; lock.unlock() }
+
+        /// Whether the publisher attached it to the Terminal's Session, which it does once it knows the Terminal's
+        /// Client: a Listener that follows the Terminal from its start does not start again.
+        var followsTheTerminal: Bool { arguments.drop(while: { $0 != "attach-session" }).contains("-t") }
+        /// Whether tmux attached it to a Session.
+        var attached: Bool { heard.contains { $0.hasPrefix("%session-changed ") } }
+
+        /// Sends, behind everything the publisher sent, a command that prints a word of its own, and returns the word.
+        /// The publisher reads no command's output.
+        func ping() -> String {
+            let word = "muxify-test-ping-" + UUID().uuidString.prefix(8)
+            lock.lock()
+            let client = self.client
+            lock.unlock()
+            client?.send("display-message -p '\(word)'")
+            return word
+        }
     }
 
     private final class RecordingControlClient: TmuxControlClient {
@@ -506,15 +547,15 @@ final class EnvironmentPublisherTests: XCTestCase {
         try server.run(["new-session", "-d", "-s", "other"])
         try server.run(["new-session", "-d", "-s", "third"])
         let terminal = try startTerminal(in: "work", colours: nil, hidingStatusLine: true)
-        try await wait("the Terminal's Session kept its status line") { try self.sessionStatus("work") == "off" }
+        try await eventually("the Terminal's Session kept its status line") { try self.sessionStatus("work") == "off" }
         XCTAssertNil(try sessionStatus("other"), "a Session that the Terminal never showed lost its status line")
-        try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try await eventually("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
 
         XCTAssertTrue(try publishers[0].switchClient(terminal.tty, to: "=other"), "no Listener ran the switch")
-        try await wait("a switch that Muxify started kept the status line") { try self.sessionStatus("other") == "off" }
+        try await eventually("a switch that Muxify started kept the status line") { try self.sessionStatus("other") == "off" }
 
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=third"])
-        try await wait("a switch made inside tmux kept the status line") { try self.sessionStatus("third") == "off" }
+        try await eventually("a switch made inside tmux kept the status line") { try self.sessionStatus("third") == "off" }
         XCTAssertEqual(try sessionStatus("work"), "off", "the Terminal's own arrival gave the status line back")
     }
 
@@ -523,12 +564,12 @@ final class EnvironmentPublisherTests: XCTestCase {
         try server.run(["new-session", "-d", "-s", "other"])
         try server.run(["set-option", "-t", "=other:", "status", "2"])
         _ = try startTerminal(in: "work", colours: nil, hidingStatusLine: true)
-        try await wait("the Terminal's Session kept its status line") { try self.sessionStatus("work") == "off" }
+        try await eventually("the Terminal's Session kept its status line") { try self.sessionStatus("work") == "off" }
         try await waitForTheHooks()
 
         let screen = try attachClient(to: "other")
         try server.run(["switch-client", "-c", screen.tty, "-t", "=work"])
-        try await wait("another terminal's move did not give the status line back") { try self.sessionStatus("work") == nil }
+        try await eventually("another terminal's move did not give the status line back") { try self.sessionStatus("work") == nil }
         XCTAssertEqual(try sessionStatus("other"), "2", "the hook changed a status line that Muxify did not hide")
         XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "=work:", TmuxStatusLine.marker]), "", "the mark stayed")
     }
@@ -538,24 +579,28 @@ final class EnvironmentPublisherTests: XCTestCase {
         try server.run(["new-session", "-d", "-s", "other"])
         try server.run(["set-option", "-t", "=other:", "status", "2"])
         let terminal = try startTerminal(in: "work", colours: nil, hidingStatusLine: true)
-        try await wait("the Terminal's Session kept its status line") { try self.sessionStatus("work") == "off" }
+        // The Listener hides the status line once it starts again in the Terminal's Session. A hide on a connection
+        // that tmux has not run yet can come after the give-back, so the test turns it off once tmux ran the hide.
+        try await listenerFollowsTheTerminal(in: "work")
+        XCTAssertEqual(try sessionStatus("work"), "off", "the Terminal's Session kept its status line")
         try await waitForTheHooks()
 
         publishers[0].hideStatusLine(false)
-        try await wait("the Terminal's Session did not get its status line back") { try self.sessionStatus("work") == nil }
-        try await wait("Muxify's hooks stayed") { try !self.server.run(["show-hooks", "-g"]).contains("[77]") }
-        XCTAssertEqual(try sessionStatus("work"), nil, "a hide on its way to tmux hid the status line again")
+        try await tmuxRanTheListenersCommands()
+        XCTAssertEqual(try sessionStatus("work"), nil, "the Terminal's Session did not get its status line back")
+        XCTAssertFalse(try server.run(["show-hooks", "-g"]).contains("[77]"), "Muxify's hooks stayed")
         XCTAssertEqual(try sessionStatus("other"), "2", "a status line that Muxify did not hide changed")
 
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
-        try await Task.sleep(nanoseconds: 500_000_000)
+        try await eventually("the Listener did not follow the Terminal") { try self.controlClients() == ["other"] }
+        try await tmuxRanTheListenersCommands()
         XCTAssertEqual(try sessionStatus("other"), "2", "a move hid the status line while the header does not show the Session")
     }
 
     /// Muxify's hooks come after `status off` on the Listener's connection, so a Session can lose its status line
     /// before they are set.
     private func waitForTheHooks() async throws {
-        try await wait("no hook gives the status line back") {
+        try await eventually("no hook gives the status line back") {
             let hooks = try self.server.run(["show-hooks", "-g"])
             return hooks.contains("client-attached[77]") && hooks.contains("client-session-changed[77]")
         }
@@ -566,7 +611,7 @@ final class EnvironmentPublisherTests: XCTestCase {
 
     /// A publisher with a Client marker, a Terminal's Client attached to `session` that the marker names, and the
     /// colours of the key App Window, or none.
-    private func startTerminal(in session: String, colours: TerminalColours?, sent: SentLines? = nil, news: NewsLog? = nil,
+    private func startTerminal(in session: String, colours: TerminalColours?, news: NewsLog? = nil,
                                hidingStatusLine: Bool = false) throws -> ViewCommandExecutor.Client {
         let marker = ClientMarker.option(nonce: "terminal")
         _ = start(clientMarker: marker, sent: sent, news: news)
@@ -580,9 +625,43 @@ final class EnvironmentPublisherTests: XCTestCase {
     }
 
     /// Another screen, as Muxify Mobile is: a control Client in `session`, attached with `flags`, writes its own
-    /// colours to every Pane of the Session and detaches once the publisher has read it.
-    private func screenWritesAndDetaches(in session: String, flags: String?) async throws {
-        try await colourProbes.screenWritesAndDetaches(in: session, flags: flags) { await self.publishers[0].read() }
+    /// colours to every Pane of the Session and detaches once the publisher has read it. Then, `hearingTheDetach`, it
+    /// waits until the publisher handled the detach and tmux ran what the publisher sent for it.
+    private func screenWritesAndDetaches(in session: String, flags: String?, hearingTheDetach: Bool = true) async throws {
+        try await colourProbes.screenWritesAndDetaches(in: session, flags: flags, afterAttach: { await self.publishers[0].read() },
+                                                       afterDetach: { screen in
+            if hearingTheDetach { try await self.listenerHeardTheDetach(of: screen) }
+        })
+    }
+
+    /// Waits until the publisher has handled what came before, in a read of its own too, and tmux has run every command
+    /// it sent its Listener so far: tmux runs one connection's commands in order, so it answers one sent after them
+    /// last.
+    private func tmuxRanTheListenersCommands() async throws {
+        await publishers[0].read()
+        let connection = try XCTUnwrap(sent.latest, "no Listener started")
+        let ping = connection.ping()
+        await eventually("tmux did not run the Listener's commands") { connection.heard.contains(ping) }
+        await publishers[0].caughtUp()
+    }
+
+    /// Waits until the Listener sits in `session`, the Terminal's, on a connection that the publisher started there
+    /// once it knew the Terminal's Client, and tmux ran what the publisher sent it. Before that the Listener sits in
+    /// the Session that tmux picks, and then starts again: a report or a hide sent before the start can run after a
+    /// test's next step, or go with the connection that ends.
+    private func listenerFollowsTheTerminal(in session: String) async throws {
+        try await eventually("the Listener did not start again in the Terminal's Session") {
+            guard let connection = sent.latest, connection.followsTheTerminal, connection.attached else { return false }
+            return try controlClients() == [session]
+        }
+        try await tmuxRanTheListenersCommands()
+    }
+
+    /// Waits until the Listener heard `screen`, a Client's name, detach, and tmux ran what the publisher sent for it.
+    private func listenerHeardTheDetach(of screen: String) async throws {
+        let connection = try XCTUnwrap(sent.latest, "no Listener started")
+        await eventually("the Listener did not hear the screen detach") { connection.heard.contains("%client-detached " + screen) }
+        try await tmuxRanTheListenersCommands()
     }
 
     private func probe(session: String) throws -> (String, String) {
@@ -608,20 +687,23 @@ final class EnvironmentPublisherTests: XCTestCase {
         }
         let store = TopicStore(paths: paths)
         let recorder = start()
-        try await wait("no first item") { recorder.server?.isRunning == true }
+        await eventually("no first item") { recorder.server?.isRunning == true }
         let first = try XCTUnwrap(recorder.server?.serverID)
 
         try server.run(["kill-session", "-t", "=notes"])
-        try await wait("the row of a Board Session that ended on the same server stayed", seconds: 10) {
+        try await eventually("the row of a Board Session that ended on the same server stayed") {
             try store.read().boardSessions.map(\.name) == ["scratch"]
         }
 
         try server.run(["kill-server"])
+        // A new Session that reaches the server while it exits fails with "server exited unexpectedly".
+        try await serverExited()
         try server.run(["new-session", "-d", "-s", "work"])
-        try await wait("the publisher did not read the new server", seconds: 10) {
+        await eventually("the publisher did not read the new server") {
             recorder.server?.isRunning == true && recorder.server?.serverID != first
         }
-        try await Task.sleep(nanoseconds: 1_500_000_000)
+        // The read after the one that found the new server keeps the Board Session too.
+        await publishers[0].read()
         let dormant = try XCTUnwrap(store.read().boardSessions.first, "a tmux restart took the Board Session off the Board")
         XCTAssertEqual(dormant.name, "scratch")
         XCTAssertEqual(dormant.session["windows"]?.array?.count, 2, "the Board Session keeps the Windows to Reopen")
@@ -635,11 +717,11 @@ final class EnvironmentPublisherTests: XCTestCase {
         try server.run(["set-option", "-t", "=notes:", BoardSession.legacyOption, "7"])
         let store = TopicStore(paths: paths)
         _ = start()
-        try await wait("the Board Session was not imported", seconds: 10) { try store.read().boardSessions.count == 1 }
+        try await eventually("the Board Session was not imported") { try store.read().boardSessions.count == 1 }
         let boardSession = try XCTUnwrap(store.read().boardSessions.first)
         XCTAssertEqual(boardSession.order, 7, "the Board Session keeps its order")
         XCTAssertEqual(boardSession.name, "notes")
-        try await wait("the option stayed", seconds: 5) {
+        try await eventually("the option stayed") {
             try self.server.run(["show-options", "-qv", "-t", "=notes:", BoardSession.legacyOption]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "=notes:", "@muxify_session_id"]).trimmingCharacters(in: .whitespacesAndNewlines),
@@ -667,7 +749,14 @@ final class EnvironmentPublisherTests: XCTestCase {
     private func start(clientMarker: String? = nil, sent: SentLines? = nil, news: NewsLog? = nil) -> Recorder {
         let recorder = Recorder()
         let startControlClient: TmuxControlClientStart = { invocation, environment, onLines, onExit in
-            let client = try PipeControlClient.start(invocation, environment, onLines, onExit)
+            let connection = ListenerConnection(arguments: invocation.arguments)
+            // After the publisher's own handler, so a test that saw a line can wait for the publisher's queue behind it.
+            let client = try PipeControlClient.start(invocation, environment, { lines in
+                onLines(lines)
+                connection.hear(lines)
+            }, onExit)
+            connection.connect(client)
+            sent?.started(connection)
             return sent.map { RecordingControlClient(client, sent: $0) } ?? client
         }
         let publisher = EnvironmentPublisher(server: server, topics: TopicStore(paths: paths),
@@ -684,23 +773,23 @@ final class EnvironmentPublisherTests: XCTestCase {
 
     /// Waits for the control Clients, then for a quiet moment, and forgets what came before.
     private func settle(_ recorder: Recorder, controlClients count: Int) async throws {
-        try await wait("the publisher did not attach its Listener") { try self.controlClients().count == count }
-        var seen = -1
-        try await wait("the publisher did not settle", seconds: 10) {
-            let now = recorder.items.count
-            defer { seen = now }
-            if now == seen { return true }
-            try await Task.sleep(nanoseconds: 1_200_000_000)
-            return false
-        }
+        try await eventually("the publisher did not attach its Listener") { try self.controlClients().count == count }
+        await settled("the publisher did not settle") { recorder.items }
         recorder.clear()
     }
 
-    /// Waits up to 2 s for the first event, then a little longer for any other, and checks that only `key` came.
+    /// How soon a change's event comes. The format subscription, which tmux checks each second, sees a change that
+    /// has no notification within its second and a read, at most about 1.1 s, where the whole read every 5 s could
+    /// take longer; a notification's change comes in a few tenths.
+    private static let soon = scaled(4.5)
+
+    /// Waits for the first event, which comes `soon`, then a little longer for any other, and checks that only `key`
+    /// came.
     private func expectOnly(_ key: String, from recorder: Recorder, _ change: String) async throws {
         let start = Date()
-        try await wait("no event within 2 s of \(change)", seconds: 2) { !recorder.items.isEmpty }
-        XCTAssertLessThan(Date().timeIntervalSince(start), 2.05, change)
+        await eventually("no event of \(change)") { !recorder.items.isEmpty }
+        XCTAssertLessThan(Date().timeIntervalSince(start), Self.soon, "the event of \(change) came late")
+        // absence: no event of another key follows the change.
         try await Task.sleep(nanoseconds: 600_000_000)
         XCTAssertEqual(recorder.keys, [key], change)
         recorder.clear()
@@ -716,16 +805,17 @@ final class EnvironmentPublisherTests: XCTestCase {
             .split(separator: "\n").map(String.init)
     }
 
-    private func sessions() throws -> [String] {
-        ((try? server.run(["list-sessions", "-F", "#{session_name}"])) ?? "").split(separator: "\n").map(String.init)
+    /// Waits until no server answers on the socket.
+    private func serverExited(_ message: String = "the server did not exit") async throws {
+        await eventually(message) {
+            do { _ = try server.run(["display-message", "-p", "#{pid}"]); return false } catch {
+                return (error as? TmuxError)?.indicatesNoServer == true
+            }
+        }
     }
 
-    private func wait(_ message: String, seconds: TimeInterval = 10, until done: () async throws -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while try await !done() {
-            guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
+    private func sessions() throws -> [String] {
+        ((try? server.run(["list-sessions", "-F", "#{session_name}"])) ?? "").split(separator: "\n").map(String.init)
     }
 
     /// A Client attached to `session` in a pseudo-terminal, as a Terminal is: its tty and pid. The first is the
@@ -752,12 +842,13 @@ final class EnvironmentPublisherTests: XCTestCase {
         process.standardError = FileHandle.nullDevice
         try process.run()
         if clientProcess == nil { clientProcess = process } else { otherProcesses.append(process) }
-        let deadline = Date().addingTimeInterval(8)
-        while Date() < deadline {
-            if let client = try nonControlClients().first(where: { !attachedBefore.contains($0.tty) }) { return client }
-            Thread.sleep(forTimeInterval: 0.05)
+        var attached: ViewCommandExecutor.Client?
+        try eventually("the Client did not attach") {
+            attached = try nonControlClients().first { !attachedBefore.contains($0.tty) }
+            return attached != nil
         }
-        throw TmuxError.timedOut
+        guard let attached else { throw TmuxError.timedOut }
+        return attached
     }
 
     private func nonControlClients() throws -> [ViewCommandExecutor.Client] {
