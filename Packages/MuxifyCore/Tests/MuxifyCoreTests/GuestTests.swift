@@ -47,8 +47,8 @@ final class GuestTests: XCTestCase {
 
     private func name(_ entry: BoardCard) -> String {
         switch entry {
-        case .topic(let record): return record.id + (entry.isGuest ? "(G)" : "")
-        case .session(let session): return "~" + session.id + (entry.isGuest ? "(G)" : "")
+        case .topic(let record): return record.id + (entry.hasGuestMark ? "(G)" : "")
+        case .session(let session): return "~" + session.id + (entry.hasGuestMark ? "(G)" : "")
         case .openPlace: return "_"
         }
     }
@@ -309,6 +309,12 @@ final class GuestTests: XCTestCase {
         try placed.create(TopicRecord(id: "scratch-fix", title: "scratch-fix"), replacingSession: "scratch")
         XCTAssertEqual(sidebar(placed), "payments scratch-fix docs + infra(G) | release", "from a place, the Topic takes the place")
         XCTAssertEqual(placed.openPlaces, [], "and leaves no Open Place")
+
+        var pastLastPlace = transaction("payments auth-bug docs ~scratch | release")
+        XCTAssertEqual(sidebar(pastLastPlace), "payments auth-bug docs + ~scratch | release")
+        try pastLastPlace.create(TopicRecord(id: "scratch-fix", title: "scratch-fix"), replacingSession: "scratch")
+        XCTAssertEqual(sidebar(pastLastPlace), "payments auth-bug docs + scratch-fix(G) | release",
+                       "a Board Session without the mark past the last place is among the Guests, so the Topic is a Guest, not Benched")
 
         var none = transaction("payments auth-bug docs + ~scratch(G) | release")
         try none.create(TopicRecord(id: "new", title: "new"), replacingSession: "gone")

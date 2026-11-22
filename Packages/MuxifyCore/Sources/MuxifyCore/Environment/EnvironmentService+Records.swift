@@ -121,7 +121,7 @@ extension EnvironmentService {
             let cards = TopicCards.order(records: contents.records, boardSessions: contents.boardSessions, openPlaces: contents.openPlaces)
             if let window = card.withoutCard {
                 try makeGuest(window, snapshot: snapshot, client: client, phase: &phase)
-            } else if cards.first(where: { $0.id == card.id })?.isGuest == true {
+            } else if TopicOrder.cut(cards, inPlay: topics.inPlay).guests.contains(where: { $0.id == card.id }) {
                 return .changed(card.change)
             } else {
                 try store.write { try $0.apply(.makeGuest, to: card.id) }

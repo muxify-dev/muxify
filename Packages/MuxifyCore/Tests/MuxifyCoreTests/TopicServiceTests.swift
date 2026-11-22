@@ -1098,6 +1098,24 @@ final class TopicServiceCardTests: TopicServiceTestCase {
         XCTAssertEqual(try guests(), ["Fifth", "Sixth"])
     }
 
+    func testABoardSessionPastTheLastPlaceIsAGuestToMakeAGuestAndToANewTopicFromIt() throws {
+        let two = service(inPlay: 2), one = service(inPlay: 1)
+        try regularTopic("First", using: two)
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        _ = try change(two.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        let notes = try sessionID("notes")
+        _ = try change(two.handle(EnvironmentRequest(.chooseInPlay([.topic(.named("First")), .liveSession(notes)]))))
+        XCTAssertEqual(try boardSessions().map(\.isGuest), [false], "it holds the second place")
+
+        let before = try boardSessions()
+        _ = try change(one.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        XCTAssertEqual(try boardSessions(), before, "with one place it is among the Guests already, so Make a Guest changes nothing")
+
+        _ = try change(one.handle(EnvironmentRequest(.move(to: .newTopic(title: "Notes work")), target: .session(notes))))
+        XCTAssertEqual(try topicList(), ["First", "Notes work"])
+        XCTAssertEqual(try guests(), ["Notes work"], "the new Topic takes the section its card showed: the Guests, not the Bench")
+    }
+
     /// A service with `topics.in_play` set to `count`.
     private func service(inPlay count: Int) -> EnvironmentService {
         var topics = Config.Topics()

@@ -271,7 +271,7 @@ struct BoardModel {
         var agentSpines: [String: AgentMark] = [:]
         var usesRowMarks = false
         var isUnread = false
-        /// A Guest: a Topic with the Guest mark, or a Board Session.
+        /// The card is in the Guests section: a Topic with the Guest mark, or a Board Session among the Guests.
         var isGuest = false
         let isPinned: Bool
         let sessions: [Session]

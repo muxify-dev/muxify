@@ -97,7 +97,9 @@ public enum BoardCard: Equatable, Sendable {
         return false
     }
 
-    public var isGuest: Bool {
+    /// The Guest mark as the card stores it. Only the cut says if a card is among the Guests: a Board Session without
+    /// the mark is there too when it is past the last place.
+    var hasGuestMark: Bool {
         switch self {
         case .topic(let record): return record.isGuest && !record.isPinned
         case .session(let session): return session.isGuest
@@ -109,7 +111,7 @@ public enum BoardCard: Equatable, Sendable {
     public var slot: InPlaySlot {
         switch self {
         case .openPlace: return .openPlace
-        case _ where isGuest: return .guest
+        case _ where hasGuestMark: return .guest
         case .topic: return .regular
         case .session: return .session
         }
@@ -533,7 +535,7 @@ public enum TopicOrder {
         for index in left { placeHolders.insert(.openPlace(OpenPlace(order: .nan)), at: min(index, placeHolders.count)) }
         let cut = InPlayCut(placeHolders, limit: inPlay, slot: \.slot)
         let pastLastPlace = Set(cut.guests.map(\.id))
-        return rewriting(cut.places + zone.filter { $0.isGuest || pastLastPlace.contains($0.id) } + cut.bench, from: zone)
+        return rewriting(cut.places + zone.filter { $0.hasGuestMark || pastLastPlace.contains($0.id) } + cut.bench, from: zone)
     }
 
     /// The order in the three sections, as the Sidebar shows them: each Board Session that an older Muxify kept among

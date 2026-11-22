@@ -108,9 +108,13 @@ final class BenchTests: XCTestCase {
         XCTAssertEqual(shown(placed), ["topic-pinned", "topic-a", "locked-$2", "bench-line"])
         XCTAssertEqual(placed.split.bench.map(\.id), [.topic("b"), .topic("c"), .topic("d")])
         XCTAssertEqual(placed.steps(of: TopicGroupID.session("$2")).down, .toGuests)
-        XCTAssertEqual(shown(model(inPlay: 1, windows: windows, boardSessions: session)),
+        XCTAssertEqual(placed.rows.filter(\.isGuest).map(\.id), [])
+        let pastLastPlace = model(inPlay: 1, windows: windows, boardSessions: session)
+        XCTAssertEqual(shown(pastLastPlace),
                        ["topic-pinned", "topic-a", "guests-line", "locked-$2", "bench-line"],
                        "past the last place, after a smaller in_play, it is among the Guests")
+        XCTAssertEqual(pastLastPlace.rows.filter(\.isGuest).map(\.id), [.session("$2")],
+                       "its card shows the Guest mark of its section, though its row has no guest flag")
     }
 
     private func cards(_ model: BoardModel) -> [QuickSwitchTarget] {

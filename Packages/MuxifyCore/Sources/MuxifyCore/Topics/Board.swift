@@ -22,7 +22,8 @@ public struct Board {
         public let state: TopicState
         /// In Config order, then the Tags the Config no longer defines. None with Tags off, and none on a Board Session.
         public let tags: [ShownTag]
-        /// A Topic or a Board Session with the Guest mark.
+        /// The card is in the Guests section of the cut: a Topic with the Guest mark, or a Board Session with the mark or
+        /// past the last place.
         public let isGuest: Bool
 
         public var id: TopicGroupID {
@@ -60,14 +61,6 @@ public struct Board {
             if case .card(let card) = self { return card }
             return nil
         }
-
-        fileprivate var slot: InPlaySlot {
-            switch self {
-            case .card(let card) where card.isGuest: return .guest
-            case .card(let card): return card.record == nil ? .session : .regular
-            case .openPlace: return .openPlace
-            }
-        }
     }
 
     /// Every card and Open Place in list order, the Pinned Topics first, as `TopicCards.order` gives them.
@@ -89,6 +82,8 @@ public struct Board {
     public init(records: [TopicRecord], openPlaces: [OpenPlace], boardSessions: [BoardSession] = [], windows: [TmuxWindow], marks: AgentMarks,
                 topics: Config.Topics) {
         let order = TopicCards.order(records: records, boardSessions: boardSessions, openPlaces: openPlaces)
+        let cut = TopicOrder.cut(order, inPlay: topics.inPlay)
+        let guests = Set(cut.guests.map(\.id))
         let open = Set(order.records.map(\.id))
         let boardSessionsBySession = order.boardSessions.bySession(in: windows, open: open).mapValues(\.id)
         let labels = TopicLabels(records)
@@ -102,7 +97,7 @@ public struct Board {
                 let sessions = TopicSessionOrder.firstWindows(windows, record: nil, order: topics.sessionOrder).map(\.sessionID)
                 return .card(Card(subject: .session(boardSession), label: windows.first?.sessionName ?? boardSession.name,
                                   mark: marks.card(sessions: sessions).map(CardMark.agent), sessions: sessions,
-                                  state: sessions.isEmpty ? .dormant : .live, tags: [], isGuest: entry.isGuest))
+                                  state: sessions.isEmpty ? .dormant : .live, tags: [], isGuest: guests.contains(entry.id)))
             case .topic(let record):
                 let sessions = TopicSessionOrder.firstWindows(members[.topic(record.id)] ?? [], record: record, order: topics.sessionOrder)
                     .map(\.sessionID)
@@ -110,12 +105,13 @@ public struct Board {
                                   mark: CardMark(unread: record.isUnread, agent: marks.card(sessions: sessions)), sessions: sessions,
                                   state: TopicState(record: record, hasLiveSession: !sessions.isEmpty),
                                   tags: topics.tags?.shown(record.tags) ?? [],
-                                  isGuest: entry.isGuest))
+                                  isGuest: guests.contains(entry.id)))
             }
         }
         self.entries = entries
         self.order = order
-        inPlay = (topics.inPlay, InPlayCut(entries.filter { !($0.card?.isPinned ?? false) }, limit: topics.inPlay, slot: \.slot))
+        let entriesByID = Dictionary(zip(order.map(\.id), entries), uniquingKeysWith: { first, _ in first })
+        inPlay = (topics.inPlay, cut.compactMap { entriesByID[$0.id] })
         self.labels = labels
         self.boardSessionsBySession = boardSessionsBySession
         openTopicIDs = open

@@ -130,7 +130,7 @@ public struct TopicTransaction {
         if let replaced = boardSessions.first(where: { $0.id == replacedSession }) {
             var placed = record
             placed.order = replaced.order
-            placed.isGuest = replaced.isGuest
+            placed.isGuest = TopicOrder.cut(entries, inPlay: inPlay).guests.contains { $0.id == .session(replaced.id) }
             return put(BoardChange([.topic(placed)], endedSessions: [replaced.id]))
         }
         if record.isPinned { return put(TopicOrder.inserting(record, inPlay: inPlay, in: entries)) }
