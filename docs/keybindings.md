@@ -50,6 +50,8 @@ listed below.
 | `toggle_zoom_pane` | ⌘M | Zoom the current Pane: show it alone in its Window, or show all the Panes again. While a Pane is Zoomed, its Window's Pane badge in the Sidebar is on an accent capsule. Terminal Focus only |
 | `split_pane_right` | ⌘D | Split the current Pane and put the new Pane on its right, in the same folder. Muxify runs tmux's `split-window` itself, so it works with no tmux config and on a Remote Environment. Terminal Focus only |
 | `split_pane_down` | ⌘⇧D | Split the current Pane and put the new Pane below it, in the same folder, as `split_pane_right` does. Terminal Focus only |
+| `split_pane_left` | Unbound | Split the current Pane and put the new Pane on its left, in the same folder, as `split_pane_right` does. Terminal Focus only |
+| `split_pane_up` | Unbound | Split the current Pane and put the new Pane above it, in the same folder, as `split_pane_right` does. Terminal Focus only |
 | `resize_pane_left` | Unbound | Move the current Pane's border 10 cells left. Terminal Focus only |
 | `resize_pane_right` | Unbound | Move the current Pane's border 10 cells right. Terminal Focus only |
 | `resize_pane_up` | Unbound | Move the current Pane's border 10 cells up. Terminal Focus only |
@@ -161,8 +163,9 @@ Commands also lists the layout and Focus actions: Maximize or Restore, Maximize
 Terminal, Maximize Browser, Focus Terminal, Focus Browser, and Show or Hide for
 the Sidebar, the Terminal and the Browser, and Toggle Bench while the Topics list has a Bench line. Each row shows its configured shortcut.
 Zoom Pane runs at once on the current Pane, as `toggle_zoom_pane` does. Split
-Pane Right and Split Pane Down run at once too, as `split_pane_right` and
-`split_pane_down` do.
+Pane Right, Split Pane Down, Split Pane Left and Split Pane Up run at once too,
+as `split_pane_right`, `split_pane_down`, `split_pane_left` and `split_pane_up`
+do.
 A row appears only when its action can change something.
 
 Move opens for a Pane with ⌘⇧T (while the Browser does not have Focus), a Window with `move_window` or a Session with ⌘⇧M.

@@ -4,6 +4,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.panels
 """
 
+import os
 import re
 import time
 import unittest
@@ -92,6 +93,28 @@ class Panels(unittest.TestCase):
         self.s.run_command('Split Pane Down')
         wait(lambda: len(panes()) == 3, 'the Split Pane Down Command did not split the current Pane')
         self.assertEqual(len({pane.split()[1] for pane in panes()}), 2, 'no new Pane is below the current one: %s' % panes())
+
+    def test_the_split_pane_left_and_up_commands_put_the_new_pane_on_their_side_in_its_folder(self):
+        # The sandbox's tmux server runs with no config, so no key of tmux's splits; Muxify runs split-window itself.
+        geometry = lambda pane: [int(n) for n in self.s.tmux('display-message', '-p', '-t', pane, '#{pane_left} #{pane_top}').split()]
+        folder = lambda pane: self.s.tmux('display-message', '-p', '-t', pane, '#{pane_current_path}')
+        for command, side in [('Split Pane Left', 'left'), ('Split Pane Up', 'up')]:
+            current = self.active_pane()
+            path = os.path.realpath(self.s.root/('split-' + side))
+            os.makedirs(path, exist_ok=True)
+            self.s.tmux('respawn-pane', '-k', '-c', path, '-t', current, SHELL)
+            wait(lambda: folder(current) == path, 'the current Pane is not in %s: %s' % (path, folder(current)))
+            count = len(self.s.tmux('list-panes', '-t', self.window, '-F', '#{pane_id}').splitlines())
+            self.s.run_command(command)
+            wait(lambda: self.active_pane() != current, 'the %s Command did not split the current Pane' % command)
+            new = self.active_pane()
+            self.assertEqual(len(self.s.tmux('list-panes', '-t', self.window, '-F', '#{pane_id}').splitlines()), count + 1)
+            (new_left, new_top), (left, top) = geometry(new), geometry(current)
+            if side == 'left':
+                self.assertTrue(new_left < left and new_top == top, 'the new Pane %s is not left of %s' % ((new_left, new_top), (left, top)))
+            else:
+                self.assertTrue(new_top < top and new_left == left, 'the new Pane %s is not above %s' % ((new_left, new_top), (left, top)))
+            wait(lambda: folder(new) == path, 'the new Pane started in %s, not in %s' % (folder(new), path))
 
     def test_keybind_splits_the_current_pane_only_while_the_terminal_has_focus(self):
         # split_pane_right acts only while the Terminal has Focus (ADR 0042); the driver performs it with no key.

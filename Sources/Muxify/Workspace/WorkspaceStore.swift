@@ -3179,6 +3179,8 @@ final class WorkspaceStore {
         case .toggleZoomPane: toggleZoomOfCurrentPane()
         case .splitPaneRight: splitCurrentPane(.right)
         case .splitPaneDown: splitCurrentPane(.down)
+        case .splitPaneLeft: splitCurrentPane(.left)
+        case .splitPaneUp: splitCurrentPane(.up)
         case .resizePaneLeft: resizeCurrentPane(.left)
         case .resizePaneRight: resizeCurrentPane(.right)
         case .resizePaneUp: resizeCurrentPane(.up)

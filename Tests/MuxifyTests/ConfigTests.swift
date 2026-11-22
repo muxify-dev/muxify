@@ -577,6 +577,8 @@ final class ConfigTests: XCTestCase {
             (.toggleZoomPane, ["cmd+m"], .terminal),
             (.splitPaneRight, ["cmd+d"], .terminal),
             (.splitPaneDown, ["cmd+shift+d"], .terminal),
+            (.splitPaneLeft, [], .terminal),
+            (.splitPaneUp, [], .terminal),
             (.resizePaneLeft, [], .terminal),
             (.resizePaneRight, [], .terminal),
             (.resizePaneUp, [], .terminal),
