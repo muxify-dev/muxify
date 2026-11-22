@@ -581,6 +581,7 @@ final class ConfigTests: XCTestCase {
             (.splitPaneUp, [], .terminal),
             (.splitWindowRight, [], .terminal),
             (.splitWindowDown, [], .terminal),
+            (.equalizePanes, [], .terminal),
             (.resizePaneLeft, [], .terminal),
             (.resizePaneRight, [], .terminal),
             (.resizePaneUp, [], .terminal),

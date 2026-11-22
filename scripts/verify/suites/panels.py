@@ -145,6 +145,16 @@ class Panels(unittest.TestCase):
                                 'the new Pane %s does not span the right of the %dx%d Window' % ((left, top, pane_width, pane_height), width, height))
             wait(lambda: folder(new) == path, 'the new Pane started in %s, not in %s' % (folder(new), path))
 
+    def test_the_equalize_panes_command_spreads_the_windows_panes_out_evenly(self):
+        # The sandbox's tmux server runs with no config; Muxify runs select-layout -E itself.
+        current = self.active_pane()
+        self.s.tmux('split-window', '-d', '-h', '-t', current, SHELL)
+        self.s.tmux('resize-pane', '-t', current, '-x', '30')
+        widths = lambda: [int(n) for n in self.s.tmux('list-panes', '-t', self.window, '-F', '#{pane_width}').split()]
+        wait(lambda: len(widths()) == 2 and abs(widths()[0] - widths()[1]) > 20, 'the Panes are not of unequal width: %s' % widths())
+        self.s.run_command('Equalize Panes')
+        wait(lambda: abs(widths()[0] - widths()[1]) <= 1, 'Equalize Panes did not spread the Panes out evenly: %s' % widths())
+
     def test_keybind_splits_the_current_pane_only_while_the_terminal_has_focus(self):
         # split_pane_right acts only while the Terminal has Focus (ADR 0042); the driver performs it with no key.
         target = 'panels:' + self.id().rsplit('.', 1)[-1][:24]

@@ -54,6 +54,7 @@ listed below.
 | `split_pane_up` | Unbound | Split the current Pane and put the new Pane above it, in the same folder, as `split_pane_right` does. Terminal Focus only |
 | `split_window_right` | Unbound | Add a Pane along the Window's whole right edge, as tmux's `split-window -f` does, in the current Pane's folder. Muxify runs `split-window` itself, as `split_pane_right` does. An older Host Server on a Remote Environment makes a normal split instead. Terminal Focus only |
 | `split_window_down` | Unbound | Add a Pane along the Window's whole bottom edge, in the current Pane's folder, as `split_window_right` does. An older Host Server makes a normal split instead. Terminal Focus only |
+| `equalize_panes` | Unbound | Spread the current Window's Panes out evenly, as tmux's `select-layout -E` does. Muxify runs `select-layout` itself, so it works with no tmux config and on a Remote Environment. Terminal Focus only |
 | `resize_pane_left` | Unbound | Move the current Pane's border 10 cells left. Terminal Focus only |
 | `resize_pane_right` | Unbound | Move the current Pane's border 10 cells right. Terminal Focus only |
 | `resize_pane_up` | Unbound | Move the current Pane's border 10 cells up. Terminal Focus only |
@@ -165,10 +166,10 @@ Commands also lists the layout and Focus actions: Maximize or Restore, Maximize
 Terminal, Maximize Browser, Focus Terminal, Focus Browser, and Show or Hide for
 the Sidebar, the Terminal and the Browser, and Toggle Bench while the Topics list has a Bench line. Each row shows its configured shortcut.
 Zoom Pane runs at once on the current Pane, as `toggle_zoom_pane` does. Split
-Pane Right, Split Pane Down, Split Pane Left, Split Pane Up, Split Window Right
-and Split Window Down run at once too, as `split_pane_right`, `split_pane_down`,
-`split_pane_left`, `split_pane_up`, `split_window_right` and `split_window_down`
-do.
+Pane Right, Split Pane Down, Split Pane Left, Split Pane Up, Split Window Right,
+Split Window Down and Equalize Panes run at once too, as `split_pane_right`,
+`split_pane_down`, `split_pane_left`, `split_pane_up`, `split_window_right`,
+`split_window_down` and `equalize_panes` do.
 A row appears only when its action can change something.
 
 Move opens for a Pane with ⌘⇧T (while the Browser does not have Focus), a Window with `move_window` or a Session with ⌘⇧M.

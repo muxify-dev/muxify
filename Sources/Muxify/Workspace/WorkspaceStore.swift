@@ -3183,6 +3183,7 @@ final class WorkspaceStore {
         case .splitPaneUp: splitCurrentPane(.up)
         case .splitWindowRight: splitCurrentPane(.right, full: true)
         case .splitWindowDown: splitCurrentPane(.down, full: true)
+        case .equalizePanes: equalizePanes()
         case .resizePaneLeft: resizeCurrentPane(.left)
         case .resizePaneRight: resizeCurrentPane(.right)
         case .resizePaneUp: resizeCurrentPane(.up)
@@ -3616,7 +3617,11 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
     func ghosttyToggleSplitZoom() { toggleZoomOfCurrentPane() }
     func ghosttyStartSearch() { showFindInPane() }
 
-    func ghosttyEqualizeSplits() {
+    func ghosttyEqualizeSplits() { equalizePanes() }
+
+    /// Spreads the current Window's Panes out evenly with tmux's own `select-layout -E`, whatever the tmux config
+    /// binds.
+    func equalizePanes() {
         runOnCurrentPane { pane, _ in .selectLayout(target: pane) }
     }
 

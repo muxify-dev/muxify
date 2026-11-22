@@ -79,6 +79,7 @@ public enum ConfigAction: String, KeybindAction {
     case splitPaneUp = "split_pane_up"
     case splitWindowRight = "split_window_right"
     case splitWindowDown = "split_window_down"
+    case equalizePanes = "equalize_panes"
     case resizePaneLeft = "resize_pane_left"
     case resizePaneRight = "resize_pane_right"
     case resizePaneUp = "resize_pane_up"
@@ -173,6 +174,7 @@ public enum ConfigAction: String, KeybindAction {
         .splitPaneUp: [],
         .splitWindowRight: [],
         .splitWindowDown: [],
+        .equalizePanes: [],
         .resizePaneLeft: [],
         .resizePaneRight: [],
         .resizePaneUp: [],
@@ -235,7 +237,7 @@ public enum ConfigAction: String, KeybindAction {
     /// from the Browser, and a Tab key does not take one from the Terminal.
     public var requiredFocus: PanelLayout.Side? {
         switch self {
-        case .toggleZoomPane, .splitPaneRight, .splitPaneDown, .splitPaneLeft, .splitPaneUp, .splitWindowRight, .splitWindowDown, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown,
+        case .toggleZoomPane, .splitPaneRight, .splitPaneDown, .splitPaneLeft, .splitPaneUp, .splitWindowRight, .splitWindowDown, .equalizePanes, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown,
              .selectPaneLeft, .selectPaneRight, .selectPaneUp, .selectPaneDown, .selectPanePrevious, .selectPaneNext, .findInPane: .terminal
         case .findInPage, .selectNextTab, .selectPrevTab, .browserBack, .browserForward, .closeTab, .reopenClosedTab: .browser
         default: nil
