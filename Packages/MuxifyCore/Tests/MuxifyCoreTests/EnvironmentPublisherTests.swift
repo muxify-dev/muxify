@@ -304,6 +304,8 @@ final class EnvironmentPublisherTests: XCTestCase {
     /// report: at the notice, the program gets the reported colours.
     func testAProgramThatAsksAtTheSwitchsNoticeGetsTheReportedColours() async throws {
         let notices = try themeProbe(session: "other")
+        // tmux tells only a program that has turned mode 2031 on, and the other screen's report sends no notice later.
+        try await wait("the probe did not turn on mode 2031") { self.lines(notices).first == "ready" }
         try server.run(["new-session", "-d", "-s", "work"])
         let terminal = try startTerminal(in: "work", colours: Self.light)
         try await wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
