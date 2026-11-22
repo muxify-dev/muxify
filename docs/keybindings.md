@@ -368,7 +368,7 @@ conflict with the actions above:
 | `settle_topic` | Unbound | Settle the highlighted Topic |
 | `forget_topic` | Unbound | Forget the highlighted Topic |
 | `reopen_topic` | Unbound | Reopen the highlighted Topic |
-| `start_topic_fresh` | Unbound | Start Fresh for the highlighted Topic |
+| `start_topic_fresh` | Unbound | Start Fresh for the highlighted Topic or Dormant Guest Session |
 | `pin_topic` | Unbound | Pin the highlighted Topic |
 | `unpin_topic` | Unbound | Unpin the highlighted Topic |
 | `remove_from_topic` | Unbound | Remove the highlighted Session or Window from its Topic |

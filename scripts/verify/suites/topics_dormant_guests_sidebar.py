@@ -1,21 +1,24 @@
 """A Guest Session after a tmux restart: its Lock in the state database keeps its card at its place among the Guests,
-Dormant, and a press on the card creates its Session again with its Windows.
+Dormant, and a press on the card creates its Session again with its Windows. Its page offers Start Fresh, which
+creates the Session with one shell Window.
 
-A restart ends every Session of the fixture, so this check has a suite of its own. GuestSessionLockTests and
+A restart ends every Session of the fixture, so these checks have a suite of their own. GuestSessionLockTests and
 EnvironmentPublisherTests prove the rules: a restart keeps the Lock, and an end on the same server ends it.
 
 The card of a Guest Session gives "Make a Guest" on the Session card and its default action on its own header
-(UI/SidebarView.swift), so the check reaches them without a context menu.
+(UI/SidebarView.swift), so the checks reach them without a context menu. The page shows when the Dormant Guest
+Session is the Next Topic after a Settle, as a Dormant Topic's page does.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_dormant_guests_sidebar
 """
 
+import time
 import unittest
 from pathlib import Path
 
 from scripts.verify.sandbox import frame, wait
-from scripts.verify.topics_sidebar import SHELL, TopicsSidebar
+from scripts.verify.topics_sidebar import REFRESH_LIMIT, SHELL, TopicsSidebar
 
 
 class TopicsDormantGuestsSidebar(TopicsSidebar):
@@ -90,6 +93,56 @@ class TopicsDormantGuestsSidebar(TopicsSidebar):
                          'the new Session does not point at the same Lock')
         s.wait_rows(lambda rs: s.has(key, rs) and 'Dormant' not in s.row(key, rs).get('accessibilityValue', '')
                     and self.above(key, later_key, rs), 'the card is not live again at its place', seconds=15)
+
+    def test_the_page_of_a_dormant_guest_session_offers_start_fresh_which_makes_one_window_at_its_place(self):
+        s = self.s
+        self.write_topic('fresh-upper', 'Fresh upper', order=0)
+        notes = self.make_guest('fresh-notes', windows=2)
+        later = self.make_guest('fresh-later', windows=1)
+        key, later_key = 'locked-' + notes, 'locked-' + later
+
+        self.restart_tmux()
+        self.addCleanup(s.tmux_ok, 'kill-session', '-t', '=fresh-notes')
+        s.wait_rows(lambda rs: s.has(key, rs) and 'Dormant' in s.row(key, rs).get('accessibilityValue', ''),
+                    'the Guest Session has no Dormant card after the tmux restart', seconds=15)
+
+        sid = self.new_session('beta/fresh-upper', self.beta, topic='fresh-upper')
+        upper = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        s.show(upper)
+        s.wait_shown(upper)
+
+        def settle_names_the_dormant_card():
+            # The menu item follows the Location about a second after the Sidebar.
+            if s.has('palette-search'):
+                s.act('action', 'palette-search', 'Close')
+            s.driver('press', 'Settle Topic…')
+            found, _ = self.rows_until(lambda rs: s.has('palette-note', rs) and 'Then opens: fresh-notes' in self.describe('palette-note', rs),
+                                       seconds=3)
+            return found is not None
+        wait(settle_names_the_dormant_card, 'Settle of the Topic above does not name the Dormant Guest Session as the Next Topic',
+             seconds=20)
+        s.act('press', 'palette-accept')
+        rs = s.wait_rows(lambda rs: s.has('reopen-choice-start-fresh', rs),
+                         "Next Topic did not show the Dormant Guest Session's Reopen choice", seconds=15)
+        self.assertIn('w1', self.describe('reopen-session-fresh-notes', rs), 'the Reopen column does not list the remembered Windows')
+        fresh = self.describe('start-fresh-session-fresh-notes', rs)
+        self.assertIn('shell', fresh, 'the Start Fresh column does not list its shell Window')
+        self.assertNotIn('w1', fresh, 'the Start Fresh column lists a remembered Window')
+        self.assertNotEqual(s.tmux_ok('has-session', '-t', '=fresh-notes').returncode, 0, 'showing the choice created the Session')
+
+        s.act('press', 'reopen-choice-start-fresh')
+        def made_with_one_window():
+            found = s.tmux_ok('list-windows', '-t', '=fresh-notes:', '-F', '#{window_id}')
+            return found.returncode == 0 and len(found.stdout.split()) == 1
+        wait(made_with_one_window, 'Start Fresh did not create the Session with one Window', seconds=15)
+        self.assertEqual(s.tmux('show-options', '-qv', '-t', '=fresh-notes:', '@muxify_session_id'), notes,
+                         'the new Session does not point at the same Lock')
+        s.wait_rows(lambda rs: not s.has('reopen-choice-start-fresh', rs) and s.has(key, rs)
+                    and 'Dormant' not in s.row(key, rs).get('accessibilityValue', '') and self.above(key, later_key, rs),
+                    'the page stays, or the card is not live again at its place', seconds=15)
+        time.sleep(REFRESH_LIMIT)
+        self.assertEqual(len(s.tmux('list-windows', '-t', '=fresh-notes:', '-F', '#{window_id}').split()), 1,
+                         'a remembered Window came back after Start Fresh')
 
 
 if __name__ == '__main__':

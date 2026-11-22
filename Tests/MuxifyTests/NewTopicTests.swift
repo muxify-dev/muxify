@@ -79,4 +79,13 @@ final class NewTopicTests: XCTestCase {
         XCTAssertNil(gone.emptyTopic)
         XCTAssertEqual(gone.activeTopic, .noTopic)
     }
+
+    func testADormantGuestSessionsPageShowsItsCardAsTheActiveTopic() {
+        let lock = SessionLock(id: "g1", order: 0, session: .object(["name": .string("notes"), "directory": .string("/work/notes")]))
+        let shown = TopicsModel(records: [], locks: [lock], windows: [], config: Config(), selection: TopicSelection(),
+                                location: .emptyTopic(.locked("g1")))
+        XCTAssertEqual(shown.activeTopic, .locked("g1"))
+        XCTAssertEqual(shown.emptyTopic?.id, .locked("g1"), "the page shows the Dormant Guest Session's Reopen choice")
+        XCTAssertEqual(shown.emptyTopic?.state, .dormant)
+    }
 }

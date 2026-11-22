@@ -51,6 +51,8 @@ public struct Router: Equatable {
         public var entryWindows: [TopicGroupID: WindowID]
         /// The ids of the Open Places that hold an In Play place.
         public var openPlaces: Set<String>
+        /// The Lock ids of the Guest Sessions, live or Dormant.
+        public var guestSessions: Set<String>
         public var hasTerminal: Bool
         public var allowAttach: Bool
         public var rememberedWindow: WindowID?
@@ -59,7 +61,7 @@ public struct Router: Equatable {
 
         public init(windows: [TmuxWindow] = [], ownClientWindow: WindowID? = nil,
                     records: [TopicRecord] = [], entryWindows: [TopicGroupID: WindowID] = [:],
-                    openPlaces: Set<String> = [], hasTerminal: Bool = true, allowAttach: Bool = false,
+                    openPlaces: Set<String> = [], guestSessions: Set<String> = [], hasTerminal: Bool = true, allowAttach: Bool = false,
                     rememberedWindow: WindowID? = nil, initialWindow: WindowID? = nil,
                     now: Date = Date()) {
             self.windows = windows
@@ -67,6 +69,7 @@ public struct Router: Equatable {
             self.records = records
             self.entryWindows = entryWindows
             self.openPlaces = openPlaces
+            self.guestSessions = guestSessions
             self.hasTerminal = hasTerminal
             self.allowAttach = allowAttach
             self.rememberedWindow = rememberedWindow
@@ -167,7 +170,7 @@ public struct Router: Equatable {
         if case .topic(let group) = intent {
             intent = nil
             let destination = facts.entryWindows[group].map(Location.window)
-                ?? .emptyTopic(group.pageGroup)
+                ?? .emptyTopic(group.page(facts))
             return go(destination, readsOnArrival: true, facts)
         }
         if case .request(_, let until) = intent {
@@ -184,7 +187,7 @@ public struct Router: Equatable {
             }
             location = nil
         }
-        if case .emptyTopic(.topic(let topic)) = location, intent == nil, let target = facts.entryWindows[.topic(topic)] {
+        if case .emptyTopic(let group) = location, group != .noTopic, intent == nil, let target = facts.entryWindows[group] {
             return go(.window(target), readsOnArrival: true, facts)
         }
         if let effects = leaveGonePage(facts) { return effects }
@@ -202,12 +205,13 @@ public struct Router: Equatable {
         return effects + attachIfNeeded(facts)
     }
 
-    /// The page's Topic is gone, or its Open Place closed (a fill from elsewhere, or a lower `topics.in_play`): the
-    /// Location goes to the Window that the Client shows, or to none. Nil while the page stays.
+    /// The page's Topic or Guest Session is gone, or its Open Place closed (a fill from elsewhere, or a lower
+    /// `topics.in_play`): the Location goes to the Window that the Client shows, or to none. Nil while the page stays.
     private mutating func leaveGonePage(_ facts: Facts) -> [Effect]? {
         guard intent == nil else { return nil }
         switch location {
         case .emptyTopic(.topic(let topic))? where !facts.records.contains(where: { $0.id == topic }): break
+        case .emptyTopic(.locked(let lock))? where !facts.guestSessions.contains(lock): break
         case .openPlace(let place)? where !facts.openPlaces.contains(place): break
         default: return nil
         }
@@ -286,8 +290,10 @@ public struct Router: Equatable {
 }
 
 private extension TopicGroupID {
-    var pageGroup: TopicGroupID {
-        if case .locked = self { return .noTopic }
+    /// The page of a card with no Window: its own, as a Dormant Guest Session's offers Reopen and Start Fresh, or No
+    /// Topic's for a Guest Session whose Lock is gone.
+    func page(_ facts: Router.Facts) -> TopicGroupID {
+        if case .locked(let lock) = self, !facts.guestSessions.contains(lock) { return .noTopic }
         return self
     }
 }

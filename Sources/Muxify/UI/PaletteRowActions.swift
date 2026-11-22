@@ -35,7 +35,11 @@ extension CommandPalette {
             return
         }
         if case .guestSession(let lock) = item.ref {
-            if action == .bench { close(); store.bench(.lock(lock)) }
+            switch action {
+            case .startTopicFresh: close(); store.reopenGuestSession(lock, .startFresh)
+            case .bench: close(); store.bench(.lock(lock))
+            default: break
+            }
             return
         }
         if case .topic(let id, _) = item.ref,

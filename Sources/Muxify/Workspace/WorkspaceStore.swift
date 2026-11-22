@@ -218,7 +218,7 @@ final class WorkspaceStore {
         if entryWindow(of: id) == nil, !changingTopic {
             switch id {
             case .topic(let topicID) where reopensOnArrival(topicID): return reopenTopic(topicID, .reopen)
-            case .locked(let lock) where locks.contains(where: { $0.id == lock }): return reopenGuestSession(lock)
+            case .locked(let lock) where locks.contains(where: { $0.id == lock }): return reopenGuestSession(lock, .reopen)
             case .topic, .locked, .noTopic: break
             }
         }
@@ -231,7 +231,8 @@ final class WorkspaceStore {
         if let window = entryWindow(of: id) { select(window) }
         else if case .topic(let topicID) = id { showEmptyTopic(topicID) }
         else {
-            route(.go(.emptyTopic(.noTopic)))
+            let dormantGuest = locks.contains { TopicGroupID.locked($0.id) == id }
+            route(.go(.emptyTopic(dormantGuest ? id : .noTopic)))
             sidebarMode = .topics
             if !palette.isOpen { terminalHost.window?.makeFirstResponder(nil) }
         }
@@ -722,17 +723,22 @@ final class WorkspaceStore {
     }
 
     func reopenTopic(_ id: String, _ choice: TopicReopening.Choice) {
+        reopen(.topic(.id(id)), choice)
+    }
+
+    /// Creates the Session of a Dormant Guest Session again and shows it: with its Windows, Panes, Tabs and Agents for
+    /// Reopen, with one shell Window for Start Fresh.
+    func reopenGuestSession(_ id: String, _ choice: TopicReopening.Choice) {
+        reopen(.guestSession(id), choice)
+    }
+
+    private func reopen(_ target: EnvironmentTarget, _ choice: TopicReopening.Choice) {
         let command: EnvironmentCommand
         switch choice {
         case .reopen: command = .reopen
         case .startFresh: command = .startFresh
         }
-        perform(EnvironmentRequest(command, target: .topic(.id(id))))
-    }
-
-    /// Creates the Session of a Dormant Guest Session again, with its Windows, Panes, Tabs and Agents, and shows it.
-    func reopenGuestSession(_ id: String) {
-        perform(EnvironmentRequest(.reopen, target: .guestSession(id)))
+        perform(EnvironmentRequest(command, target: target))
     }
 
     /// The open Topic has a Session to create, the same test that makes the empty-Topic view offer the Reopen choice.
@@ -741,6 +747,12 @@ final class WorkspaceStore {
         guard records.contains(where: { $0.id == id && $0.settledAt == nil && !$0.sessions.isEmpty }),
               case .success(let reopening)? = reopening(id, .reopen) else { return false }
         return !reopening.sessions.isEmpty
+    }
+
+    /// What `reopenGuestSession` would create now, for the page to show before the user chooses.
+    func guestReopening(_ id: String, _ choice: TopicReopening.Choice) -> Result<TopicReopening.Session, Error>? {
+        guard let lock = locks.first(where: { $0.id == id }) else { return nil }
+        return Result { try TopicReopening.Session(guest: lock, windows: windows, choice: choice) }
     }
 
     /// What `reopenTopic` would create now, for the panel to show before the user chooses.
@@ -2282,7 +2294,7 @@ final class WorkspaceStore {
         let tty = clientTTY ?? (link.isOnThisMac ? surface?.ttyName : nil)
         let client = snapshot?.clients.first { $0.tty == tty && !$0.isControl }
         return Router.Facts(windows: windows, ownClientWindow: client.flatMap { WindowID(rawValue: $0.windowID) },
-                            records: records, entryWindows: entries, openPlaces: topics.openPlaceIDs,
+                            records: records, entryWindows: entries, openPlaces: topics.openPlaceIDs, guestSessions: Set(locks.map(\.id)),
                             hasTerminal: surface != nil && surface?.processExited == false,
                             allowAttach: allowAttach, rememberedWindow: snapshot?.lastWindowID.flatMap(WindowID.init(rawValue:)),
                             initialWindow: Self.initialWindow(in: windows).flatMap { WindowID(rawValue: $0.id) }, now: Date())

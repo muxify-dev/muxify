@@ -70,7 +70,8 @@ public enum Location: Hashable, Codable, Sendable {
             switch group {
             case .topic(let id): try page.encode(id, forKey: .id)
             case .locked:
-                throw EncodingError.invalidValue(group, .init(codingPath: encoder.codingPath, debugDescription: "A Locked Session has no Empty Topic page."))
+                throw EncodingError.invalidValue(group, .init(codingPath: encoder.codingPath,
+                                                              debugDescription: "Only the Mac shows a Guest Session's page; no request names it."))
             case .noTopic: try page.encode(true, forKey: .noTopic)
             }
         case .openPlace(let id):

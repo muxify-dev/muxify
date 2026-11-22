@@ -1094,9 +1094,14 @@ private struct LockedCard: View, Equatable {
     }
 
     /// The Actions of a Guest Session. It is not a Topic, so it has no Settle, Pin or Forget. A Dormant one has no
-    /// Session to rename, move or kill.
+    /// Session to rename, move or kill, and offers Start Fresh beside Reopen.
     @ViewBuilder
     private var actions: some View {
+        if isDormant {
+            Button("Start Fresh") { store.reopenGuestSession(lock, .startFresh) }
+                .accessibilityIdentifier("start-fresh-" + row.id.accessibilityID)
+                .disabled(store.changingTopic)
+        }
         Button("Bench") { store.bench(.lock(lock)) }
             .disabled(store.changingTopic)
         if let window {

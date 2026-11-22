@@ -525,7 +525,7 @@ struct TopicsModel {
     let topicSessions: [String: Session]
     let activeTopic: TopicGroupID?
     /// The Active Topic when it has no live Session, which the terminal area shows in place of a Window: an empty
-    /// Topic, or a Dormant or Settled one with its Reopen choice.
+    /// Topic, or a Dormant or Settled one, or a Dormant Guest Session, with its Reopen choice.
     let emptyTopic: Row?
     let topicsEnabled: Bool
     let sessionsEnabled: Bool
@@ -565,17 +565,17 @@ struct TopicsModel {
         sessionChildren = Dictionary(grouping: windows, by: \.sessionID).mapValues(children)
 
         let selectedWindow = windows.first { $0.id == location?.windowID?.rawValue }
-        let pageTopicID: String?
+        let page: TopicGroupID?
         switch location {
         case .window:
             activeTopic = selectedWindow.map(groupID)
-            pageTopicID = nil
+            page = nil
         case .emptyTopic(let group):
             activeTopic = group
-            if case .topic(let id) = group { pageTopicID = id } else { pageTopicID = nil }
+            page = group == .noTopic ? nil : group
         case .openPlace, nil:
             activeTopic = nil
-            pageTopicID = nil
+            page = nil
         }
         let active = activeTopic
         let openTopics = selection.openTopics(for: active)
@@ -643,9 +643,9 @@ struct TopicsModel {
         let settled = records.filter { $0.settledAt != nil }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
         settledTopicIDs = settled.map(\.id)
-        if let id = pageTopicID, let row = rows.first(where: { $0.id == .topic(id) }) {
+        if let page, let row = rows.first(where: { $0.id == page }) {
             emptyTopic = row
-        } else if let id = pageTopicID, let record = settled.first(where: { $0.id == id }) {
+        } else if case .topic(let id)? = page, let record = settled.first(where: { $0.id == id }) {
             emptyTopic = Self.settledRow(record, labels: labels, sessionPaths: config.sessionPaths, tags: config.topics.tags, expanded: openTopics)
         } else {
             emptyTopic = nil

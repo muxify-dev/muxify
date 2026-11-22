@@ -1,13 +1,13 @@
 import SwiftUI
 import MuxifyCore
 
-/// The choice that a Dormant or Settled Topic shows in place of the terminal: Reopen or Start Fresh, each with
-/// what it will create.
+/// The choice that a Dormant or Settled Topic, or a Dormant Guest Session, shows in place of the terminal: Reopen or
+/// Start Fresh, each with the Sessions it will create.
 struct ReopenChoiceView: View {
     let store: WorkspaceStore
-    let topicID: String
-    let reopen: TopicReopening
-    let startFresh: TopicReopening
+    let reopen: [TopicReopening.Session]
+    let startFresh: [TopicReopening.Session]
+    let choose: (TopicReopening.Choice) -> Void
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
@@ -18,9 +18,9 @@ struct ReopenChoiceView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
-                Button("Start Fresh") { store.reopenTopic(topicID, .startFresh) }
+                Button("Start Fresh") { choose(.startFresh) }
                     .accessibilityIdentifier("reopen-choice-start-fresh")
-                Button("Reopen") { store.reopenTopic(topicID, .reopen) }
+                Button("Reopen") { choose(.reopen) }
                     .keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier("reopen-choice-reopen")
             }
@@ -32,12 +32,12 @@ struct ReopenChoiceView: View {
         .frame(maxWidth: fontSize(760))
     }
 
-    private func column(_ choice: TopicReopening.Choice, _ reopening: TopicReopening, title: String, summary: String) -> some View {
+    private func column(_ choice: TopicReopening.Choice, _ sessions: [TopicReopening.Session], title: String, summary: String) -> some View {
         let id = choice == .reopen ? "reopen" : "start-fresh"
         return VStack(alignment: .leading, spacing: 10) {
             Text(title).font(fontSize.font(.headline))
             Text(summary).font(fontSize.font(.callout)).foregroundStyle(.secondary)
-            ForEach(reopening.sessions, id: \.name) { session in
+            ForEach(sessions, id: \.name) { session in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(session.baseName).fontWeight(.semibold)
