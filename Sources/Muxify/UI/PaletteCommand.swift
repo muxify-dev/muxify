@@ -37,6 +37,8 @@ enum PaletteCommand: String, CaseIterable {
     case splitPaneDown = "Split Pane Down"
     case splitPaneLeft = "Split Pane Left"
     case splitPaneUp = "Split Pane Up"
+    case splitWindowRight = "Split Window Right"
+    case splitWindowDown = "Split Window Down"
     case showSidebar = "Show Sidebar"
     case hideSidebar = "Hide Sidebar"
     case switchToSessions = "Switch to Sessions"
@@ -107,6 +109,8 @@ enum PaletteCommand: String, CaseIterable {
         case .splitPaneDown: .splitPaneDown
         case .splitPaneLeft: .splitPaneLeft
         case .splitPaneUp: .splitPaneUp
+        case .splitWindowRight: .splitWindowRight
+        case .splitWindowDown: .splitWindowDown
         case .nextTab: .selectNextTab
         case .previousTab: .selectPrevTab
         case .back: .browserBack
@@ -158,7 +162,7 @@ enum PaletteCommand: String, CaseIterable {
         case .newWorktree: .verb(.worktreeCreate)
         case .removeWorktree: .verb(.worktreeRemove)
         case .zoomPane: .verb(.windowZoom)
-        case .splitPaneRight, .splitPaneDown, .splitPaneLeft, .splitPaneUp:
+        case .splitPaneRight, .splitPaneDown, .splitPaneLeft, .splitPaneUp, .splitWindowRight, .splitWindowDown:
             .noMirror("An Agent splits a Pane with tmux's own split-window.")
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser, .showSidebar, .hideSidebar,
              .switchToSessions, .switchToTopics, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
@@ -243,7 +247,7 @@ extension CommandPalette {
             case .maximizeTerminal: return store.panelLayout.maximized != .terminal && store.canMaximize(.terminal)
             case .maximizeBrowser: return store.panelLayout.maximized != .browser && store.canMaximize(.browser)
             case .focusTerminal, .focusBrowser: return store.currentBrowser != nil
-            case .zoomPane, .splitPaneRight, .splitPaneDown, .splitPaneLeft, .splitPaneUp, .renameWindow: return store.selectedWindow != nil
+            case .zoomPane, .splitPaneRight, .splitPaneDown, .splitPaneLeft, .splitPaneUp, .splitWindowRight, .splitWindowDown, .renameWindow: return store.selectedWindow != nil
             case .showSidebar: return !store.sidebarShown
             case .hideSidebar: return store.sidebarShown
             case .switchToSessions, .switchToTopics:
@@ -326,6 +330,8 @@ extension CommandPalette {
         case .splitPaneDown: store.splitCurrentPane(.down)
         case .splitPaneLeft: store.splitCurrentPane(.left)
         case .splitPaneUp: store.splitCurrentPane(.up)
+        case .splitWindowRight: store.splitCurrentPane(.right, full: true)
+        case .splitWindowDown: store.splitCurrentPane(.down, full: true)
         case .newAppWindow: store.onNewAppWindow?()
         case .newWindow: store.newWindow()
         case .newSession: store.newSession()

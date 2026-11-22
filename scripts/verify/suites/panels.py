@@ -116,6 +116,35 @@ class Panels(unittest.TestCase):
                 self.assertTrue(new_top < top and new_left == left, 'the new Pane %s is not above %s' % ((new_left, new_top), (left, top)))
             wait(lambda: folder(new) == path, 'the new Pane started in %s, not in %s' % (folder(new), path))
 
+    def test_the_split_window_commands_add_a_pane_along_the_windows_whole_edge(self):
+        # The sandbox's tmux server runs with no config; Muxify runs split-window -f itself. A normal split of the
+        # current Pane would span only that Pane's width or height, not the Window's.
+        fields = lambda target, format: [int(n) for n in self.s.tmux('display-message', '-p', '-t', target, format).split()]
+        folder = lambda pane: self.s.tmux('display-message', '-p', '-t', pane, '#{pane_current_path}')
+        for command, existing in [('Split Window Down', '-h'), ('Split Window Right', '-v')]:
+            if command == 'Split Window Right':
+                self.window = self.new_window('split-window-right')
+            window = self.window
+            current = self.active_pane()
+            path = os.path.realpath(self.s.root/command.lower().replace(' ', '-'))
+            os.makedirs(path, exist_ok=True)
+            self.s.tmux('respawn-pane', '-k', '-c', path, '-t', current, SHELL)
+            self.s.tmux('split-window', '-d', existing, '-t', current, SHELL)
+            wait(lambda: folder(current) == path, 'the current Pane is not in %s: %s' % (path, folder(current)))
+            self.s.run_command(command)
+            wait(lambda: self.active_pane() != current, 'the %s Command did not split the Window' % command)
+            new = self.active_pane()
+            self.assertEqual(len(self.s.tmux('list-panes', '-t', window, '-F', '#{pane_id}').splitlines()), 3)
+            width, height = fields(window, '#{window_width} #{window_height}')
+            left, top, pane_width, pane_height = fields(new, '#{pane_left} #{pane_top} #{pane_width} #{pane_height}')
+            if command == 'Split Window Down':
+                self.assertTrue(left == 0 and pane_width == width and top + pane_height == height,
+                                'the new Pane %s does not span the bottom of the %dx%d Window' % ((left, top, pane_width, pane_height), width, height))
+            else:
+                self.assertTrue(top == 0 and pane_height == height and left + pane_width == width,
+                                'the new Pane %s does not span the right of the %dx%d Window' % ((left, top, pane_width, pane_height), width, height))
+            wait(lambda: folder(new) == path, 'the new Pane started in %s, not in %s' % (folder(new), path))
+
     def test_keybind_splits_the_current_pane_only_while_the_terminal_has_focus(self):
         # split_pane_right acts only while the Terminal has Focus (ADR 0042); the driver performs it with no key.
         target = 'panels:' + self.id().rsplit('.', 1)[-1][:24]

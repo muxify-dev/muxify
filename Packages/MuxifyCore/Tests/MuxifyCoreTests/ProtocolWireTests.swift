@@ -10,7 +10,7 @@ final class ProtocolWireTests: XCTestCase {
     private static let requestID = RequestID("3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c")!
 
     /// This release's messages, in the order of the newest fixtures folder: the `status-line` capability, which the Mac
-    /// declares too, and its `status_line` request (ADR 0099).
+    /// declares too, and its `status_line` request (ADR 0099), and the `split_pane` View Command's optional `full` key.
     private func thisReleasesFrames() throws -> [Data] {
         [
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: HostProtocol.capabilities)),
@@ -20,6 +20,8 @@ final class ProtocolWireTests: XCTestCase {
             try ProtocolLine.ok(id: 1, ProtocolEmpty()),
             try ProtocolLine.request(id: 2, HostRequest.statusLine(StatusLineRequest(hidden: false))),
             try ProtocolLine.ok(id: 2, ProtocolEmpty()),
+            try ProtocolLine.request(id: 3, HostRequest.view(.splitPane(target: "%3", side: .down, full: true))),
+            try ProtocolLine.ok(id: 3, ViewOutput(output: "")),
         ]
     }
 

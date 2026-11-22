@@ -3181,6 +3181,8 @@ final class WorkspaceStore {
         case .splitPaneDown: splitCurrentPane(.down)
         case .splitPaneLeft: splitCurrentPane(.left)
         case .splitPaneUp: splitCurrentPane(.up)
+        case .splitWindowRight: splitCurrentPane(.right, full: true)
+        case .splitWindowDown: splitCurrentPane(.down, full: true)
         case .resizePaneLeft: resizeCurrentPane(.left)
         case .resizePaneRight: resizeCurrentPane(.right)
         case .resizePaneUp: resizeCurrentPane(.up)
@@ -3277,9 +3279,10 @@ final class WorkspaceStore {
     }
 
     /// Splits the current Pane with tmux's own `split-window`, whatever the tmux config binds, so the new Pane is on
-    /// `side` and starts in the current Pane's folder.
-    func splitCurrentPane(_ side: PaneDirection) {
-        runOnCurrentPane { pane, _ in .splitPane(target: pane, side: side) }
+    /// `side` and starts in the current Pane's folder. With `full`, the new Pane spans the Window's whole edge on
+    /// `side`, as `split-window -f` does; an older Host Server makes a normal split.
+    func splitCurrentPane(_ side: PaneDirection, full: Bool = false) {
+        runOnCurrentPane { pane, _ in .splitPane(target: pane, side: side, full: full ? true : nil) }
     }
 
     /// Makes another Pane of the current Window active with tmux's select-pane, whatever the tmux config binds:

@@ -4,3 +4,5 @@
 {"end":{"ok":{}},"id":1,"kind":"end"}
 {"id":2,"kind":"request","request":{"status_line":{"hidden":false}}}
 {"end":{"ok":{}},"id":2,"kind":"end"}
+{"id":3,"kind":"request","request":{"view":{"split_pane":{"full":true,"side":"down","target":"%3"}}}}
+{"end":{"ok":{"output":""}},"id":3,"kind":"end"}
