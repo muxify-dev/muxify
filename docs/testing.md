@@ -208,6 +208,25 @@ A fix to a flaky test is proven by 50 iterations of its class under stress, on
 the platform where it failed. A single pass of `make test` proves nothing about
 a flaky test.
 
+### Stress a branch in CI
+
+The `Stress tests` workflow (`.github/workflows/stress.yml`) runs both stress
+runs on CI's own runners, where the differences are: `make test-stress` on the
+macOS runner of the release workflow's `test` job, and
+`make test-linux STRESS=1` on the runner of its `test-linux` job, with the same
+setup and caches. It never retries, has read-only permissions and no secrets,
+and packages and publishes nothing.
+
+- Before the merge, add the `stress` label to the pull request. The workflow
+  runs when the label is added and again on each push while the label is on.
+  For another run of the same commit, open the run and choose "Re-run all
+  jobs". Remove the label to stop stressing the branch.
+- After the merge, run it from the Actions tab: choose `Stress tests`, then
+  "Run workflow". GitHub offers this only for a workflow on the default
+  branch. The optional inputs are `only` (macOS, as `STRESS_ONLY` takes it),
+  `filter` (Linux, as `STRESS_FILTER` takes it) and `iterations` (both, as
+  `STRESS_ITERATIONS` takes it; empty means 5).
+
 ## Live SSH test
 
 The live tests (`LiveSSHTests` and `LiveHostCLITests`) skip unless

@@ -1,0 +1,115 @@
+# Stresses a branch on CI's own runners: make test-stress on macOS and make test-linux STRESS=1 on Linux, set up as
+# release.yml's test and test-linux jobs are (docs/testing.md, "Stress a flaky test"). It runs on a pull request with
+# the stress label, when the label is added and on each push while it is on, and from the Actions tab with
+# workflow_dispatch, which GitHub offers only once this file is on the default branch. It never retries, so a pass
+# means no test failed, and it packages and publishes nothing.
+name: Stress tests
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'macOS: one test target, class or test, as -only-testing takes it (for example MuxifyCoreTests/EventuallyTests); empty runs every test'
+        required: false
+        type: string
+      filter:
+        description: 'Linux: swift test --filter (for example EventuallyTests); empty runs every test'
+        required: false
+        type: string
+      iterations:
+        description: 'Iterations, which stop at the first failure; empty means the Makefile default, 5'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# A new push to the pull request cancels the stress run of the old one.
+concurrency:
+  group: stress-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  stress:
+    # On a pull request, only when the stress label is the one just added, or is on the pull request pushed to.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'stress') ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'stress'))
+    runs-on: macos-26
+    timeout-minutes: 240
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the toolchain
+        run: |
+          [[ "$(uname -m)" = arm64 ]]
+          xcodebuild -version
+
+      # The three caches are release.yml's test job's, with its keys, so a stress run restores what master saved.
+      - name: Cache pinned Ghostty library, resources, and notices
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor/ghostty
+          key: ghostty-macos-26-arm64-xcode-26.6-${{ hashFiles('scripts/ghostty-version.env', 'scripts/setup-ghostty.sh', 'scripts/collect-notices.py') }}
+
+      - name: Cache resolved Swift packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/SourcePackages
+          key: swift-packages-macos-26-arm64-${{ hashFiles('project.yml', 'Package.resolved', 'Packages/MuxifyCore/Package.resolved') }}
+
+      # make test-stress builds with make test's settings, so the Debug compilation cache serves both.
+      - name: Cache the Debug build-for-testing compilation cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/CompilationCache.noindex
+          key: compilation-cache-debug-macos-26-arm64-xcode-26.6-${{ github.run_id }}
+          restore-keys: compilation-cache-debug-macos-26-arm64-xcode-26.6-
+
+      - name: Prepare dependencies
+        run: |
+          brew install tmux ripgrep
+          make setup
+
+      # make test-stress sets the time scale 3 and never retries: MUXIFY_TEST_RETRIES stays unset. A failed run prints
+      # each failure's message and line, as make test does.
+      - name: Stress Muxify
+        timeout-minutes: 210
+        env:
+          NSUnbufferedIO: 'YES'
+          # A test that needs tmux fails here when tmux is missing, and does not skip.
+          MUXIFY_REQUIRE_TMUX: '1'
+          XCODEBUILD_EXTRA_SETTINGS: COMPILATION_CACHE_ENABLE_CACHING=YES
+          STRESS_ONLY: ${{ inputs.only }}
+          STRESS_ITERATIONS: ${{ inputs.iterations }}
+        run: |
+          # An empty input leaves the Makefile's default, which an empty variable would replace.
+          [ -n "$STRESS_ITERATIONS" ] || unset STRESS_ITERATIONS
+          make test-stress
+
+  stress-linux:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'stress') ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'stress'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # STRESS=1 sets the time scale 3 and no retries; swift test prints each failure's message and line.
+      - name: Stress the CLI and MuxifyCore on Linux
+        env:
+          STRESS: '1'
+          STRESS_FILTER: ${{ inputs.filter }}
+          STRESS_ITERATIONS: ${{ inputs.iterations }}
+        run: make test-linux
