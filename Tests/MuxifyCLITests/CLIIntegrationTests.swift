@@ -12,6 +12,25 @@ import MuxifyTestSupport
 /// The binary against a throwaway tmux server, state folder and Config, a TopicSandbox. The tests of one class run in
 /// order, in one process, so the tests are in one class for each verb area, and xcodebuild runs the classes side by side.
 class CLIIntegrationTestCase: XCTestCase {
+    // The Linux test process crashed in Process.run() (SIGSEGV in libc, master run 44436198912) with about 1,355
+    // descriptors open. The tests leaked them: TopicSandbox's tmux and git runs left a pipe's read end open each, and
+    // run() two until 020787f. On Linux Foundation's Process and its run loop source retain each other until
+    // waitUntilExit(), so the Process and its Pipes are never freed, and a read end left to deinit stays open. Measured
+    // in /proc/self/fd on Linux: 43 at the start of the CLI integration classes, 695 at the end, 4 to 63 more per test
+    // with a sandbox and none without one. Each Process.run() on Linux reads /proc/self/fd and adds a close action for
+    // every descriptor up to the highest (swift-corelibs-foundation 6.4.2, Process.swift, findMaximumOpenFD and the
+    // POSIX_SPAWN_CLOEXEC_DEFAULT emulation), so its work grew with every leak. Each pipe end is now closed where it is
+    // made, and DescriptorCheck fails a class that ends with more descriptors than it started with.
+    override class func setUp() {
+        super.setUp()
+        DescriptorCheck.classStarted(self)
+    }
+
+    override func invokeTest() {
+        super.invokeTest()
+        DescriptorCheck.testEnded(Self.self)
+    }
+
     /// The one JSON object on the one line of `stdout`.
     fileprivate func jsonLine(_ stdout: String) throws -> [String: Any] {
         XCTAssertEqual(stdout.filter { $0 == "\n" }.count, 1, "one line: \(stdout)")
@@ -1494,6 +1513,11 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         try process.run()
         let client = ProtocolClient(input: output.fileHandleForReading, output: input.fileHandleForWriting, build: "muxify test",
                                     capabilities: capabilities)
+        // The client closes the pipe ends that it reads and writes; the read end of stderr is the test's to close.
+        addTeardownBlock {
+            client.close()
+            try? errors.fileHandleForReading.close()
+        }
         return (process, client, { String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self) })
     }
 
@@ -2234,6 +2258,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         let source = sandbox.tools.appendingPathComponent("src")
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         let up = Pipe(), down = Pipe(), errors = Pipe()
+        defer { try? errors.fileHandleForReading.close() }
         let server = makeProcess(cli, arguments: ["server"], output: down, errors: errors, environment: environment)
         server.standardInput = up
         try server.run()
@@ -2407,6 +2432,9 @@ private final class TopicSandbox {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
+        // Close the read end here: on Linux a Process that nobody calls waitUntilExit() on is never freed, since it and
+        // its run loop source retain each other, and its Pipes with it, so a read end left to deinit stays open.
+        defer { try? output.fileHandleForReading.close() }
         // start(), not isRunning: on Linux, Foundation sees the exit of a tmux that started the server only when the
         // server exits.
         let exit = try process.start()
@@ -2452,6 +2480,7 @@ private final class TopicSandbox {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
+        defer { try? output.fileHandleForReading.close() }
         let exit = try process.start()
         let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         guard exit.wait().status == 0 else { throw CLIError("git \(arguments.joined(separator: " ")): \(text)") }
@@ -2602,6 +2631,7 @@ private final class TopicSandbox {
             kill(client.process.processIdentifier, SIGKILL)
             eventually("an attached terminal did not exit after SIGKILL") { !client.process.isRunning }
         }
+        for client in clients { try? client.input.fileHandleForWriting.close() }
         if (try? ownsServer()) == true { _ = try? tmux(["kill-server"]) }
         try? FileManager.default.removeItem(at: root)
     }

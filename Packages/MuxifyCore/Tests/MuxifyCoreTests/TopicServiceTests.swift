@@ -4,7 +4,7 @@ import MuxifyTestSupport
 
 /// The service against a throwaway tmux server and state folder in the test's own run directory. The tests of one class
 /// run in order, in one process, so the tests are in one class for each area, and xcodebuild runs the classes side by side.
-class TopicServiceTestCase: XCTestCase {
+class TopicServiceTestCase: DescriptorCheckedTestCase {
     fileprivate var root: URL!
     fileprivate var paths: MuxifyPaths!
     fileprivate var server: TmuxServer!

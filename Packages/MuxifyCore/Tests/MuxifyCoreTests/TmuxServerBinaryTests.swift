@@ -2,7 +2,7 @@ import XCTest
 @testable import MuxifyCore
 import MuxifyTestSupport
 
-final class TmuxServerBinaryTests: XCTestCase {
+final class TmuxServerBinaryTests: DescriptorCheckedTestCase {
     private var directory: URL!
     private var socket: String!
     private var saved: [String: String?] = [:]

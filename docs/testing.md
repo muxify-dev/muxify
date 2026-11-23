@@ -45,6 +45,13 @@ owns its state:
   the test ends, as the `WorkspaceStore` and `AppWindows` tests do with
   `isolatedDefaults()`. Do not save and restore keys of `UserDefaults.standard`:
   another process can read them in between.
+- **Its file descriptors.** Close each pipe end it makes, and let go in its
+  tearDown of what holds a descriptor, such as servers and clients: XCTest keeps
+  every test case to the end of the run, and on Linux a `Process` that nobody
+  calls `waitUntilExit()` on is never freed, so a pipe left to deinit stays open.
+  `CLIIntegrationTestCase` and the MuxifyCore classes that start a real tmux
+  server run `DescriptorCheck` (MuxifyTestSupport), which fails a test that
+  ends with more open descriptors than its class started with.
 
 A test never writes a fixed path that another test reads.
 
