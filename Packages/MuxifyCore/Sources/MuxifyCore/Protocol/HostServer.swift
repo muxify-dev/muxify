@@ -871,10 +871,11 @@ final class HostEnvironment: @unchecked Sendable {
     /// A Window's stored Browser Tabs, read as `muxify browser tabs --window <id> --json` reads them with no Mac
     /// (ADR 0084), so both answer the same JSON. It changes nothing; the queued opens stay for the app.
     func browserTabs(_ tabs: BrowserTabsRequest, for request: ProtocolIncomingRequest) {
-        let tmux = context.tmux
+        let tmux = context.tmux, paths = context.paths
         Task {
             let read = await Self.background { () -> [BrowserAgentTab]? in
-                (try? tmux.run(StoredBrowser.storedTabsArguments(target: tabs.window))).flatMap(StoredBrowser.agentTabs(listedPanes:))
+                guard let output = try? tmux.run(StoredBrowser.storedTabsArguments(target: tabs.window)) else { return nil }
+                return StoredBrowser.agentTabs(listedPanes: output, paths: paths)
             }
             guard let read else { return request.fail(ProtocolError(.failed, StoredBrowser.noWindow(tabs.window))) }
             request.finish(read)

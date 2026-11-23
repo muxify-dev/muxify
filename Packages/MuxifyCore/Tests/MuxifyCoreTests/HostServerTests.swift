@@ -846,6 +846,8 @@ final class HostServerTests: XCTestCase {
         try tmux.run(["set-option", "-w", "-t", window, Tmux.tabsOption, "https://github.com/ about:blank"])
         try tmux.run(["set-option", "-w", "-t", window, Tmux.activeTabOption, "1"])
         try tmux.run(["set-option", "-w", "-t", window, Tmux.openOption, "example.com"])
+        let entry = HistoryEntry(key: "https://github.com", url: "https://GitHub.com/#readme", title: "GitHub", topics: [])
+        try BrowserHistoryStore(paths: paths).save([entry], removing: [])
         let request = HostRequest.browserTabs(BrowserTabsRequest(window: window))
 
         let plain = try await connect()
@@ -860,6 +862,7 @@ final class HostServerTests: XCTestCase {
         let client = try await connect(capabilities: [HostCapability.browserTabs.rawValue])
         let tabs = try await client.call(request, as: [BrowserAgentTab].self)
         XCTAssertEqual(tabs.map(\.url), ["https://github.com/", "https://example.com"], "the blank active Tab loads the queued page")
+        XCTAssertEqual(tabs.map(\.title), ["GitHub", ""])
         XCTAssertEqual(tabs.map(\.active), [false, true])
         XCTAssertEqual(try tmuxOutput(["show-options", "-wqv", "-t", window, Tmux.openOption]), "example.com", "a read leaves the queue for the app")
 

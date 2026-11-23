@@ -1848,6 +1848,9 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_active_tab", "2"])
         _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_open", "https://GitHub.com#readme"])
         let environment = sandbox.cliEnvironment(pane: nil)
+        let paths = MuxifyPaths(environment: environment, home: "/nonexistent")
+        let entry = HistoryEntry(key: "https://github.com", url: "https://github.com/", title: "GitHub", topics: [])
+        try BrowserHistoryStore(paths: paths).save([entry], removing: [])
         let server = try startServer(environment: environment, capabilities: [HostCapability.browserTabs.rawValue])
         defer { stopIfRunning(server.process) }
         try await server.client.connect()
@@ -1856,8 +1859,16 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(printed.status, 0, printed.output)
         let answer = try await server.client.call(HostRequest.browserTabs(BrowserTabsRequest(window: window)), as: JSONValue.self)
         XCTAssertEqual(answer, try JSONDecoder().decode(JSONValue.self, from: Data(printed.stdout.utf8)), printed.stdout)
-        XCTAssertEqual(try JSONDecoder().decode([BrowserAgentTab].self, from: Data(printed.stdout.utf8)).map(\.active), [true, false, false],
-                       "the queued page that the first Tab has selects it")
+        let tabs = try JSONDecoder().decode([BrowserAgentTab].self, from: Data(printed.stdout.utf8))
+        XCTAssertEqual(tabs.map(\.title), ["GitHub", "", ""])
+        XCTAssertEqual(tabs.map(\.active), [true, false, false], "the queued page selects the first Tab")
+
+        try Data("browser:\n  history: false\n".utf8).write(to: sandbox.config)
+        let disabled = try await run(cli, arguments: ["browser", "tabs", "--window", window, "--json"], environment: environment)
+        XCTAssertEqual(disabled.status, 0, disabled.output)
+        let withoutHistory = try await server.client.call(HostRequest.browserTabs(BrowserTabsRequest(window: window)), as: [BrowserAgentTab].self)
+        XCTAssertEqual(withoutHistory, try JSONDecoder().decode([BrowserAgentTab].self, from: Data(disabled.stdout.utf8)))
+        XCTAssertEqual(withoutHistory.map(\.title), ["", "", ""])
 
         let unknown = try await run(cli, arguments: ["browser", "tabs", "--window", "@999", "--json"], environment: environment)
         XCTAssertEqual(unknown.status, 1, unknown.output)

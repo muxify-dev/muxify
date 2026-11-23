@@ -8,7 +8,7 @@ The rules are now these:
 
 - **The fallback.** When the CLI cannot reach the app, `tabs` reads `@muxify_tabs`, `@muxify_active_tab` and `@muxify_open` of the Window, and lists those Tabs. "Cannot reach" means that `@muxify_browser_socket` is empty, or that its socket does not accept a connection, as after the app stopped. An app that accepts the request and then fails is still a failure.
 - **The same Tabs as the app.** The list is the stored Tabs, then each queued request, opened as the app opens it: a page that a Tab has already selects that Tab, a blank active Tab takes the page, and any other page adds a Tab and selects it. The app's Browser and the CLI use one rule for this, `TabOpening` in MuxifyCore, and one parser for a queued request, `Omnibox`.
-- **No title, an id from the position.** tmux does not store page titles or Tab ids. A stored Tab has an empty title, and an id made from its position: `00000000-0000-0000-0000-000000000000` for the first Tab. The id is the same for each read until the Tabs change. Only `tabs` falls back. The other Browser commands need a page, so they still fail, and `--tab` with a stored id fails with them.
+- **Titles from Browser History, ids from position.** tmux stores URLs. When Browser History is on, a stored Tab uses the title of the matching page in Browser History. With no known title, it has an empty title. A stored Tab gets its id from its position: `00000000-0000-0000-0000-000000000000` for the first Tab. The id is the same for each read until the Tabs change. Only `tabs` falls back. The other Browser commands need a page, so they still fail, and `--tab` with a stored id fails with them.
 - **A read changes nothing.** The CLI does not clear `@muxify_open`. The app opens the queued pages when it starts, as before.
 
 ## Considered Options
@@ -20,6 +20,6 @@ The rules are now these:
 
 ## Consequences
 
-- Muxify Mobile shows the Tabs of a Window when the desktop app does not run, with no change on the phone. A Tab shows its address, because it has no title.
+- Muxify Mobile shows the Tabs of a Window when the desktop app does not run, with no change on the phone. A Tab with no known title shows its address.
 - The app's `Browser.open` and the CLI cannot disagree on where a queued page goes.
 - The rule for a queued request moved from the app to MuxifyCore, with `TabURL.matchKey`, which History and Suggestions also use.
