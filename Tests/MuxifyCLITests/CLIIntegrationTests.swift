@@ -65,15 +65,6 @@ class CLIIntegrationTestCase: XCTestCase {
         return try XCTUnwrap(try jsonLine(listed.stdout)["topics"] as? [NSDictionary], listed.stdout)
     }
 
-    /// Waits for what a program in a Pane does in its own time, such as a hook or the command of a new Window.
-    fileprivate func wait(_ message: String, seconds: TimeInterval = 10, until done: () throws -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while try !done() {
-            guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-    }
-
     fileprivate func makeProcess(_ tool: URL, arguments: [String], output: Pipe, errors: Pipe,
                                  environment: [String: String] = [:], in directory: URL? = nil) -> Process {
         let process = Process()
@@ -94,6 +85,9 @@ class CLIIntegrationTestCase: XCTestCase {
         let output = Pipe()
         let errors = Pipe()
         let process = makeProcess(tool, arguments: arguments, output: output, errors: errors, environment: environment, in: directory)
+        // The read ends stay open until closed: on macOS two descriptors for each run outlived it, and a stress run of
+        // one class went past OPEN_MAX, where Process.run() fails with EBADF.
+        defer { [output, errors].forEach { try? $0.fileHandleForReading.close() } }
         try process.run()
         defer { stopIfRunning(process) }
         try await waitForExit(process)
@@ -102,10 +96,11 @@ class CLIIntegrationTestCase: XCTestCase {
                       stderr: String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
     }
 
+    /// Waits for the exit of a CLI process, 5 s times the time scale at most.
     fileprivate func waitForExit(_ process: Process) async throws {
-        let deadline = Date().addingTimeInterval(5)
-        while process.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        guard !process.isRunning else { throw CLIError("CLI did not exit before the timeout") }
+        guard await eventually("", timeout: 5, fail: { _, _, _ in }, until: { !process.isRunning }) else {
+            throw CLIError("CLI did not exit in \(scaled(5)) s: \(process.arguments ?? [])")
+        }
         // Async tasks can resume on a different thread than Process.run().
         // waitUntilExit() can then hang in a thread-local run loop even after exit.
         // Once isRunning is false, terminationStatus is already available.
@@ -114,9 +109,7 @@ class CLIIntegrationTestCase: XCTestCase {
     fileprivate func stopIfRunning(_ process: Process) {
         if process.isRunning {
             kill(process.processIdentifier, SIGKILL)
-            let deadline = Date().addingTimeInterval(2)
-            while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
-            XCTAssertFalse(process.isRunning, "CLI did not exit after SIGKILL")
+            eventually("CLI did not exit after SIGKILL", timeout: 2) { !process.isRunning }
         }
     }
 }
@@ -656,6 +649,9 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
         #else
         let urls = ""
         #endif
+        // The asserts assume that the app was handed each URL: wait for that, rather than assume that each open wrote
+        // before its CLI exited.
+        await eventually("each topic open handed the app the Topic's URL", fail: { _, _, _ in }) { openedURLs() == urls }
         XCTAssertEqual(openedURLs(), urls)
 
         let missing = try await run(cli, arguments: ["topic", "open", "--topic", "No such topic"],
@@ -983,7 +979,7 @@ final class CLIWindowAndSessionIntegrationTests: CLIIntegrationTestCase {
         let window = try XCTUnwrap((try jsonLine(made.stdout)["changed"] as? [String: Any])?["window"] as? String, made.stdout)
         XCTAssertEqual(try sandbox.tmux(["display-message", "-p", "-t", window, "#{session_name}"]), "game/window-one")
         func ran() -> String { (try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .newlines) ?? "" }
-        try await wait("the command did not run in the new Window") { !ran().isEmpty }
+        await eventually("the command did not run in the new Window") { !ran().isEmpty }
         XCTAssertEqual(sandbox.real(ran()), sandbox.game.path)
 
         let added = try await run(cli, arguments: ["topic", "add-session", sandbox.tools.path, "--topic", id], environment: environment)
@@ -1041,13 +1037,13 @@ final class CLIWindowAndSessionIntegrationTests: CLIIntegrationTestCase {
         let window = try sandbox.tmux(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "=game/kill:"])
         let pane = try sandbox.tmux(["display-message", "-p", "-t", window, "#{pane_id}"])
         try sandbox.tmux(["respawn-pane", "-k", "-t", pane, inPane(["window", "kill"])])
-        try await wait("window kill from its own Pane left the Window") {
+        try await eventually("window kill from its own Pane left the Window") {
             !(try sandbox.tmux(["list-windows", "-a", "-F", "#{window_id}"]).split(separator: "\n").contains(Substring(window)))
         }
 
         // The kill closes the Pane that runs the CLI, so the record must be written before the kill.
         try sandbox.tmux(["respawn-pane", "-k", "-t", try sandbox.pane(of: "game/kill").rawValue, inPane(["session", "kill"])])
-        try await wait("session kill from its own Pane left the Session") { try sandbox.sessions() == ["main"] }
+        try await eventually("session kill from its own Pane left the Session") { try sandbox.sessions() == ["main"] }
         let record = try XCTUnwrap(sandbox.records().only)
         XCTAssertNil(record.settledAt, "the Topic is not open")
         XCTAssertEqual(record.sessions, [], "the Topic is not Empty")
@@ -1140,22 +1136,26 @@ final class CLITopicExecIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(result.stdout, "==> game/ship <==\n\(sandbox.game.path)\n==> tools/ship <==\n\(sandbox.tools.path)\n")
         XCTAssertEqual(result.stderr, "")
+        // absence: topic exec types into no Pane, so no listener of the Topic's Panes reads a line.
         try await Task.sleep(nanoseconds: 300_000_000)
         for file in heard {
             XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "", "a Pane of the Topic got input: \(file.lastPathComponent)")
         }
     }
 
+    /// The background process holds the output pipes until the test lets it end, after the answer: a topic exec that
+    /// waited for it would not exit.
     func testTopicExecKeepsTheOutputOfACommandThatLeavesABackgroundProcess() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
         let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
-        let start = Date()
-        let result = try await run(cli, arguments: ["topic", "exec", "--topic", id, "--", "sh", "-c", "echo first; /bin/sleep 3 & echo second"],
+        let release = sandbox.root.appendingPathComponent("release-background")
+        defer { FileManager.default.createFile(atPath: release.path, contents: nil) }
+        let background = "(\(sandbox.waitForFile(release))) &"
+        let result = try await run(cli, arguments: ["topic", "exec", "--topic", id, "--", "sh", "-c", "echo first; \(background) echo second"],
                                    environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(result.stdout, "==> game/ship <==\nfirst\nsecond\n")
-        XCTAssertLessThan(Date().timeIntervalSince(start), 2.5, "the background process is not waited for")
     }
 
     func testTopicExecRunsTheSessionsAtTheSameTimeAndSessionPathLimitsItToOneSession() async throws {
@@ -1166,11 +1166,17 @@ final class CLITopicExecIntegrationTests: CLIIntegrationTestCase {
                                   environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(added.status, 0, added.output)
 
-        let start = Date()
-        let both = try await run(cli, arguments: ["topic", "exec", "--topic", id, "--", "/bin/sleep", "2"],
+        // Each run marks its start, then waits until both runs have started: one after the other, the first run would
+        // wait alone and fail.
+        let started = sandbox.root.appendingPathComponent("exec-started", isDirectory: true)
+        try FileManager.default.createDirectory(at: started, withIntermediateDirectories: true)
+        let marks = Tmux.shellQuote(started.path)
+        let tries = Int(scaled(30) / 0.05)
+        let meet = "touch \(marks)/\"${PWD##*/}\"; i=0; while set -- \(marks)/*; [ $# -lt 2 ]; do "
+            + "i=$((i + 1)); [ $i -gt \(tries) ] && { echo alone >&2; exit 9; }; sleep 0.05; done"
+        let both = try await run(cli, arguments: ["topic", "exec", "--topic", id, "--", "sh", "-c", meet],
                                  environment: sandbox.cliEnvironment(pane: nil))
-        XCTAssertEqual(both.status, 0, both.output)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 3.5, "two runs of 2 s each took as long as one after the other")
+        XCTAssertEqual(both.status, 0, "the two runs did not run at the same time: \(both.output)")
 
         let one = try await run(cli, arguments: ["topic", "exec", "--topic", id, "--session", "tools/ship", "--", "pwd"],
                                 environment: sandbox.cliEnvironment(pane: nil))
@@ -1196,7 +1202,8 @@ final class CLITopicExecIntegrationTests: CLIIntegrationTestCase {
         let start = Date()
         let result = try await run(cli, arguments: ["topic", "exec", "--topic", id, "--timeout", "0.5", "--json", "--", "sh", "-c", script],
                                    environment: sandbox.cliEnvironment(pane: nil))
-        XCTAssertLessThan(Date().timeIntervalSince(start), 4, "the run that sleeps was not stopped at the timeout")
+        // A correct run takes about 1 s: the timeout, the kill and the wait for the pipes.
+        XCTAssertLessThan(Date().timeIntervalSince(start), scaled(6), "the run that sleeps was not stopped at the timeout")
         XCTAssertEqual(result.status, 1, result.output)
         XCTAssertEqual(result.stderr, "muxify: topic exec: game/ship did not exit in 0.5 s; tools/ship exited with status 3\n")
         let line = try jsonLine(result.stdout)
@@ -1267,7 +1274,7 @@ final class CLIWorktreeIntegrationTests: CLIIntegrationTestCase {
         XCTAssertNotNil(try? FileManager.default.destinationOfSymbolicLink(atPath: worktree.appendingPathComponent("shared").path),
                         "the setup did not link shared")
         XCTAssertEqual(try sandbox.git(["symbolic-ref", "--short", "HEAD"], in: worktree.path), "fix-login")
-        try await wait("postCreate did not run in the new Session") { !text(worktree.appendingPathComponent("post-created.log")).isEmpty }
+        await eventually("postCreate did not run in the new Session") { !text(worktree.appendingPathComponent("post-created.log")).isEmpty }
         XCTAssertEqual(text(worktree.appendingPathComponent("post-created.log")), "fix-login\n")
         XCTAssertEqual(try sandbox.topicOption(of: "app/fix-login"), "", "the Session has a Topic")
         let record = try XCTUnwrap(sandbox.worktrees().only)
@@ -1309,7 +1316,7 @@ final class CLIWorktreeIntegrationTests: CLIIntegrationTestCase {
         let made = try await run(cli, arguments: ["worktree", "create", "remove-me", "--no-open"], environment: environment, in: repository)
         XCTAssertEqual(made.status, 0, made.output)
         let worktree = worktree("app", "remove-me", sandbox: sandbox)
-        try await wait("postCreate did not run") { !text(worktree.appendingPathComponent("post-created.log")).isEmpty }
+        await eventually("postCreate did not run") { !text(worktree.appendingPathComponent("post-created.log")).isEmpty }
 
         let refused = try await run(cli, arguments: ["worktree", "remove", "remove-me"], environment: environment, in: repository)
         XCTAssertNotEqual(refused.status, 0, refused.output)
@@ -1336,7 +1343,7 @@ final class CLIWorktreeIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(added.status, 0, added.output)
         let worktree = worktree("app", "worktree-topic", sandbox: sandbox)
         XCTAssertEqual(text(worktree.appendingPathComponent(".envrc")), "export SECRET=1\n", "the Topic Worktree did not get its sync")
-        try await wait("postCreate did not run in the Topic Session") { !text(worktree.appendingPathComponent("post-created.log")).isEmpty }
+        await eventually("postCreate did not run in the Topic Session") { !text(worktree.appendingPathComponent("post-created.log")).isEmpty }
         let record = try XCTUnwrap(sandbox.worktrees().only)
         XCTAssertEqual(try XCTUnwrap(sandbox.records().only).sessions.compactMap { $0["worktree_id"]?.string }, [record.id])
         let listed = try await run(cli, arguments: ["worktree", "list", "--json"], environment: environment, in: repository)
@@ -1409,7 +1416,9 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         try await server.client.ping()
         let start = Date()
         try await waitForExit(server.process)
-        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 0.4)
+        // A lower bound, not a speed: the server waited for its silence. A busy machine only makes the wait longer, so
+        // the bound is not scaled.
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 0.4, "the server exited before its silence ended")
         XCTAssertEqual(server.process.terminationStatus, 0)
         XCTAssertTrue(server.stderr().contains("muxify server: exits, no frame came in time"))
     }
@@ -1445,11 +1454,11 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         // A Pane's shell may still draw its prompt or name its Window, which the next item shows: the last item and
         // what the CLI prints agree once tmux settled.
         func assertAgree(_ message: String) async throws {
-            var printed = try await shown()
-            let deadline = Date().addingTimeInterval(10)
-            while items.last != printed, Date() < deadline {
-                try await Task.sleep(for: .milliseconds(200))
+            var printed: JSONValue?
+            // The assert after the wait reports a disagreement with both sides.
+            try await eventually(message, fail: { _, _, _ in }) {
                 printed = try await shown()
+                return items.last == printed
             }
             XCTAssertEqual(items.last, printed, message)
         }
@@ -1461,7 +1470,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(made.status, 0, made.output)
         let id = made.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         func text(_ item: JSONValue?) -> String { item.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? "" }
-        try await wait("topic new pushed no snapshot item with its Topic") { text(items.last).contains("\"\(id)\"") }
+        await eventually("topic new pushed no snapshot item with its Topic") { text(items.last).contains("\"\(id)\"") }
         try await assertAgree("the item after topic new is environment show --json without capabilities")
     }
 
@@ -1506,13 +1515,14 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
 
         // The server writes the Topic's remembered Sessions after its first read, so the two agree once it settled.
         var item: Any?, shown: Any?
-        for _ in 0..<50 {
+        // The asserts after the wait report a disagreement with both sides.
+        try await eventually("the topic item never agreed with topic show --json", fail: { _, _, _ in }) {
             let result = try await run(cli, arguments: ["topic", "show", "--topic", id, "--json"], environment: sandbox.cliEnvironment(pane: nil))
             XCTAssertEqual(result.status, 0, result.output)
             shown = try jsonLine(result.stdout)
             item = try latest.json()
-            if let item = item as? NSDictionary, let shown = shown as? NSDictionary, item == shown { break }
-            try await Task.sleep(for: .milliseconds(100))
+            guard let item = item as? NSDictionary, let shown = shown as? NSDictionary else { return false }
+            return item == shown
         }
         let sessions = (shown as? [String: Any])?["topic"].flatMap { ($0 as? [String: Any])?["sessions"] as? [Any] }
         XCTAssertEqual(sessions?.count, 1, "\(String(describing: shown))")
@@ -2125,7 +2135,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(visited["directory"], sandbox.tools.path, "the visit is to the Session Path that holds the folder")
         let stamp = try XCTUnwrap(visited["last_visit"])
         let time = try XCTUnwrap(ISO8601DateFormatter().date(from: stamp), stamp)
-        XCTAssertLessThan(abs(time.timeIntervalSinceNow), 60)
+        XCTAssertLessThan(abs(time.timeIntervalSinceNow), scaled(60), "the visit is stamped now")
         let saved = try XCTUnwrap(try visits.times()[.directory(sandbox.tools.path)])
 
         let ranked = try await rows()
@@ -2162,8 +2172,8 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(read.status, 2, "a read takes no Request: \(read.output)")
     }
 
-    /// The fake git takes 3 seconds for each call, so an answer that waited for the discovery, or a refresh that
-    /// held the answer's pipes, would not be back in 2.
+    /// The fake git waits until the test lets it run, after the answer, so an answer that waited for the discovery, or a
+    /// refresh that held the answer's pipes, would never come, and the discovery is still running when it comes.
     func testSessionPathsAnswersFromTheDiscoveryCacheAndFindsTheFoldersAgainAfterTheAnswer() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
@@ -2183,23 +2193,23 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         try FileManager.default.createDirectory(at: sandbox.root.appendingPathComponent("work/late"), withIntermediateDirectories: true)
         let bin = sandbox.root.appendingPathComponent("bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        try Data("#!/bin/sh\nsleep 3\nexec /usr/bin/git \"$@\"\n".utf8).write(to: bin.appendingPathComponent("git"))
+        let called = sandbox.root.appendingPathComponent("git-called"), release = sandbox.root.appendingPathComponent("release-git")
+        defer { FileManager.default.createFile(atPath: release.path, contents: nil) }
+        let git = "#!/bin/sh\ntouch \(Tmux.shellQuote(called.path))\n\(sandbox.waitForFile(release))\nexec /usr/bin/git \"$@\"\n"
+        try Data(git.utf8).write(to: bin.appendingPathComponent("git"))
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent("git").path)
         environment["PATH"] = bin.path + ":/usr/bin:/bin"
 
-        let start = Date()
+        // git waits for the release, so this answer came without it.
         let cached = try await names()
-        XCTAssertLessThan(Date().timeIntervalSince(start), 2, "the answer does not wait for git")
         XCTAssertEqual(cached, ["game", "tools"], "the answer is the cache's")
+        await eventually("the answer started no refresh that runs git") { FileManager.default.fileExists(atPath: called.path) }
         XCTAssertEqual((try? String(contentsOf: cache, encoding: .utf8))?.contains("late"), false, "the discovery is still running")
 
-        let deadline = Date().addingTimeInterval(30)
-        var refreshed = false
-        while !refreshed, Date() < deadline {
-            refreshed = (try? String(contentsOf: cache, encoding: .utf8))?.contains("late") == true
-            if !refreshed { try await Task.sleep(for: .milliseconds(100)) }
+        FileManager.default.createFile(atPath: release.path, contents: nil)
+        await eventually("the refresh that the answer started saved the new folder") {
+            (try? String(contentsOf: cache, encoding: .utf8))?.contains("late") == true
         }
-        XCTAssertTrue(refreshed, "the refresh that the answer started saved the new folder")
         environment["PATH"] = "/usr/bin:/bin"
         let later = try await names()
         XCTAssertEqual(later, ["game", "late", "tools"])
@@ -2394,6 +2404,12 @@ private final class TopicSandbox {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// A shell command that waits until `file` exists, a minute times the time scale at most, so that a program of the
+    /// test runs until the test lets it go on.
+    func waitForFile(_ file: URL) -> String {
+        "i=0; while [ ! -e \(Tmux.shellQuote(file.path)) ] && [ $i -lt \(Int(scaled(60) / 0.05)) ]; do i=$((i + 1)); sleep 0.05; done"
+    }
+
     /// A bare repository in `work/<name>`, which the Config names, with one Worktree folder per branch.
     /// The first branch is the repository's HEAD.
     func makeBareRepository(_ name: String, worktrees branches: [String]) throws -> URL {
@@ -2491,15 +2507,14 @@ private final class TopicSandbox {
         process.standardError = FileHandle.nullDevice
         try process.run()
         clients.append((process, input))
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline {
+        var tty: String?
+        try eventually("", fail: { _, _, _ in }) {
             let attached = try tmux(["list-clients", "-F", "#{client_tty} #{client_control_mode}"]).split(separator: "\n")
-            if let line = attached.first(where: { $0.hasSuffix(" " + mode) && !before.contains($0.dropLast(2)) }) {
-                return String(line.dropLast(2))
-            }
-            usleep(20_000)
+            tty = attached.first(where: { $0.hasSuffix(" " + mode) && !before.contains($0.dropLast(2)) }).map { String($0.dropLast(2)) }
+            return tty != nil
         }
-        throw CLIError("no client attached to \(session)")
+        guard let tty else { throw CLIError("no client attached to \(session)") }
+        return tty
     }
 
     func clientSession(_ tty: String) throws -> String {
@@ -2574,7 +2589,7 @@ private final class TopicSandbox {
     func stop() {
         for client in clients where client.process.isRunning {
             kill(client.process.processIdentifier, SIGKILL)
-            while client.process.isRunning { usleep(5_000) }
+            eventually("an attached terminal did not exit after SIGKILL") { !client.process.isRunning }
         }
         if (try? ownsServer()) == true { _ = try? tmux(["kill-server"]) }
         try? FileManager.default.removeItem(at: root)

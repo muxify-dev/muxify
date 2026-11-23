@@ -1,6 +1,7 @@
 import XCTest
 @testable import MuxifyCLI
 import MuxifyCore
+import MuxifyTestSupport
 
 /// `muxify askpass`, the helper that git and ssh run for the Git View's network commands (ADR 0089), run as git runs
 /// it: the built CLI with the prompt as its one argument, against a socket that a test listener serves.
@@ -76,7 +77,8 @@ final class AskpassCommandTests: XCTestCase {
         XCTAssertNotEqual(run.status, 0)
         XCTAssertEqual(run.output, "", "a cancelled question printed an answer")
         XCTAssertTrue(run.errors.contains("nobody answered"), run.errors)
-        XCTAssertLessThan(run.seconds, 5)
+        // A correct run takes well under a second; a helper that waited would wait for its reply timeout of an hour.
+        XCTAssertLessThan(run.seconds, scaled(5))
     }
 
     func testAHelperWhoseSocketIsGoneExitsNonZeroAtOnce() throws {
@@ -84,7 +86,7 @@ final class AskpassCommandTests: XCTestCase {
         XCTAssertNotEqual(run.status, 0)
         XCTAssertEqual(run.output, "")
         XCTAssertTrue(run.errors.contains("cannot reach Muxify"), run.errors)
-        XCTAssertLessThan(run.seconds, 5)
+        XCTAssertLessThan(run.seconds, scaled(5), "a correct run takes well under a second")
     }
 
     func testAHelperRunOutsideAGitViewCommandSaysSo() throws {
