@@ -13,7 +13,7 @@ import MuxifyTestSupport
 /// A Host Server's own socket (ADR 0091) through a pair of pipes in this process: a program's line on the socket
 /// reaches the protocol client as a `MacRequest`, and `@muxify_browser_socket` follows `claim_open` and
 /// `release_open`, on a throwaway tmux server.
-final class HostServerSocketTests: XCTestCase {
+final class HostServerSocketTests: DescriptorCheckedTestCase {
     private var directory: URL!
     private var tmux: TmuxServer!
     private var paths: MuxifyPaths!
@@ -44,6 +44,9 @@ final class HostServerSocketTests: XCTestCase {
     override func tearDown() async throws {
         clients.forEach { $0.close() }
         for server in servers { _ = await server.wait() }
+        // XCTest keeps every test case to the end of the run, and with it what the test case holds (DescriptorCheck).
+        clients = []
+        servers = []
         if let actual = try? tmux?.run(["display-message", "-p", "#{socket_path}"]),
            actual.trimmingCharacters(in: .whitespacesAndNewlines) == socket {
             _ = try? tmux.run(["kill-server"])

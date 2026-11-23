@@ -46,12 +46,9 @@ public final class PipeControlClient: TmuxControlClient {
         ignoreBrokenPipes(on: input.fileHandleForWriting.fileDescriptor)
         let exit = try process.start()
         var buffer = Data()
+        let reading = OutputEnd()
         output.fileHandleForReading.readabilityHandler = { handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else {
-                handle.readabilityHandler = nil
-                return
-            }
+            guard let chunk = reading.read(handle), !chunk.isEmpty else { return }
             buffer.append(chunk)
             var lines: [String] = []
             while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
@@ -66,7 +63,7 @@ public final class PipeControlClient: TmuxControlClient {
         Thread.detachNewThread { [weak self] in
             exit.wait()
             self?.closeInput()
-            output.fileHandleForReading.readabilityHandler = nil
+            reading.close(output.fileHandleForReading)
             onExit()
         }
     }
@@ -93,5 +90,34 @@ public final class PipeControlClient: TmuxControlClient {
         guard !closed else { return }
         closed = true
         try? input.fileHandleForWriting.close()
+    }
+
+    /// The read end of the client's output, which the client closes when its process exits, not at deinit: on Linux
+    /// Foundation's Process and its run loop source retain each other until `waitUntilExit()`, so the Process, and the
+    /// Pipe with it, is never freed, and each client left its descriptor open. A read never meets a closed handle:
+    /// the close marks the end first, and a read that began before it finishes first.
+    private final class OutputEnd: @unchecked Sendable {
+        private let lock = NSLock()
+        private var closed = false
+
+        /// What the handle has, or nil once it is closed. At the end of the output the handle stops being read.
+        func read(_ handle: FileHandle) -> Data? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !closed else { return nil }
+            let chunk = handle.availableData
+            if chunk.isEmpty { handle.readabilityHandler = nil }
+            return chunk
+        }
+
+        func close(_ handle: FileHandle) {
+            lock.lock()
+            guard !closed else { lock.unlock(); return }
+            closed = true
+            lock.unlock()
+            // Not under the lock: on Linux `close()` waits for the handle's queue, where a read may wait for the lock.
+            handle.readabilityHandler = nil
+            try? handle.close()
+        }
     }
 }

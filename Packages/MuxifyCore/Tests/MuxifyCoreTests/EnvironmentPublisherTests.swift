@@ -3,7 +3,7 @@ import XCTest
 import MuxifyTestSupport
 
 /// Runs the `environment` publisher against a throwaway tmux server and a temporary state database.
-final class EnvironmentPublisherTests: XCTestCase {
+final class EnvironmentPublisherTests: DescriptorCheckedTestCase {
     private var directory: URL!
     private var server: TmuxServer!
     private var paths: MuxifyPaths!
@@ -42,6 +42,11 @@ final class EnvironmentPublisherTests: XCTestCase {
                 eventually("a Client's process outlived SIGKILL") { kill(pid, 0) != 0 }
             }
         }
+        // Each Client's input is open until closed: on Linux a Process and its Pipes are never freed (DescriptorCheck).
+        for process in [clientProcess].compactMap({ $0 }) + otherProcesses {
+            try? (process.standardInput as? Pipe)?.fileHandleForWriting.close()
+        }
+        clientProcess = nil
         otherProcesses = []
         if let actual = try? server?.run(["display-message", "-p", "#{socket_path}"]),
            actual.trimmingCharacters(in: .whitespacesAndNewlines) == socket {
@@ -469,6 +474,7 @@ final class EnvironmentPublisherTests: XCTestCase {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
+        otherProcesses.append(process)
         return process
     }
 

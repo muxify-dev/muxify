@@ -81,7 +81,7 @@ final class ViewCommandWireTests: XCTestCase {
     }
 }
 
-final class ViewCommandExecutorTests: XCTestCase {
+final class ViewCommandExecutorTests: DescriptorCheckedTestCase {
     private var directory: URL!
     private var server: TmuxServer!
     private var socket: String { directory.appendingPathComponent("view").path }
@@ -104,6 +104,9 @@ final class ViewCommandExecutorTests: XCTestCase {
 
     override func tearDownWithError() throws {
         if let clientProcess, clientProcess.isRunning { clientProcess.terminate(); clientProcess.waitUntilExit() }
+        // The Client's input is open until closed: on Linux a Process and its Pipes are never freed (DescriptorCheck).
+        try? (clientProcess?.standardInput as? Pipe)?.fileHandleForWriting.close()
+        clientProcess = nil
         if let found = try? server?.run(["display-message", "-p", "#{socket_path}"]).trimmingCharacters(in: .whitespacesAndNewlines),
            found == socket {
             _ = try? server?.run(["kill-server"])

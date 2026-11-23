@@ -12,7 +12,7 @@ import MuxifyTestSupport
 
 /// The Host Server's Environment through a pair of pipes in this process: a protocol client and `HostServer` against
 /// a throwaway tmux server and a temporary state database.
-final class HostServerTests: XCTestCase {
+final class HostServerTests: DescriptorCheckedTestCase {
     private var directory: URL!
     private var tmux: TmuxServer!
     private var paths: MuxifyPaths!
@@ -61,6 +61,13 @@ final class HostServerTests: XCTestCase {
                 await eventually("the Client's process outlived SIGKILL") { kill(pid, 0) != 0 }
             }
         }
+        // XCTest keeps every test case to the end of the run, and with it what the test case holds: let go of the
+        // servers, clients and the Client's input, whose descriptors would stay open (DescriptorCheck).
+        try? (clientProcess?.standardInput as? Pipe)?.fileHandleForWriting.close()
+        clientProcess = nil
+        consumers = []
+        clients = []
+        servers = []
         if let actual = try? tmux?.run(["display-message", "-p", "#{socket_path}"]),
            actual.trimmingCharacters(in: .whitespacesAndNewlines) == socket {
             _ = try? tmux.run(["kill-server"])

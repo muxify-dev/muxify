@@ -2,7 +2,7 @@ import XCTest
 @testable import MuxifyCore
 import MuxifyTestSupport
 
-final class PaneSearchTests: XCTestCase {
+final class PaneSearchTests: DescriptorCheckedTestCase {
     private var directory: URL!
     private var server: TmuxServer!
     private var saved: [String: String?] = [:]
