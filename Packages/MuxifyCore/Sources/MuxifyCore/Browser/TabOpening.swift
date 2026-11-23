@@ -82,9 +82,9 @@ public enum TabOpening: Equatable {
 extension StoredBrowser {
     /// The Tabs that the app shows for this Window when it next reads it: the stored Tabs, then each request
     /// queued in `@muxify_open`, opened as the app opens it. `browser tabs` lists them while no app serves the
-    /// Window's tmux server (ADR 0084). A stored Tab has no page title and no id yet, so it gets an empty title
-    /// and an id from its position, the same for each read until the Tabs change.
-    public func agentTabs(opening requests: [String]) -> [BrowserAgentTab] {
+    /// Window's tmux server (ADR 0084). Browser History supplies the last recorded title. The position gives each
+    /// Tab an id that stays the same until the Tabs change.
+    public func agentTabs(opening requests: [String], history: BrowserHistoryStore? = nil) -> [BrowserAgentTab] {
         var urls = tabURLs.map { $0 == "about:blank" ? "" : $0 }
         var active = urls.isEmpty ? nil : min(max(activeTab, 0), urls.count - 1)
         for request in requests {
@@ -97,8 +97,9 @@ extension StoredBrowser {
                 active = urls.count - 1
             }
         }
+        let titles = (try? history?.titles(for: urls)) ?? [:]
         return urls.enumerated().map { index, url in
-            BrowserAgentTab(id: Self.storedTabID(index), url: url, title: "", active: index == active)
+            BrowserAgentTab(id: Self.storedTabID(index), url: url, title: titles[url] ?? "", active: index == active)
         }
     }
 
@@ -110,13 +111,14 @@ extension StoredBrowser {
         return ["list-panes", "-t", target, "-F", format]
     }
 
-    /// The Tabs that `storedTabsArguments`'s output names, as `agentTabs(opening:)` lists them; nil when the output
-    /// is not of a Window.
-    public static func agentTabs(listedPanes output: String) -> [BrowserAgentTab]? {
+    /// The Window's Tabs after queued opens. Returns nil for invalid tmux output.
+    public static func agentTabs(listedPanes output: String, paths: MuxifyPaths) -> [BrowserAgentTab]? {
         let fields = output.split(separator: "\n", omittingEmptySubsequences: false).first?.components(separatedBy: Tmux.separator) ?? []
         guard fields.count == 3 else { return nil }
         let stored = StoredBrowser(tabs: fields[0], activeTab: fields[1], shown: "", maximized: "")
-        return stored.agentTabs(opening: fields[2].split(separator: " ").map(String.init))
+        let config = Config.load(path: paths.configFile.path, read: { try? String(contentsOfFile: $0, encoding: .utf8) })
+        let history = (try? config.get().browser.history) == true ? BrowserHistoryStore(paths: paths) : nil
+        return stored.agentTabs(opening: fields[2].split(separator: " ").map(String.init), history: history)
     }
 
     /// What a read of the stored Tabs of a target that names no Window or Pane says.

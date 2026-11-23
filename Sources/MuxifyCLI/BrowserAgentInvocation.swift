@@ -9,6 +9,7 @@ struct BrowserAgentInvocation: Equatable {
     let tab: UUID?
     let command: BrowserAgentCommand
     let json: Bool
+    private let paths: MuxifyPaths
     /// Where `screenshot` writes its PNG.
     var screenshotPath: String?
 
@@ -17,6 +18,7 @@ struct BrowserAgentInvocation: Equatable {
         tab = try Self.tab(parsed)
         self.command = command
         json = parsed.flag("--json")
+        paths = parsed.paths
         self.screenshotPath = screenshotPath
     }
 
@@ -25,7 +27,7 @@ struct BrowserAgentInvocation: Equatable {
         do {
             reply = try Self.send(command, target: target, tab: tab, using: runner)
         } catch BrowserAgentChannel.Failure.unreachable where command == .tabs {
-            reply = .tabs(try Self.storedTabs(target: target, using: runner))
+            reply = .tabs(try storedTabs(using: runner))
         }
         switch reply {
         case .tabs(let tabs):
@@ -89,9 +91,9 @@ struct BrowserAgentInvocation: Equatable {
     /// The Window's Tabs as tmux holds them, for a client that reads Tabs while no app runs, such as the phone
     /// (ADR 0084). Window options, read through one of its Panes. `-u`, as `TmuxServer` reads: without a UTF-8
     /// locale, tmux prints the separator as `_`.
-    private static func storedTabs(target: String, using runner: any CLICommandRunning) throws -> [BrowserAgentTab] {
+    private func storedTabs(using runner: any CLICommandRunning) throws -> [BrowserAgentTab] {
         let result = try runner.run("tmux", arguments: ["-u"] + StoredBrowser.storedTabsArguments(target: target), quiet: true)
-        guard result.status == 0, let tabs = StoredBrowser.agentTabs(listedPanes: result.output) else {
+        guard result.status == 0, let tabs = StoredBrowser.agentTabs(listedPanes: result.output, paths: paths) else {
             throw CLIError(StoredBrowser.noWindow(target))
         }
         return tabs

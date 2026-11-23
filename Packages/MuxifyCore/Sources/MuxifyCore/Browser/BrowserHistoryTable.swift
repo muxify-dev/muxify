@@ -117,6 +117,20 @@ public struct BrowserHistoryStore: Sendable {
         try database.use(creating: false) { try BrowserHistoryTable.entries($0) } ?? []
     }
 
+    /// The last recorded titles for the given Tab URLs. Read only the title at each matching History entry.
+    func titles(for urls: [String]) throws -> [String: String] {
+        guard urls.contains(where: { !$0.isEmpty }), FileManager.default.fileExists(atPath: paths.stateDatabase.path) else { return [:] }
+        return try database.use(creating: false) { connection in
+            let lookup = try connection.prepare("SELECT title FROM browser_history WHERE key = ?")
+            var titles: [String: String] = [:]
+            for url in urls where !url.isEmpty {
+                try lookup.bind([TabURL.matchKey(url)])
+                if try lookup.step() { titles[url] = lookup.text(0) }
+            }
+            return titles
+        } ?? [:]
+    }
+
     /// Writes `changed` in the place of the rows with their keys, and deletes the rows of `removed`, in one
     /// transaction. It never rewrites the table.
     public func save(_ changed: [HistoryEntry], removing removed: Set<String>) throws {

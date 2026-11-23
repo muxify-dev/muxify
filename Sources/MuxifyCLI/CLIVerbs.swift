@@ -97,7 +97,7 @@ enum CLIVerbs {
                 help: """
                 Lists the Tabs of this Window's Browser: id, URL, title, and active
                 for the Tab that the Browser shows. While Muxify does not run, it lists
-                the Tabs that Muxify shows when it starts, with no titles.
+                the Tabs that Muxify shows when it starts, with titles from Browser History when available.
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .browser(try BrowserAgentInvocation(.tabs, parsed: parsed))

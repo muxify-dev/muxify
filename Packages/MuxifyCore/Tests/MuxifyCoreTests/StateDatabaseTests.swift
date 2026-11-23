@@ -281,11 +281,27 @@ final class StateDatabaseTests: XCTestCase {
         XCTAssertEqual(try MuxifyWorktreeStore(paths: paths).all().map(\.id), ["one"])
     }
 
-    // MARK: - The import of browser-history.json
+    // MARK: - Browser History
 
     private func seedBrowserHistoryFile(_ text: String) throws {
         try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
         try Data(text.utf8).write(to: paths.browserHistory)
+    }
+
+    func testStoredTabsUseBrowserHistoryTitlesAfterOpeningQueuedPages() throws {
+        let history = BrowserHistoryStore(paths: paths)
+        let known = "https://example.com/docs"
+        let entry = HistoryEntry(key: TabURL.matchKey(known), url: known, title: "Reference", topics: [])
+        let stored = StoredBrowser(tabURLs: ["https://other.test/", "about:blank"], activeTab: 1)
+        let requests = ["https://EXAMPLE.com/docs/#part"]
+        XCTAssertEqual(stored.agentTabs(opening: requests, history: history).map(\.title), ["", ""])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.state.path))
+        try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
+        XCTAssertEqual(stored.agentTabs(opening: requests, history: history).map(\.title), ["", ""])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.stateDatabase.path))
+        try history.save([entry], removing: [])
+        XCTAssertEqual(stored.agentTabs(opening: requests, history: history).map(\.title), ["", "Reference"])
+        XCTAssertEqual(stored.agentTabs(opening: requests, history: nil).map(\.title), ["", ""])
     }
 
     func testTheImportMovesACurrentAndALegacyBrowserHistoryFileAndRenamesIt() throws {
