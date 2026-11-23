@@ -35,7 +35,7 @@ final class RemoteTmuxTests: XCTestCase {
         var marker: [String] = []
         var snapshot: TmuxSnapshot?
         // The assert below reports a timeout, with the Terminal's output.
-        eventually("", fail: { _, _, _ in }) {
+        eventually("", fail: ignoreTheTimeout) {
             marker = ((try? remote(["show-option", "-sqv", ssh.markerOption])) ?? "")
                 .trimmingCharacters(in: .newlines).components(separatedBy: Tmux.separator)
             snapshot = try? Tmux.readSnapshot(using: remote)
@@ -167,7 +167,7 @@ final class RemoteTmuxTests: XCTestCase {
         }
         func exited(_ terminal: Process, owner: RemoteSSH) throws {
             // The assert below reports a timeout, with the Terminal's output.
-            eventually("", fail: { _, _, _ in }) { !terminal.isRunning }
+            eventually("", fail: ignoreTheTimeout) { !terminal.isRunning }
             let log = logs[terminal.processIdentifier].flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "No terminal output"
             XCTAssertFalse(terminal.isRunning, "SSH status: \(String(describing: owner.exitStatus)); output: \(log.suffix(2000))")
             if terminal.isRunning { throw TmuxError.timedOut }

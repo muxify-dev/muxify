@@ -77,7 +77,9 @@ three test bundles import, never with a private polling loop:
   main queue, which runs nothing else until the job ends.
 
 Both report a timeout through `fail:`, which defaults to `XCTFail`; a test of
-the waits themselves passes its own.
+the waits themselves passes its own. A caller that reports the timeout itself
+after the wait, by the wait's result, an assert or an error with more to say,
+passes `fail: ignoreTheTimeout`.
 
 ### Sleep only before asserting an absence
 

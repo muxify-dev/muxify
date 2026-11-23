@@ -90,7 +90,7 @@ final class LiveSSHTests: XCTestCase {
             var value: TmuxSnapshot?
             var lastError: Error?
             // The unwrap below reports a timeout, with what the server said.
-            eventually("", timeout: 10, fail: { _, _, _ in }) {
+            eventually("", timeout: 10, fail: ignoreTheTimeout) {
                 do { value = try connection.snapshot() } catch { lastError = error }
                 return value != nil
             }
@@ -267,7 +267,7 @@ final class LiveSSHTests: XCTestCase {
         guard process.isRunning else { return }
         process.terminate()
         // Given a moment to exit on the terminate, then killed.
-        if !eventually("", timeout: 1, fail: { _, _, _ in }, until: { !process.isRunning }) {
+        if !eventually("", timeout: 1, fail: ignoreTheTimeout, until: { !process.isRunning }) {
             kill(process.processIdentifier, SIGKILL)
         }
         process.waitUntilExit()

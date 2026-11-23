@@ -56,7 +56,7 @@ final class HostServerTests: DescriptorCheckedTestCase {
             // `waitUntilExit` can miss the exit in an async tearDown and wait for ever: wait for the pid, a while at most,
             // then kill it.
             let pid = clientProcess.processIdentifier
-            if !(await eventually("", timeout: 5, fail: { _, _, _ in }, until: { kill(pid, 0) != 0 })) {
+            if !(await eventually("", timeout: 5, fail: ignoreTheTimeout, until: { kill(pid, 0) != 0 })) {
                 kill(pid, SIGKILL)
                 await eventually("the Client's process outlived SIGKILL") { kill(pid, 0) != 0 }
             }

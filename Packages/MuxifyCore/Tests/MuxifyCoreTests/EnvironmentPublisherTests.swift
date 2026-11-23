@@ -37,7 +37,7 @@ final class EnvironmentPublisherTests: DescriptorCheckedTestCase {
             // `waitUntilExit` can miss the exit and wait for ever, as in HostServerTests: wait for the pid, a while at
             // most, then kill it.
             let pid = process.processIdentifier
-            if !eventually("", timeout: 5, fail: { _, _, _ in }, until: { kill(pid, 0) != 0 }) {
+            if !eventually("", timeout: 5, fail: ignoreTheTimeout, until: { kill(pid, 0) != 0 }) {
                 kill(pid, SIGKILL)
                 eventually("a Client's process outlived SIGKILL") { kill(pid, 0) != 0 }
             }
