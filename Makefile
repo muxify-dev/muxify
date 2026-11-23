@@ -17,9 +17,12 @@ XCODEBUILD_SETTINGS := diagnostic_message_length=0
 XCODEBUILD_EXTRA_SETTINGS ?=
 # The xcodebuild test run of make test and make test-stress. xcodebuild gives a test only the variables named
 # TEST_RUNNER_<name>, as <name>; env leads so that make test-stress can run the whole line under its CPU hog.
+# A test that runs longer than its execution time allowance, 120 s unless it sets its own, fails with xcodebuild's
+# timeout report, and the other tests go on (docs/testing.md).
 XCODEBUILD_TEST = env TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" TEST_RUNNER_MUXIFY_TEST_TIME_SCALE="$$MUXIFY_TEST_TIME_SCALE" \
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
-	-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) $(XCODEBUILD_EXTRA_SETTINGS) test
+	-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) $(XCODEBUILD_EXTRA_SETTINGS) \
+	-test-timeouts-enabled YES -default-test-execution-time-allowance 120 test
 # The iterations of make test-stress and of make test-linux STRESS=1 (docs/testing.md).
 STRESS_ITERATIONS ?= 5
 STRESS_ONLY ?=
