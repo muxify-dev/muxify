@@ -140,6 +140,34 @@ A test that needs more than 120 s says why in a comment and raises its own
 allowance, with `executionTimeAllowance` in its `setUp`. It does not raise the
 default.
 
+## CI retries a failed test and names it FLAKY
+
+CI retries a failed test, so that one unlucky run does not turn master red,
+and names every test that passed only on a retry, so that it is fixed rather
+than hidden. `MUXIFY_TEST_RETRIES` turns retries on; CI's two test steps set
+it to 2. A local `make test` or `make test-linux` leaves it unset and never
+retries, and neither does a stress run, so a local run shows every failure.
+
+- `make test` runs `xcodebuild test` with `-retry-tests-on-failure` and
+  `retries + 1` test iterations.
+- `make test-linux` runs each package through `scripts/swift-test-retries.py`.
+  After a failed attempt it reruns, `retries` times at most, only the classes
+  that failed, with `swift test --filter`. After a crash or a timeout, which
+  leave no complete result, it reruns the whole package. It keeps each
+  attempt's output and a record of each test's attempts in
+  `build/test-linux`.
+
+A test that failed every attempt fails the run. A test that failed and then
+passed is FLAKY, and the run passes. With retries on, both targets then run
+`scripts/report-flaky-tests.py`, passing or failing: it reads the result
+bundle through `xcresulttool` on macOS and the wrapper's record on Linux, and
+prints a GitHub `::warning` for each FLAKY test with the failure message of
+its failed attempt, and a line in a "Flaky tests" section of the step
+summary. When no test was FLAKY it prints nothing.
+
+A FLAKY warning is a bug to fix, not noise to ignore: stress the test (below)
+until it fails on your machine, and fix its cause.
+
 ## Stress a flaky test
 
 A test that passes on a Mac and fails in CI often depends on what CI changes: a

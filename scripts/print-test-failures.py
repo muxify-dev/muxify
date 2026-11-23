@@ -19,12 +19,29 @@ def newest_bundle():
     return max(bundles, key=os.path.getmtime) if bundles else None
 
 
+def read_tests(bundle):
+    """The bundle's tests as xcresulttool's JSON. Raises OSError, CalledProcessError or JSONDecodeError."""
+    output = subprocess.run(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", bundle],
+                            check=True, capture_output=True, text=True).stdout
+    return json.loads(output)
+
+
+def failure_messages(node):
+    """The failure messages of a test case or a repetition; a retried case keeps them under its repetitions."""
+    messages = []
+    for child in node.get("children", []):
+        if child.get("nodeType") == "Failure Message":
+            messages.append(child)
+        elif child.get("nodeType") == "Repetition":
+            messages += failure_messages(child)
+    return messages
+
+
 def failed_cases(node, names):
     """Each failed test case under `node`, with the names of the nodes above it and its failure messages."""
     names = names + [node.get("name", "")]
     if node.get("nodeType") == "Test Case" and node.get("result") == "Failed":
-        messages = [child for child in node.get("children", []) if child.get("nodeType") == "Failure Message"]
-        yield names, messages
+        yield names, failure_messages(node)
         return
     for child in node.get("children", []):
         yield from failed_cases(child, names)
@@ -44,9 +61,7 @@ def main():
         print("No test result bundle under build/Logs/Test.")
         return 0
     try:
-        output = subprocess.run(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", bundle],
-                                check=True, capture_output=True, text=True).stdout
-        tests = json.loads(output)
+        tests = read_tests(bundle)
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
         print("Could not read the test results of %s: %s" % (bundle, error))
         return 0

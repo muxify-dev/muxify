@@ -1,0 +1,102 @@
+{
+ "testNodes": [
+  {
+   "children": [
+    {
+     "children": [
+      {
+       "children": [
+        {
+         "children": [
+          {
+           "children": [
+            {
+             "name": "failed - throwaway: every attempt fails",
+             "nodeType": "Failure Message",
+             "sourceLocation": {
+              "filePath": "/ROOT/Packages/MuxifyCore/Tests/MuxifyCoreTests/ThrowawayFlakyTests.swift",
+              "lineNumber": 28
+             }
+            }
+           ],
+           "duration": "0,32s",
+           "durationInSeconds": 0.317425012588501,
+           "name": "First Run",
+           "nodeIdentifier": "1",
+           "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests/testDAlwaysFails",
+           "nodeType": "Repetition",
+           "result": "Failed"
+          },
+          {
+           "children": [
+            {
+             "name": "failed - throwaway: every attempt fails",
+             "nodeType": "Failure Message",
+             "sourceLocation": {
+              "filePath": "/ROOT/Packages/MuxifyCore/Tests/MuxifyCoreTests/ThrowawayFlakyTests.swift",
+              "lineNumber": 28
+             }
+            }
+           ],
+           "duration": "0,00077s",
+           "durationInSeconds": 0.0007699728012084961,
+           "name": "Retry 1",
+           "nodeIdentifier": "2",
+           "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests/testDAlwaysFails",
+           "nodeType": "Repetition",
+           "result": "Failed"
+          },
+          {
+           "children": [
+            {
+             "name": "failed - throwaway: every attempt fails",
+             "nodeType": "Failure Message",
+             "sourceLocation": {
+              "filePath": "/ROOT/Packages/MuxifyCore/Tests/MuxifyCoreTests/ThrowawayFlakyTests.swift",
+              "lineNumber": 28
+             }
+            }
+           ],
+           "duration": "0,00064s",
+           "durationInSeconds": 0.0006409883499145508,
+           "name": "Retry 2",
+           "nodeIdentifier": "3",
+           "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests/testDAlwaysFails",
+           "nodeType": "Repetition",
+           "result": "Failed"
+          }
+         ],
+         "details": "Failed after 3 retries",
+         "duration": "0,11s",
+         "durationInSeconds": 0.10627865791320801,
+         "name": "testDAlwaysFails()",
+         "nodeIdentifier": "ThrowawayFlakyTests/testDAlwaysFails()",
+         "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests/testDAlwaysFails",
+         "nodeType": "Test Case",
+         "result": "Failed"
+        }
+       ],
+       "name": "ThrowawayFlakyTests",
+       "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests",
+       "nodeType": "Test Suite",
+       "result": "Failed"
+      }
+     ],
+     "name": "MuxifyCoreTests",
+     "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests",
+     "nodeType": "Unit test bundle",
+     "result": "Failed"
+    }
+   ],
+   "name": "Muxify",
+   "nodeType": "Test Plan",
+   "result": "Failed"
+  }
+ ],
+ "testPlanConfigurations": [
+  {
+   "configurationId": "1",
+   "configurationName": "Test Scheme Action"
+  }
+ ]
+}

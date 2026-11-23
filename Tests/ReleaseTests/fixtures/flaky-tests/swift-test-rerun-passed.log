@@ -1,0 +1,35 @@
+Building for debugging...
+Build complete! (0.32 secs)
+Test Suite 'Selected tests' started at 2026-11-23 12:09:54.651
+Test Suite 'HostServerSocketTests' started at 2026-11-23 12:09:54.652
+Test Case 'HostServerSocketTests.testALineOnTheSocketReachesTheClientAsABrowserRequestAndTheClientsReplyComesBack' started at 2026-11-23 12:09:54.709
+Test Case 'HostServerSocketTests.testALineOnTheSocketReachesTheClientAsABrowserRequestAndTheClientsReplyComesBack' passed (0.012 seconds)
+Test Case 'HostServerSocketTests.testARequestWithNoHandlerOnTheMacFailsWithCannotReachMuxify' started at 2026-11-23 12:09:54.721
+Test Case 'HostServerSocketTests.testARequestWithNoHandlerOnTheMacFailsWithCannotReachMuxify' passed (0.009 seconds)
+Test Case 'HostServerSocketTests.testAScreenshotLargerThanOneChunkArrivesAsChunksAndComesBackWhole' started at 2026-11-23 12:09:54.730
+Test Case 'HostServerSocketTests.testAScreenshotLargerThanOneChunkArrivesAsChunksAndComesBackWhole' passed (0.033 seconds)
+Test Case 'HostServerSocketTests.testASelectLineReachesTheClientAsASelectRequest' started at 2026-11-23 12:09:54.763
+Test Case 'HostServerSocketTests.testASelectLineReachesTheClientAsASelectRequest' passed (0.008 seconds)
+Test Case 'HostServerSocketTests.testAStartingServerRemovesADeadSocketAndKeepsALiveOne' started at 2026-11-23 12:09:54.771
+Test Case 'HostServerSocketTests.testAStartingServerRemovesADeadSocketAndKeepsALiveOne' passed (0.008 seconds)
+Test Case 'HostServerSocketTests.testAnExitingServerClearsTheOptionOnlyWhileItNamesItsSocket' started at 2026-11-23 12:09:54.779
+Test Case 'HostServerSocketTests.testAnExitingServerClearsTheOptionOnlyWhileItNamesItsSocket' passed (0.015 seconds)
+Test Case 'HostServerSocketTests.testTheConsumersServerTakesTheOptionWhileItIsEmpty' started at 2026-11-23 12:09:54.794
+Test Case 'HostServerSocketTests.testTheConsumersServerTakesTheOptionWhileItIsEmpty' passed (0.106 seconds)
+Test Case 'HostServerSocketTests.testTheOptionFollowsClaimOpenAndReleaseOpen' started at 2026-11-23 12:09:54.900
+Test Case 'HostServerSocketTests.testTheOptionFollowsClaimOpenAndReleaseOpen' passed (0.019 seconds)
+Test Case 'HostServerSocketTests.testTheSocketSitsBesideTmuxsAndGoesWhenTheServerExits' started at 2026-11-23 12:09:54.919
+Test Case 'HostServerSocketTests.testTheSocketSitsBesideTmuxsAndGoesWhenTheServerExits' passed (0.009 seconds)
+Test Suite 'HostServerSocketTests' passed at 2026-11-23 12:09:54.928
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.218 (0.218) seconds
+Test Suite 'ThrowawayFlakyTests' started at 2026-11-23 12:09:54.928
+Test Case 'ThrowawayFlakyTests.testACrashesOnceThenPasses' started at 2026-11-23 12:09:54.928
+Test Case 'ThrowawayFlakyTests.testACrashesOnceThenPasses' passed (0.0 seconds)
+Test Case 'ThrowawayFlakyTests.testBFailsOnceThenPasses' started at 2026-11-23 12:09:54.928
+Test Case 'ThrowawayFlakyTests.testBFailsOnceThenPasses' passed (0.0 seconds)
+Test Case 'ThrowawayFlakyTests.testCPasses' started at 2026-11-23 12:09:54.928
+Test Case 'ThrowawayFlakyTests.testCPasses' passed (0.0 seconds)
+Test Suite 'ThrowawayFlakyTests' passed at 2026-11-23 12:09:54.928
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.0 (0.0) seconds
+Test Suite 'Selected tests' passed at 2026-11-23 12:09:54.928
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.218 (0.218) seconds

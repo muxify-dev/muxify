@@ -83,6 +83,9 @@ jobs:
           MUXIFY_REQUIRE_TMUX: '1'
           # A busy runner is slower than a Mac: every shared wait of the tests gets three times its time.
           MUXIFY_TEST_TIME_SCALE: '3'
+          # A failed test runs twice more; make test then runs scripts/report-flaky-tests.py, passing or failing, which
+          # names each test that passed only on a retry as FLAKY in a warning and in the step summary (docs/testing.md).
+          MUXIFY_TEST_RETRIES: '2'
           XCODEBUILD_EXTRA_SETTINGS: COMPILATION_CACHE_ENABLE_CACHING=YES
         run: make test
 
@@ -283,6 +286,9 @@ jobs:
         env:
           # A busy runner is slower than a Mac: every shared wait of the tests gets three times its time.
           MUXIFY_TEST_TIME_SCALE: '3'
+          # The classes that failed run twice more at most; make test-linux then runs scripts/report-flaky-tests.py,
+          # passing or failing, which names each test that passed only on a retry as FLAKY (docs/testing.md).
+          MUXIFY_TEST_RETRIES: '2'
         run: make test-linux
 
   host-cli-linux:

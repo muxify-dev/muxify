@@ -1,0 +1,58 @@
+Building for debugging...
+Build complete! (0.32 secs)
+Test Suite 'All tests' started at 2026-11-23 12:07:12.569
+Test Suite 'Debug-linux-aarch64.xctest' started at 2026-11-23 12:07:12.569
+Test Suite 'AgentGuardTests' started at 2026-11-23 12:07:12.569
+Test Case 'AgentGuardTests.testAnAgentInAnotherWorktreeOfTheRepositoryDoesNotCount' started at 2026-11-23 12:07:12.569
+Test Case 'AgentGuardTests.testAnAgentInAnotherWorktreeOfTheRepositoryDoesNotCount' passed (0.001 seconds)
+Test Case 'AgentGuardTests.testAnAgentInTheWorktreeOrBelowItCounts' started at 2026-11-23 12:07:12.570
+Test Case 'AgentGuardTests.testAnAgentInTheWorktreeOrBelowItCounts' passed (0.0 seconds)
+Test Case 'AgentGuardTests.testAnAgentOutsideTheRepositoryDoesNotCount' started at 2026-11-23 12:07:12.570
+Test Case 'AgentGuardTests.testAnAgentOutsideTheRepositoryDoesNotCount' passed (0.0 seconds)
+[… trimmed …]
+Test Suite 'HostServerSocketTests' started at 2026-11-23 12:08:50.803
+Test Case 'HostServerSocketTests.testALineOnTheSocketReachesTheClientAsABrowserRequestAndTheClientsReplyComesBack' started at 2026-11-23 12:08:50.803
+Test Case 'HostServerSocketTests.testALineOnTheSocketReachesTheClientAsABrowserRequestAndTheClientsReplyComesBack' passed (0.009 seconds)
+Test Case 'HostServerSocketTests.testARequestWithNoHandlerOnTheMacFailsWithCannotReachMuxify' started at 2026-11-23 12:08:50.813
+Test Case 'HostServerSocketTests.testARequestWithNoHandlerOnTheMacFailsWithCannotReachMuxify' passed (0.009 seconds)
+Test Case 'HostServerSocketTests.testAScreenshotLargerThanOneChunkArrivesAsChunksAndComesBackWhole' started at 2026-11-23 12:08:50.822
+Test Case 'HostServerSocketTests.testAScreenshotLargerThanOneChunkArrivesAsChunksAndComesBackWhole' passed (0.032 seconds)
+Test Case 'HostServerSocketTests.testASelectLineReachesTheClientAsASelectRequest' started at 2026-11-23 12:08:50.854
+Test Case 'HostServerSocketTests.testASelectLineReachesTheClientAsASelectRequest' passed (0.008 seconds)
+Test Case 'HostServerSocketTests.testAStartingServerRemovesADeadSocketAndKeepsALiveOne' started at 2026-11-23 12:08:50.862
+Test Case 'HostServerSocketTests.testAStartingServerRemovesADeadSocketAndKeepsALiveOne' passed (0.009 seconds)
+Test Case 'HostServerSocketTests.testAnExitingServerClearsTheOptionOnlyWhileItNamesItsSocket' started at 2026-11-23 12:08:50.872
+Test Case 'HostServerSocketTests.testAnExitingServerClearsTheOptionOnlyWhileItNamesItsSocket' passed (0.014 seconds)
+Test Case 'HostServerSocketTests.testTheConsumersServerTakesTheOptionWhileItIsEmpty' started at 2026-11-23 12:08:50.885
+<EXPR>:0: error: HostServerSocketTests.testTheConsumersServerTakesTheOptionWhileItIsEmpty : threw error "The tmux command timed out"
+Test Case 'HostServerSocketTests.testTheConsumersServerTakesTheOptionWhileItIsEmpty' failed (1.032 seconds)
+Test Case 'HostServerSocketTests.testTheOptionFollowsClaimOpenAndReleaseOpen' started at 2026-11-23 12:08:51.917
+Test Case 'HostServerSocketTests.testTheOptionFollowsClaimOpenAndReleaseOpen' passed (0.035 seconds)
+Test Case 'HostServerSocketTests.testTheSocketSitsBesideTmuxsAndGoesWhenTheServerExits' started at 2026-11-23 12:08:51.952
+Test Case 'HostServerSocketTests.testTheSocketSitsBesideTmuxsAndGoesWhenTheServerExits' passed (0.013 seconds)
+Test Suite 'HostServerSocketTests' failed at 2026-11-23 12:08:51.965
+	 Executed 9 tests, with 1 failure (1 unexpected) in 1.161 (1.161) seconds
+[… trimmed …]
+Test Suite 'ThrowawayFlakyTests' started at 2026-11-23 12:09:43.807
+Test Case 'ThrowawayFlakyTests.testACrashesOnceThenPasses' started at 2026-11-23 12:09:43.807
+Test Case 'ThrowawayFlakyTests.testACrashesOnceThenPasses' passed (0.0 seconds)
+Test Case 'ThrowawayFlakyTests.testBFailsOnceThenPasses' started at 2026-11-23 12:09:43.808
+/src/Packages/MuxifyCore/Tests/MuxifyCoreTests/ThrowawayFlakyTests.swift:20: error: ThrowawayFlakyTests.testBFailsOnceThenPasses : failed - throwaway: the first attempt fails
+Test Case 'ThrowawayFlakyTests.testBFailsOnceThenPasses' failed (0.001 seconds)
+Test Case 'ThrowawayFlakyTests.testCPasses' started at 2026-11-23 12:09:43.808
+Test Case 'ThrowawayFlakyTests.testCPasses' passed (0.0 seconds)
+Test Suite 'ThrowawayFlakyTests' failed at 2026-11-23 12:09:43.809
+	 Executed 3 tests, with 1 failure (0 unexpected) in 0.002 (0.002) seconds
+[… trimmed …]
+Test Suite 'WorktreeWindowTests' passed at 2026-11-23 12:09:53.853
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'Debug-linux-aarch64.xctest' failed at 2026-11-23 12:09:53.853
+	 Executed 749 tests, with 6 tests skipped and 2 failures (1 unexpected) in 161.197 (161.197) seconds
+Test Suite 'All tests' failed at 2026-11-23 12:09:53.854
+	 Executed 749 tests, with 6 tests skipped and 2 failures (1 unexpected) in 161.197 (161.197) seconds
+◇ Test run started.
+↳ Testing Library Version: 6.4.2 (288a2328ff84644)
+↳ Target Platform: aarch64-unknown-linux-gnu
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+Note: Some test targets reported failures:
+  - MuxifyCoreTests (XCTest)
