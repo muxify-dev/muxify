@@ -55,10 +55,6 @@ owns its state:
 
 A test never writes a fixed path that another test reads.
 
-A timing assert runs beside other test processes, so the machine can be busy.
-Give it a bound that the buggy behaviour cannot meet, not one tuned to an idle
-machine: "two 2 s runs at the same time" stays below the 4 s they take one after
-the other.
 
 ## Wait for a signal, with the shared wait
 
@@ -82,6 +78,38 @@ three test bundles import, never with a private polling loop:
 
 Both report a timeout through `fail:`, which defaults to `XCTFail`; a test of
 the waits themselves passes its own.
+
+### Sleep only before asserting an absence
+
+A test never sleeps for a fixed time before asserting that something happened:
+it waits for that thing. A fixed sleep (`Thread.sleep`, `Task.sleep`, `usleep`,
+`sleep(`, or a run of the run loop with `run(until:)` or `run(mode:before:)`)
+is allowed only before asserting that something did *not* happen, where no
+signal can come. Say so with an `// absence:` comment, on the sleep's line or
+just above it, that names what does not happen:
+
+```swift
+// absence: a stopped watch fires nothing for a write.
+Thread.sleep(forTimeInterval: 0.5)
+XCTAssertEqual(events, [])
+```
+
+`make test` runs `scripts/check-test-sleeps.sh`, which enforces this rule. It
+fails on a fixed sleep without the marker in the app, MuxifyCore and CLI test
+bundles and in `MuxifyTestSupport`, and prints each one's file, line and the
+rule. The shared waits' own poll is its one exemption. A sleep in a shell or
+Python script that a test hands to tmux or a shell, such as `exec sleep 600`,
+is not a Swift sleep and passes.
+
+### Assert on elapsed time only where speed is the behaviour
+
+A test asserts on how long something took only where speed is the behaviour
+under test, such as "two 2 s runs at the same time" taking less than the 4 s
+they take one after the other. Elsewhere, wait for the result and assert on
+it. A bound that stays goes through `scaled(_:)` and is at least 4× what a
+correct run takes, so a busy machine cannot miss it and only the bug can. A
+lower bound, such as "it waited the whole timeout", cannot fail on a slow
+machine and needs neither.
 
 ### The time scale
 

@@ -68,18 +68,19 @@ final class EventuallyTests: XCTestCase {
     }
 
     func testTheAsyncFormWaitsForTheConditionAndReportsATimeout() async {
-        let items = Items()
-        _ = Task.detached { try await Task.sleep(nanoseconds: 100_000_000); items.add(1) }
+        // The condition holds on its third look, so the wait must look again rather than return.
+        var looks = 0
         let failures = Failures()
-        let held = await eventually("no item came", scale: 1, fail: failures.add) { !items.all.isEmpty }
+        let held = await eventually("the third look never came", scale: 1, fail: failures.add) { looks += 1; return looks == 3 }
         XCTAssertTrue(held)
+        XCTAssertEqual(looks, 3)
         XCTAssertEqual(failures.messages, [])
 
         let start = Date()
-        let late = await eventually("a second item never came", timeout: 0.1, scale: 3, fail: failures.add) { items.all.count > 1 }
+        let late = await eventually("the condition never held", timeout: 0.1, scale: 3, fail: failures.add) { false }
         XCTAssertFalse(late)
         XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 0.3)
-        XCTAssertEqual(failures.messages, ["a second item never came"])
+        XCTAssertEqual(failures.messages, ["the condition never held"])
     }
 
     func testTheScaleIsOneUnlessTheEnvironmentSetsOneOrMore() {
@@ -94,17 +95,14 @@ final class EventuallyTests: XCTestCase {
     }
 
     func testTheSettleWaitReturnsOnceItemsStopComing() async {
-        let items = Items()
-        let burst = Task.detached {
-            for item in 1...10 {
-                items.add(item)
-                try await Task.sleep(nanoseconds: 30_000_000)
-            }
-        }
+        // A burst: one new item at each look, up to ten, then none.
+        var count = 0
         let failures = Failures()
         let start = Date()
-        let seen = await settled("the burst did not settle", quiet: 0.3, scale: 1, fail: failures.add) { items.all }
-        _ = await burst.result
+        let seen = await settled("the burst did not settle", quiet: 0.3, scale: 1, fail: failures.add) {
+            count = min(count + 1, 10)
+            return Array(1...count)
+        }
         XCTAssertEqual(seen, Array(1...10))
         // It waited out the quiet period after the last item, and no longer than its deadline.
         XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 0.3)
@@ -137,14 +135,4 @@ private final class Failures {
         files.append("\(file)")
         lines.append(line)
     }
-}
-
-/// Items that another task adds.
-private final class Items: @unchecked Sendable {
-    private let lock = NSLock()
-    private var items: [Int] = []
-
-    var all: [Int] { lock.withLock { items } }
-
-    func add(_ item: Int) { lock.withLock { items.append(item) } }
 }
