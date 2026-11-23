@@ -8,6 +8,7 @@ import Musl
 import Foundation
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// A temporary repository with a private HOME, so the user's git config can't change what git prints: `master` with
 /// one commit and a tag, `feature` one commit ahead, a stash, a staged and unstaged change, and a new file.
@@ -251,17 +252,17 @@ final class RepositoryWatchTests: XCTestCase {
         let watch = RepositoryWatch(path: repository.path, reader: repository.reader, probeInterval: 60) { events.add($0) }
         watch.start()
         defer { watch.stop() }
-        try events.wait("no first event") { $0.count == 1 }
+        events.wait("no first event") { $0.count == 1 }
         XCTAssertEqual(events.all.first, RepositoryEvent(head: "master", repository: true, changed: false))
         XCTAssertTrue(watch.watchesGitDirectory, "the git directory has no watch on this system")
 
         try repository.run("cd \"$1\" && git add c.txt && git commit -q -m Watched")
-        try events.wait("the watch did not see a commit", seconds: 3) { $0.count >= 2 }
+        events.wait("the watch did not see a commit") { $0.count >= 2 }
         XCTAssertEqual(events.all.last, RepositoryEvent(head: "master", repository: true, changed: true))
 
         let seen = events.all.count
         try repository.run("cd \"$1\" && git checkout -q -b watched")
-        try events.wait("the watch did not see a checkout", seconds: 3) { $0.last?.head == "watched" && $0.count > seen }
+        events.wait("the watch did not see a checkout") { $0.last?.head == "watched" && $0.count > seen }
         XCTAssertEqual(events.all.last, RepositoryEvent(head: "watched", repository: true, changed: true))
     }
 
@@ -270,17 +271,18 @@ final class RepositoryWatchTests: XCTestCase {
         let watch = RepositoryWatch(path: repository.path, reader: repository.reader, probeInterval: 0.2) { events.add($0) }
         watch.start()
         defer { watch.stop() }
-        try events.wait("no first event") { $0.count == 1 }
+        events.wait("no first event") { $0.count == 1 }
         try "edited\n".write(toFile: repository.path + "/c.txt", atomically: false, encoding: .utf8)
         try "new\n".write(toFile: repository.path + "/d.txt", atomically: false, encoding: .utf8)
-        try events.wait("the probe did not see an edit in the working tree", seconds: 3) { $0.count >= 2 }
+        events.wait("the probe did not see an edit in the working tree") { $0.count >= 2 }
         XCTAssertEqual(events.all.last?.changed, true)
 
         let outside = Events()
         let none = RepositoryWatch(path: repository.directory.path, reader: repository.reader, probeInterval: 0.1) { outside.add($0) }
         none.start()
         defer { none.stop() }
-        try outside.wait("no first event in no repository") { $0.count == 1 }
+        outside.wait("no first event in no repository") { $0.count == 1 }
+        // absence: a folder in no repository sends no event after its first.
         Thread.sleep(forTimeInterval: 0.4)
         XCTAssertEqual(outside.all, [RepositoryEvent(head: nil, repository: false, changed: false)])
         XCTAssertFalse(none.watchesGitDirectory)
@@ -304,12 +306,15 @@ final class Events: @unchecked Sendable {
         return events
     }
 
-    func wait(_ message: String, seconds: TimeInterval = 5, until done: ([RepositoryEvent]) -> Bool) throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while !done(all) {
-            guard Date() < deadline else { return XCTFail("\(message): \(all)") }
-            Thread.sleep(forTimeInterval: 0.02)
-        }
+    /// Waits until `done` holds of the events so far; on timeout, the failure lists them.
+    @available(*, noasync, message: "an async test waits with the async form")
+    func wait(_ message: String, file: StaticString = #filePath, line: UInt = #line, until done: ([RepositoryEvent]) -> Bool) {
+        eventually("\(message): \(all)", file: file, line: line) { done(all) }
+    }
+
+    /// Waits as the sync form does, sleeping the task between looks.
+    func wait(_ message: String, file: StaticString = #filePath, line: UInt = #line, until done: ([RepositoryEvent]) -> Bool) async {
+        await eventually("\(message): \(all)", file: file, line: line) { done(all) }
     }
 }
 
@@ -362,7 +367,7 @@ final class HostServerGitTests: XCTestCase {
         consumers.append(Task {
             do { for try await event in stream { events.add(event) } } catch {}
         })
-        try events.wait("no first event") { $0.count == 1 }
+        await events.wait("no first event") { $0.count == 1 }
         XCTAssertEqual(events.all, [RepositoryEvent(head: "master", repository: true, changed: false)], "the first event is the whole state")
 
         for (what, script) in [("a commit", "git commit -q -m Staged"), ("a stage", "git add c.txt"),
@@ -370,7 +375,7 @@ final class HostServerGitTests: XCTestCase {
             let seen = events.all.count
             try repository.run("cd \"$1\" && " + script)
             // The edit is seen by the 2 s probe; the commit and the stage by the git directory's watch too.
-            try events.wait("repository pushed nothing after \(what)", seconds: 6) { $0.count > seen }
+            await events.wait("repository pushed nothing after \(what)") { $0.count > seen }
             XCTAssertEqual(events.all.last?.changed, true, what)
             XCTAssertEqual(events.all.last?.head, "master", what)
         }
@@ -383,7 +388,7 @@ final class HostServerGitTests: XCTestCase {
         consumers.append(Task {
             do { for try await event in stream { events.add(event) } } catch {}
         })
-        try events.wait("no first event") { $0.count == 1 }
+        await events.wait("no first event") { $0.count == 1 }
         let before = try repository.run("cd \"$1\" && git rev-list --count HEAD")
 
         let written = try await client.call(HostRequest.gitWrite(.commit(root: repository.path, message: "Over the wire")), as: GitWritten.self)
@@ -391,7 +396,7 @@ final class HostServerGitTests: XCTestCase {
         XCTAssertEqual(head, written.output.trimmingCharacters(in: .whitespacesAndNewlines) + " Over the wire",
                        "the answer is the new commit's short hash")
         XCTAssertNotEqual(try repository.run("cd \"$1\" && git rev-list --count HEAD"), before)
-        try events.wait("repository pushed nothing after the commit", seconds: 6) { $0.count > 1 }
+        await events.wait("repository pushed nothing after the commit") { $0.count > 1 }
         XCTAssertEqual(events.all.last, RepositoryEvent(head: "master", repository: true, changed: true))
 
         // A write git refuses ends failed with git's words, and changes nothing.

@@ -123,8 +123,7 @@ final class TmuxServerBinaryTests: XCTestCase {
             .trimmingCharacters(in: .whitespacesAndNewlines)))
         // A killed server leaves its socket file behind. tmux answers a refused connection with "no server running".
         kill(pid, SIGKILL)
-        let deadline = Date().addingTimeInterval(5)
-        while kill(pid, 0) == 0, Date() < deadline { usleep(10_000) }
+        eventually("the killed server did not exit") { kill(pid, 0) != 0 }
         XCTAssertTrue(FileManager.default.fileExists(atPath: socket))
 
         let server = TmuxServer(socketPath: socket)

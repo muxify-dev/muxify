@@ -34,10 +34,7 @@ final class PaneSearchTests: XCTestCase {
         try (lines.joined(separator: "\n") + "\n").write(to: script, atomically: true, encoding: .utf8)
         let pane = try server.run(["new-session", "-d", "-P", "-F", "#{pane_id}", "-x", "40", "-y", "10",
                                    "cat \(script.path); exec sleep 1000"]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let deadline = Date().addingTimeInterval(5)
-        while try !server.run(["capture-pane", "-p", "-t", pane]).contains(lines.last!), Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
+        try eventually("the Pane does not show its lines") { try server.run(["capture-pane", "-p", "-t", pane]).contains(lines.last!) }
         return pane
     }
 
