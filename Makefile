@@ -51,6 +51,7 @@ build: project
 test: project
 	./scripts/check-folder-paths.sh
 	./scripts/check-palette-structure.sh
+	./scripts/check-test-sleeps.sh
 	# The verify runner's own tests (scripts/verify/test_run.py). They never launch the app, so they run here, not in make verify.
 	python3 -m unittest scripts.verify.test_run
 	# xcodebuild's parallel output names a failed test but not why, so a failed run prints each failure's message and
