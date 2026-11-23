@@ -35,8 +35,7 @@ final class RemoteTmuxTests: XCTestCase {
 
         var pid: Int?
         var tty = ""
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline, pid == nil {
+        eventually("the remote Client did not list itself", timeout: 5, fail: ignoreTheTimeout) {
             let fields = ((try? host.raw(["show-option", "-sqv", ssh.markerOption])) ?? "")
                 .trimmingCharacters(in: .newlines).components(separatedBy: Tmux.separator)
             if fields.count == 5, let named = Int(fields[0]),
@@ -44,13 +43,14 @@ final class RemoteTmuxTests: XCTestCase {
                 pid = named
                 tty = fields[1]
             }
-            Thread.sleep(forTimeInterval: 0.02)
+            return pid != nil
         }
         let client = try XCTUnwrap(pid, (try? String(contentsOf: log, encoding: .utf8)) ?? "No terminal output")
         XCTAssertTrue(TmuxStatusLine.listedTerminals(try host.raw(["show-option", "-gqv", TmuxStatusLine.terminals])).contains(client))
         XCTAssertEqual(try host.raw(["show-options", "-qv", "-t", "=main:", "status"]).trimmingCharacters(in: .newlines), "off")
         _ = try host.raw(["switch-client", "-c", tty, "-t", "=other"])
         XCTAssertEqual(try host.raw(["show-options", "-qv", "-t", "=other:", "status"]).trimmingCharacters(in: .newlines), "off")
+        // absence: the Terminal draws no status line after it switches Session.
         Thread.sleep(forTimeInterval: 0.3)
         XCTAssertFalse(try String(contentsOf: log, encoding: .utf8).contains("STATUSLINE"), "the Terminal drew the status line")
     }

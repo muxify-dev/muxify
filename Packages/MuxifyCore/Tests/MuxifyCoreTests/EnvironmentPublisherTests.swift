@@ -45,6 +45,10 @@ final class EnvironmentPublisherTests: DescriptorCheckedTestCase {
         // Each Client's input is open until closed: on Linux a Process and its Pipes are never freed (DescriptorCheck).
         for process in [clientProcess].compactMap({ $0 }) + otherProcesses {
             try? (process.standardInput as? Pipe)?.fileHandleForWriting.close()
+            if let output = process.standardOutput as? Pipe {
+                output.fileHandleForReading.readabilityHandler = nil
+                try? output.fileHandleForReading.close()
+            }
         }
         clientProcess = nil
         otherProcesses = []
@@ -565,20 +569,21 @@ final class EnvironmentPublisherTests: DescriptorCheckedTestCase {
         try server.run(["set-option", "-g", "status-left", "STATUSLINE"])
         try server.run(["set-option", "-g", "status-left-length", "20"])
         let output = Output()
-        let terminal = try attachListedTerminal(to: "work", output: output)
-        try await wait("the Terminal did not draw") { output.text.count > 100 }
+        let terminal = try await attachListedTerminal(to: "work", output: output)
+        try await eventually("the Terminal did not draw") { output.text.count > 100 }
         XCTAssertEqual(try sessionStatus("work"), "off")
 
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
         XCTAssertEqual(try sessionStatus("other"), "off", "the hook did not hide the status line before the switch ended")
         try server.run(["new-session", "-d", "-s", "third"])
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=third"])
+        XCTAssertEqual(try sessionStatus("third"), "off", "the hook did not hide the status line before the switch ended")
+        // absence: the Terminal draws no status line in a Session made after it attached.
         try await Task.sleep(nanoseconds: 300_000_000)
-        XCTAssertEqual(try sessionStatus("third"), "off")
         XCTAssertFalse(output.text.contains("STATUSLINE"), "the Terminal drew the status line")
 
         _ = try attachClient(to: "other")
-        try await wait("another terminal did not get the status line back") { try self.sessionStatus("other") == nil }
+        try await eventually("another terminal did not get the status line back") { try self.sessionStatus("other") == nil }
     }
 
     func testThePublisherForgetsTheTerminalsWhoseProcessEnded() async throws {
@@ -590,10 +595,10 @@ final class EnvironmentPublisherTests: DescriptorCheckedTestCase {
         ended.waitUntilExit()
         try server.run(["set-option", "-g", TmuxStatusLine.terminals, " \(ended.processIdentifier) "])
         let terminal = try startTerminal(in: "work", colours: nil, hidingStatusLine: true)
-        try await wait("the publisher did not list its Terminal") {
+        try await eventually("the publisher did not list its Terminal") {
             TmuxStatusLine.listedTerminals(try self.server.run(["show-option", "-gqv", TmuxStatusLine.terminals])).contains(terminal.pid)
         }
-        try await wait("the ended Terminal stayed listed", seconds: 30) {
+        try await eventually("the ended Terminal stayed listed", timeout: 30) {
             !TmuxStatusLine.listedTerminals(try self.server.run(["show-option", "-gqv", TmuxStatusLine.terminals]))
                 .contains(Int(ended.processIdentifier))
         }
@@ -609,7 +614,7 @@ final class EnvironmentPublisherTests: DescriptorCheckedTestCase {
 
     /// A Terminal's Client as Muxify starts it while the header shows the Session: it lists itself and sets the hooks,
     /// then attaches to `session`. What it draws goes to `output`.
-    private func attachListedTerminal(to session: String, output: Output) throws -> ViewCommandExecutor.Client {
+    private func attachListedTerminal(to session: String, output: Output) async throws -> ViewCommandExecutor.Client {
         let binary = try XCTUnwrap(server.binary)
         let tmux = [binary, "-u", "-S", socket, "-f", "/dev/null"].map(Tmux.shellQuote).joined(separator: " ")
         let script = TmuxStatusLine.attachSetup(tmux: tmux) + "\nexec \(tmux) attach-session -t \(Tmux.shellQuote(session))"
@@ -632,12 +637,13 @@ final class EnvironmentPublisherTests: DescriptorCheckedTestCase {
         process.standardError = FileHandle.nullDevice
         try process.run()
         if clientProcess == nil { clientProcess = process } else { otherProcesses.append(process) }
-        let deadline = Date().addingTimeInterval(8)
-        while Date() < deadline {
-            if let client = try nonControlClients().first { return client }
-            Thread.sleep(forTimeInterval: 0.05)
+        var client: ViewCommandExecutor.Client?
+        try await eventually("the Terminal did not attach", timeout: 8, fail: ignoreTheTimeout) {
+            client = try self.nonControlClients().first
+            return client != nil
         }
-        throw TmuxError.timedOut
+        guard let client else { throw TmuxError.timedOut }
+        return client
     }
 
     /// Muxify's hooks come after `status off` on the Listener's connection, so a Session can lose its status line
