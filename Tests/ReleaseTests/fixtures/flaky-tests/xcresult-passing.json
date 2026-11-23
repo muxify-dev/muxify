@@ -1,0 +1,42 @@
+{
+ "testNodes": [
+  {
+   "children": [
+    {
+     "children": [
+      {
+       "children": [
+        {
+         "duration": "0,00087s",
+         "durationInSeconds": 0.000867009162902832,
+         "name": "testCPasses()",
+         "nodeIdentifier": "ThrowawayFlakyTests/testCPasses()",
+         "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests/testCPasses",
+         "nodeType": "Test Case",
+         "result": "Passed"
+        }
+       ],
+       "name": "ThrowawayFlakyTests",
+       "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests",
+       "nodeType": "Test Suite",
+       "result": "Passed"
+      }
+     ],
+     "name": "MuxifyCoreTests",
+     "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests",
+     "nodeType": "Unit test bundle",
+     "result": "Passed"
+    }
+   ],
+   "name": "Muxify",
+   "nodeType": "Test Plan",
+   "result": "Passed"
+  }
+ ],
+ "testPlanConfigurations": [
+  {
+   "configurationId": "1",
+   "configurationName": "Test Scheme Action"
+  }
+ ]
+}

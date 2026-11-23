@@ -1,0 +1,73 @@
+{
+ "testNodes": [
+  {
+   "children": [
+    {
+     "children": [
+      {
+       "children": [
+        {
+         "children": [
+          {
+           "children": [
+            {
+             "name": "failed - throwaway: the first attempt fails",
+             "nodeType": "Failure Message",
+             "sourceLocation": {
+              "filePath": "/ROOT/Packages/MuxifyCore/Tests/MuxifyCoreTests/ThrowawayFlakyTests.swift",
+              "lineNumber": 20
+             }
+            }
+           ],
+           "duration": "0,69s",
+           "durationInSeconds": 0.6905339956283569,
+           "name": "First Run",
+           "nodeIdentifier": "1",
+           "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests/testBFailsOnceThenPasses",
+           "nodeType": "Repetition",
+           "result": "Failed"
+          },
+          {
+           "duration": "0,00038s",
+           "durationInSeconds": 0.0003839731216430664,
+           "name": "Retry 1",
+           "nodeIdentifier": "2",
+           "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests/testBFailsOnceThenPasses",
+           "nodeType": "Repetition",
+           "result": "Passed"
+          }
+         ],
+         "details": "⚠️ Passed after 1 retry",
+         "duration": "0,35s",
+         "durationInSeconds": 0.345458984375,
+         "name": "testBFailsOnceThenPasses()",
+         "nodeIdentifier": "ThrowawayFlakyTests/testBFailsOnceThenPasses()",
+         "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests/testBFailsOnceThenPasses",
+         "nodeType": "Test Case",
+         "result": "Passed"
+        }
+       ],
+       "name": "ThrowawayFlakyTests",
+       "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests/ThrowawayFlakyTests",
+       "nodeType": "Test Suite",
+       "result": "Passed"
+      }
+     ],
+     "name": "MuxifyCoreTests",
+     "nodeIdentifierURL": "test://com.apple.xcode/MuxifyCore/MuxifyCoreTests",
+     "nodeType": "Unit test bundle",
+     "result": "Passed"
+    }
+   ],
+   "name": "Muxify",
+   "nodeType": "Test Plan",
+   "result": "Passed"
+  }
+ ],
+ "testPlanConfigurations": [
+  {
+   "configurationId": "1",
+   "configurationName": "Test Scheme Action"
+  }
+ ]
+}

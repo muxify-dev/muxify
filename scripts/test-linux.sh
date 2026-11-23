@@ -24,6 +24,10 @@
 # STRESS_FILTER passes swift test's --filter; STRESS_PACKAGE (core, cli or both,
 # the default) chooses MuxifyCore, the CLI or both. scripts/test-linux-swift.sh
 # runs the swift test calls.
+#
+# MUXIFY_TEST_RETRIES (unset or 0: none; CI sets 2) retries the classes that failed, as scripts/test-linux-swift.sh
+# says, and then scripts/report-flaky-tests.py names each test that failed and then passed as FLAKY. A stress run
+# never retries.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,8 +48,10 @@ options+=(${TEST_LINUX_DOCKER_ARGS:-})
 
 stress="${STRESS:-}"
 time_scale="${MUXIFY_TEST_TIME_SCALE:-}"
+retries="${MUXIFY_TEST_RETRIES:-0}"
 if [ -n "$stress" ]; then
   time_scale=3
+  retries=0
 fi
 
 # The docker client neither stops nor stops its container on a signal, so docker runs in the background, and an
@@ -61,13 +67,13 @@ docker run --rm --name "$container" ${options[@]+"${options[@]}"} \
   -v "$ROOT:/src" -v "$CACHE_VOLUME:/cache" -w /src \
   -e TMUX_VERSION="$TMUX_VERSION" -e TMUX_SHA256="$TMUX_SHA256" \
   -e OWNER_UID="$(id -u)" -e OWNER_GID="$(id -g)" \
-  -e MUXIFY_TEST_TIME_SCALE="$time_scale" -e STRESS="$stress" -e STRESS_ITERATIONS="${STRESS_ITERATIONS:-5}" \
+  -e MUXIFY_TEST_TIME_SCALE="$time_scale" -e MUXIFY_TEST_RETRIES="$retries" -e STRESS="$stress" -e STRESS_ITERATIONS="${STRESS_ITERATIONS:-5}" \
   -e STRESS_FILTER="${STRESS_FILTER:-}" -e STRESS_PACKAGE="${STRESS_PACKAGE:-both}" \
   "$HOST_CLI_SWIFT_IMAGE" bash -euo pipefail -c '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null
     apt-get install -y -qq --no-install-recommends git ca-certificates curl make bison pkg-config \
-      libevent-dev libncurses-dev >/dev/null
+      libevent-dev libncurses-dev python3 >/dev/null
 
     tmux_dir="/cache/tmux-$TMUX_VERSION-$(uname -m)"
     if [ ! -x "$tmux_dir/bin/tmux" ]; then
@@ -90,7 +96,12 @@ docker run --rm --name "$container" ${options[@]+"${options[@]}"} \
       hog=(scripts/with-cpu-hog.sh)
     fi
     runuser -u tester -- env HOME=/cache/home MUXIFY_REQUIRE_TMUX=1 MUXIFY_TEST_TIME_SCALE="$MUXIFY_TEST_TIME_SCALE" \
-      STRESS="$STRESS" STRESS_ITERATIONS="$STRESS_ITERATIONS" STRESS_FILTER="$STRESS_FILTER" STRESS_PACKAGE="$STRESS_PACKAGE" \
+      MUXIFY_TEST_RETRIES="$MUXIFY_TEST_RETRIES" STRESS="$STRESS" STRESS_ITERATIONS="$STRESS_ITERATIONS" STRESS_FILTER="$STRESS_FILTER" STRESS_PACKAGE="$STRESS_PACKAGE" \
       ${hog[@]+"${hog[@]}"} scripts/test-linux-swift.sh
   ' &
-wait $!
+status=0
+wait $! || status=$?
+if [ "$retries" != 0 ]; then
+  "$ROOT/scripts/report-flaky-tests.py" --linux "$ROOT/build/test-linux"
+fi
+exit "$status"

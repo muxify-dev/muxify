@@ -58,8 +58,15 @@ test: project
 	# The verify runner's own tests (scripts/verify/test_run.py). They never launch the app, so they run here, not in make verify.
 	python3 -m unittest scripts.verify.test_run
 	# xcodebuild's parallel output names a failed test but not why, so a failed run prints each failure's message and
-	# line from the result bundle.
-	$(XCODEBUILD_TEST) || { status=$$?; ./scripts/print-test-failures.py; exit $$status; }
+	# line from the result bundle. MUXIFY_TEST_RETRIES (unset or 0: none; CI sets 2) retries a failed test that many
+	# times, and then each test that failed and then passed is named FLAKY (docs/testing.md).
+	retries="$${MUXIFY_TEST_RETRIES:-0}"; \
+	case "$$retries" in ''|*[!0-9]*) echo "MUXIFY_TEST_RETRIES is a number of retries, not $$retries" >&2; exit 2;; esac; \
+	retry=; [ "$$retries" -eq 0 ] || retry="-retry-tests-on-failure -test-iterations $$((retries + 1))"; \
+	status=0; $(XCODEBUILD_TEST) $$retry || status=$$?; \
+	[ "$$status" -eq 0 ] || ./scripts/print-test-failures.py; \
+	[ "$$retries" -eq 0 ] || ./scripts/report-flaky-tests.py; \
+	exit $$status
 
 # make test's xcodebuild test run, without the lints and the Python unittests, with the time scale 3, a CPU hog on every
 # core, twice the core count of test workers, and STRESS_ITERATIONS iterations that stop at the first failure. It never

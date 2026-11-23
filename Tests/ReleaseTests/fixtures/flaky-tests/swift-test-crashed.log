@@ -1,0 +1,42 @@
+Building for debugging...
+[Pre-planning 1 / 332]
+[1 / 5] MuxifyCoreTests-product
+[6 / 16] MuxifyCoreTests-product
+[15 / 18] MuxifyCoreTests-product
+[19 / 21] MuxifyCoreTests-test-runner
+Build complete! (2.33 secs)
+Test Suite 'All tests' started at 2026-11-23 12:04:37.252
+Test Suite 'Debug-linux-aarch64.xctest' started at 2026-11-23 12:04:37.252
+Test Suite 'AgentGuardTests' started at 2026-11-23 12:04:37.252
+Test Case 'AgentGuardTests.testAnAgentInAnotherWorktreeOfTheRepositoryDoesNotCount' started at 2026-11-23 12:04:37.252
+Test Case 'AgentGuardTests.testAnAgentInAnotherWorktreeOfTheRepositoryDoesNotCount' passed (0.001 seconds)
+[… trimmed: the classes from AgentMarkTests to TagTests passed …]
+Test Case 'TagTests.testTopicsTagsDefinesTagsInConfigOrderWithAColor' started at 2026-11-23 12:07:11.439
+Test Case 'TagTests.testTopicsTagsDefinesTagsInConfigOrderWithAColor' passed (0.002 seconds)
+Test Suite 'TagTests' passed at 2026-11-23 12:07:11.441
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.211 (0.211) seconds
+Test Suite 'ThrowawayFlakyTests' started at 2026-11-23 12:07:11.441
+Test Case 'ThrowawayFlakyTests.testACrashesOnceThenPasses' started at 2026-11-23 12:07:11.441
+MuxifyCoreTests/ThrowawayFlakyTests.swift:15: Fatal error: throwaway: the first attempt crashes
+
+*** Signal 5: Backtracing from 0xffffb3e8c858... done ***
+
+*** Program crashed: System trap at 0x0000ffffb3e8c858 ***
+
+Platform: arm64 Linux (Ubuntu 24.04.5 LTS)
+
+Thread 0 "MuxifyCoreTests" crashed:
+
+ 0               0x0000ffffb3e8c858 _assertionFailure(_:_:file:line:flags:) + 208 in libswiftCore.so
+ 1 [ra]          0x0000ffffb47bf380 ThrowawayFlakyTests.testACrashesOnceThenPasses() + 211 in MuxifyCoreTests.so at /src/Packages/MuxifyCore/Tests/MuxifyCoreTests/ThrowawayFlakyTests.swift:15:33
+ 2 [ra] [system] 0x0000aaaadeff63bc implicit closure #1104 in implicit closure #1103 in __allDiscoveredTests() + 35 in MuxifyCoreTests-test-runner at /cache/build/aarch64/core/out/Intermediates.noindex/MuxifyCore.build/Debug-linux-aarch64/MuxifyCoreTests-test-runner.build/DerivedSources/test_entry_point.swift
+ 3 [ra] [thunk]  0x0000aaaadefd2294 thunk for @escaping @callee_guaranteed () -> () + 19 in MuxifyCoreTests-test-runner at //<compiler-generated>
+[… trimmed: the rest of the backtrace …]
+Backtrace took 0.28s
+
+◇ Test run started.
+↳ Testing Library Version: 6.4.2 (288a2328ff84644)
+↳ Target Platform: aarch64-unknown-linux-gnu
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+Note: Some test targets reported failures:
+  - MuxifyCoreTests (XCTest)
