@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class EnvironmentSelectorTests: XCTestCase {
     /// Render the real Menu through AppKit, not just its isolated SwiftUI label:
@@ -42,7 +43,7 @@ final class EnvironmentSelectorTests: XCTestCase {
         host.frame = frame
         window.layoutIfNeeded()
         host.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        waitForTheMainQueue()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
         withExtendedLifetime(window) {}

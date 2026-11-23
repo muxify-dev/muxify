@@ -1,6 +1,7 @@
 import XCTest
 import Darwin
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class CommandRunnerTests: XCTestCase {
     func testDefaultEnvironmentInheritsProcessChanges() throws {
@@ -34,7 +35,8 @@ final class CommandRunnerTests: XCTestCase {
         XCTAssertThrowsError(try CommandRunner().run(
             CommandInvocation(executable: "/bin/sh", arguments: ["-c", "trap '' TERM; while :; do :; done"]), timeout: 0.1
         )) { XCTAssertEqual($0 as? TmuxError, .timedOut) }
-        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+        // Speed is the behaviour: the deadline and the kill a quarter second after it end the run in under half a second.
+        XCTAssertLessThan(Date().timeIntervalSince(started), scaled(3))
     }
 
     func testCancellationStopsAnInFlightProcessAndPreventsFutureLaunches() {

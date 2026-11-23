@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class AppWindowsTests: XCTestCase {
     private static let config = """
@@ -428,10 +429,8 @@ final class AppWindowsTests: XCTestCase {
             XCTAssertFalse(native.isKeyWindow)
             // Wait for the hold delay to pass rather than for a fixed time: a busy
             // CI runner can wake the delay's timer late.
-            let deadline = Date().addingTimeInterval(2)
-            while first.hintHold.visibleModifiers == nil, Date() < deadline {
-                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-            }
+            eventually("the hold never showed Hints") { first.hintHold.visibleModifiers != nil }
+            // absence: the other App Window shows no Hints for the event once the hold's delay has passed.
             RunLoop.main.run(until: Date().addingTimeInterval(0.1))
             XCTAssertEqual(first.hintHold.visibleModifiers, .control, "Only the event's App Window shows Hints")
             XCTAssertNil(second.hintHold.visibleModifiers)

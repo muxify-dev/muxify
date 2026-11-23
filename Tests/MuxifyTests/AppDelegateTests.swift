@@ -1,4 +1,5 @@
 import AppKit
+import MuxifyTestSupport
 import XCTest
 
 final class AppDelegateTests: XCTestCase {
@@ -46,7 +47,7 @@ final class AppDelegateTests: XCTestCase {
         XCTAssertEqual(replies, 0)
         finish?()
         finish?()
-        wait(for: [replied], timeout: 2)
+        wait(for: [replied], timeout: scaled(10))
         XCTAssertEqual(replies, 1)
         XCTAssertEqual(delegate.requestTermination { XCTFail("Already finished") }, .terminateNow)
     }
@@ -61,7 +62,7 @@ final class AppDelegateTests: XCTestCase {
             replied.fulfill()
         }, .terminateLater)
         returned = true
-        wait(for: [replied], timeout: 2)
+        wait(for: [replied], timeout: scaled(10))
     }
 
     @MainActor func testBackgroundCleanupRepliesOnTheMainThread() {
@@ -72,6 +73,6 @@ final class AppDelegateTests: XCTestCase {
             XCTAssertTrue(Thread.isMainThread)
             replied.fulfill()
         }, .terminateLater)
-        wait(for: [replied], timeout: 2)
+        wait(for: [replied], timeout: scaled(10))
     }
 }

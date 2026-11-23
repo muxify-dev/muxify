@@ -129,7 +129,7 @@ final class SidebarRenderingTests: XCTestCase {
     @MainActor private func snapshot<V: View>(_ host: NSHostingView<V>) throws -> (width: CGFloat, height: CGFloat, ink: Int) {
         host.window?.layoutIfNeeded()
         host.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        waitForTheMainQueue()
         let image = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: image)
         var ink = 0

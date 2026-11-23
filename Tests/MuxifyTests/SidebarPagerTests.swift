@@ -3,6 +3,7 @@ import Observation
 import SwiftUI
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 @Observable private final class PagerModel {
     var mode = SidebarMode.board
@@ -100,7 +101,8 @@ final class SidebarPagerTests: XCTestCase {
     private var window: NSWindow!
     private var counted = false
 
-    override func setUp() async throws {
+    // Synchronous, so the main queue can run while it settles: an async setUp runs in a main-queue job.
+    override func setUp() {
         _ = NSApplication.shared
         // Diagnostics turns the body counter on in the app; no Diagnostics runs here.
         counted = BodyCount.isOn
@@ -120,7 +122,7 @@ final class SidebarPagerTests: XCTestCase {
         settle()
     }
 
-    override func tearDown() async throws {
+    override func tearDown() {
         window.close()
         window = nil
         BodyCount.isOn = counted
@@ -129,7 +131,7 @@ final class SidebarPagerTests: XCTestCase {
     private func settle() {
         window.layoutIfNeeded()
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        waitForTheMainQueue()
         CATransaction.flush()
     }
 
@@ -165,7 +167,8 @@ final class SidebarPagerTests: XCTestCase {
         let updates = slide.updates
         for translation in [-10, -30, -55, -80] as [CGFloat] {
             slide.track(translation)
-            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            // Each step gives SwiftUI the turn of the main queue in which it would update the pages.
+            waitForTheMainQueue()
             CATransaction.flush()
         }
         XCTAssertEqual(slide.updates, updates, "a swipe made SwiftUI update the pages container")
@@ -212,9 +215,7 @@ final class SidebarPagerTests: XCTestCase {
         #if DEBUG
         XCTAssertTrue(SidebarPagerMotion.isMoving, "the verify driver would not wait for the settle")
         #endif
-        let deadline = Date().addingTimeInterval(3)
-        while slide.isMoving, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
-        XCTAssertFalse(slide.isMoving, "the settle never ended")
+        eventually("the settle never ended") { !slide.isMoving }
         #if DEBUG
         XCTAssertFalse(SidebarPagerMotion.isMoving, "the pager still moves for the verify driver after the settle")
         #endif

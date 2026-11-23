@@ -1,3 +1,4 @@
+import MuxifyTestSupport
 import Observation
 import XCTest
 
@@ -23,7 +24,8 @@ final class ObservedCacheTests: XCTestCase {
         source.value = 2
 
         XCTAssertEqual(readDuringChange.value, 10, "the read during the change sees the old value")
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        // The value built during the change is dropped on the next turn of the main queue.
+        waitForTheMainQueue()
         XCTAssertEqual(cache.value, 20)
     }
 

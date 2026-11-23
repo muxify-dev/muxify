@@ -34,14 +34,13 @@ final class RemoteTmuxTests: XCTestCase {
 
         var marker: [String] = []
         var snapshot: TmuxSnapshot?
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline {
+        // The assert below reports a timeout, with the Terminal's output.
+        eventually("", fail: { _, _, _ in }) {
             marker = ((try? remote(["show-option", "-sqv", ssh.markerOption])) ?? "")
                 .trimmingCharacters(in: .newlines).components(separatedBy: Tmux.separator)
             snapshot = try? Tmux.readSnapshot(using: remote)
-            if marker.count == 5, let pid = Int(marker[0]),
-               snapshot?.clients.contains(where: { $0.pid == pid && $0.tty == marker[1] && !$0.isControl }) == true { break }
-            Thread.sleep(forTimeInterval: 0.02)
+            guard marker.count == 5, let pid = Int(marker[0]) else { return false }
+            return snapshot?.clients.contains(where: { $0.pid == pid && $0.tty == marker[1] && !$0.isControl }) == true
         }
         XCTAssertEqual(marker.count, 5, (try? String(contentsOf: log, encoding: .utf8)) ?? "No terminal output")
         guard marker.count == 5 else { return }
@@ -68,10 +67,8 @@ final class RemoteTmuxTests: XCTestCase {
         other.standardError = FileHandle.nullDevice
         try other.run()
         defer { host.stop(other) }
-        let otherDeadline = Date().addingTimeInterval(3)
-        while Date() < otherDeadline {
-            if (try? Tmux.readSnapshot(using: remote).clients.contains { $0.pid == Int(other.processIdentifier) }) == true { break }
-            Thread.sleep(forTimeInterval: 0.02)
+        eventually("the other control Client did not attach") {
+            (try? Tmux.readSnapshot(using: remote).clients.contains { $0.pid == Int(other.processIdentifier) }) == true
         }
 
         let name = "quotes ' ; $(echo wrong) 😃"
@@ -156,19 +153,21 @@ final class RemoteTmuxTests: XCTestCase {
             return (ssh, terminal)
         }
         func ready(_ ssh: RemoteSSH) throws -> TmuxSnapshot {
-            let deadline = Date().addingTimeInterval(5)
-            while Date() < deadline {
-                if let snapshot = try? Tmux.readSnapshot(using: host.raw),
-                   let marker = try? host.raw(["show-option", "-sqv", ssh.markerOption]),
-                   let pid = Int(marker.components(separatedBy: Tmux.separator)[0]),
-                   snapshot.clients.contains(where: { $0.pid == pid }) { return snapshot }
-                Thread.sleep(forTimeInterval: 0.02)
+            var ready: TmuxSnapshot?
+            eventually("the connection's Terminal Client did not attach") {
+                guard let snapshot = try? Tmux.readSnapshot(using: host.raw),
+                      let marker = try? host.raw(["show-option", "-sqv", ssh.markerOption]),
+                      let pid = Int(marker.components(separatedBy: Tmux.separator)[0]),
+                      snapshot.clients.contains(where: { $0.pid == pid }) else { return false }
+                ready = snapshot
+                return true
             }
-            throw TmuxError.notReady
+            guard let ready else { throw TmuxError.notReady }
+            return ready
         }
         func exited(_ terminal: Process, owner: RemoteSSH) throws {
-            let deadline = Date().addingTimeInterval(5)
-            while terminal.isRunning, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+            // The assert below reports a timeout, with the Terminal's output.
+            eventually("", fail: { _, _, _ in }) { !terminal.isRunning }
             let log = logs[terminal.processIdentifier].flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "No terminal output"
             XCTAssertFalse(terminal.isRunning, "SSH status: \(String(describing: owner.exitStatus)); output: \(log.suffix(2000))")
             if terminal.isRunning { throw TmuxError.timedOut }
@@ -216,16 +215,10 @@ final class RemoteTmuxTests: XCTestCase {
         listener.standardError = FileHandle.nullDevice
         try listener.run()
         defer { host.stop(listener); withExtendedLifetime(listenerInput) {} }
-        let listening = Date().addingTimeInterval(5)
-        while Date() < listening, !((try? ready(second))?.clients.contains(where: \.isControl) ?? false) {
-            Thread.sleep(forTimeInterval: 0.02)
-        }
-        XCTAssertTrue(try ready(second).clients.contains(where: \.isControl), "The listener attached")
+        eventually("The listener attached") { (try? ready(second))?.clients.contains(where: \.isControl) ?? false }
         _ = try host.raw(["kill-pane", "-t", otherTarget])
         try exited(secondTerminal, owner: second)
-        let listenerEnd = Date().addingTimeInterval(5)
-        while listener.isRunning, Date() < listenerEnd { Thread.sleep(forTimeInterval: 0.02) }
-        XCTAssertFalse(listener.isRunning, "The listener ends itself when its Terminal Client ends")
+        eventually("The listener ends itself when its Terminal Client ends") { !listener.isRunning }
         let survivors = try XCTUnwrap(second.closedSnapshot)
         XCTAssertEqual(survivors.windows.map(\.sessionName), ["project"])
         XCTAssertEqual(survivors.windows.map(\.name), ["✳ agent"])

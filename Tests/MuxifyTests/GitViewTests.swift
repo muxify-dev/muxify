@@ -1,4 +1,5 @@
 import AppKit
+import MuxifyTestSupport
 import SwiftUI
 import XCTest
 @testable import MuxifyCore
@@ -2836,6 +2837,8 @@ final class GitViewWatchingTests: XCTestCase {
 
     private let watcher = FakeWatcher()
     private var reads = 0
+    /// When each read started, by system uptime.
+    private var readStarts: [TimeInterval] = []
     /// The read running, ended by calling it.
     private var finishRead: (() -> Void)?
     /// Kept, as the store keeps its Git Views: the watcher holds it weakly.
@@ -2854,22 +2857,13 @@ final class GitViewWatchingTests: XCTestCase {
         gitView.changeTiming = (settle: 0.05, spacing: 0.3)
         gitView.readAfterChange = { [unowned self] done in
             reads += 1
+            readStarts.append(ProcessInfo.processInfo.systemUptime)
             finishRead = done
         }
         gitView.apply(snapshot)
         gitView.startWatching()
         self.gitView = gitView
         return gitView
-    }
-
-    private func spin(_ seconds: TimeInterval) {
-        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
-    }
-
-    /// Waits for something to happen rather than a fixed time, which a slow machine can overrun.
-    private func spin(until done: () -> Bool) {
-        let deadline = Date().addingTimeInterval(2)
-        while !done(), Date() < deadline { spin(0.01) }
     }
 
     func testItWatchesTheTopFolderAndAnOutsideCommonGitDirectory() {
@@ -2890,29 +2884,34 @@ final class GitViewWatchingTests: XCTestCase {
         // Back to back, so no settle can end inside the burst on a slow machine; each change still restarts it.
         for _ in 0..<5 { watcher.change() }
         XCTAssertEqual(reads, 0, "it read before the burst settled")
-        spin { reads > 0 }
+        eventually("the burst started no read") { reads > 0 }
         XCTAssertEqual(reads, 1)
         finishRead?()
-        spin(0.5)
+        // absence: the burst, read once, reads no more after the read ends.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
         XCTAssertEqual(reads, 1)
     }
 
     func testOneReadRunsAtATimeAndChangesDuringItReadOnceAfterTheSpacing() {
-        watchingGitView().changeTiming = (settle: 0.05, spacing: 0.8)
+        let spacing = 0.8
+        watchingGitView().changeTiming = (settle: 0.05, spacing: spacing)
         watcher.change()
-        spin { reads > 0 }
+        eventually("a change started no read") { reads > 0 }
         XCTAssertEqual(reads, 1)
         watcher.change()
         watcher.change()
-        spin(0.2)
+        // absence: the changes during the read start no second read while it runs.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         XCTAssertEqual(reads, 1, "a second read started while the first ran")
         finishRead?()
-        spin(0.05)
-        XCTAssertEqual(reads, 1, "the next read started before the spacing since the last")
-        spin { reads > 1 }
+        eventually("the changes during the read were not read after it") { reads > 1 }
         XCTAssertEqual(reads, 2, "the changes during the read were not read after it")
+        // By the times the reads started, not a spin, which a slow machine overruns past the spacing.
+        XCTAssertGreaterThanOrEqual(readStarts[1] - readStarts[0], spacing - 0.001,
+                                    "the next read started before the spacing since the last")
         finishRead?()
-        spin(0.4)
+        // absence: the changes during the first read are read once, not again after the second read.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
         XCTAssertEqual(reads, 2)
     }
 
@@ -2925,14 +2924,13 @@ final class GitViewWatchingTests: XCTestCase {
         var changes = 0
         fileWatcher.start(GitWatchedRepository(root: folder.path, commonDirectory: folder.path + "/.git")) { changes += 1 }
         try "one\n".write(to: folder.appendingPathComponent("a.txt"), atomically: false, encoding: .utf8)
-        let deadline = Date().addingTimeInterval(5)
-        while changes == 0, Date() < deadline { spin(0.05) }
-        XCTAssertGreaterThan(changes, 0, "FSEvents reported no change")
+        eventually("FSEvents reported no change") { changes > 0 }
+        // Events come on the main queue, where the stop runs, so none comes after it.
         fileWatcher.stop()
-        spin(0.2)
         let seen = changes
         try "two\n".write(to: folder.appendingPathComponent("b.txt"), atomically: false, encoding: .utf8)
-        spin(0.5)
+        // absence: a stopped watcher reports nothing for a write.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
         XCTAssertEqual(changes, seen, "a stopped watcher reported a change")
     }
 
@@ -2955,9 +2953,13 @@ final class GitViewWatchingTests: XCTestCase {
         defer { watch.stop() }
         // On the main thread before the probe's result can come back to it.
         try "new\n".write(to: folder.appendingPathComponent("a.txt"), atomically: false, encoding: .utf8)
-        spin { events.contains(where: \.changed) }
+        // The first event, the probe's whole state, comes first; only a change after it reports the file. FSEvents can
+        // take its time on a busy machine, so the wait is the shared one, not a short spin.
+        eventually("the subscription sent no first event") { !events.isEmpty }
         XCTAssertEqual(events.first?.changed, false, "the first event is not the whole state: \(events)")
-        XCTAssertTrue(events.dropFirst().contains(where: \.changed), "the file written during the probe came as no change: \(events)")
+        eventually("the file written during the probe came as no change: \(events)") {
+            events.dropFirst().contains(where: \.changed)
+        }
     }
 
     func testASuspendedOrClosedGitViewWatchesNothingAndIgnoresChanges() {
@@ -2968,7 +2970,8 @@ final class GitViewWatchingTests: XCTestCase {
         XCTAssertFalse(watcher.isRunning, "a suspended Git View still watches")
         // A report that comes late, after the stop, reads nothing either.
         report?()
-        spin(0.2)
+        // absence: a change, and a late report after the suspend, start no read.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         XCTAssertEqual(reads, 0, "a change read after the suspend")
         // Resumed, it watches again; stopped, as on close, it ignores changes again.
         gitView.startWatching()
@@ -2976,7 +2979,8 @@ final class GitViewWatchingTests: XCTestCase {
         gitView.stopWatching()
         XCTAssertFalse(watcher.isRunning)
         report?()
-        spin(0.2)
+        // absence: a late report after the stop starts no read.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         XCTAssertEqual(reads, 0)
         // A Git View that never opened watches nothing.
         let other = FakeWatcher()
@@ -3018,16 +3022,6 @@ final class RepositoryWatcherTests: XCTestCase {
 
     private let repository = GitWatchedRepository(root: "/repo", commonDirectory: "/repo/.git")
 
-    private func spin(_ seconds: TimeInterval) {
-        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
-    }
-
-    /// Waits for something to happen rather than a fixed time, which a slow machine can overrun.
-    private func spin(until done: () -> Bool) {
-        let deadline = Date().addingTimeInterval(2)
-        while !done(), Date() < deadline { spin(0.01) }
-    }
-
     func testTheFirstEventReportsNothingAndEachChangeReports() {
         let watcher = makeWatcher()
         watcher.start(repository) { self.changes += 1 }
@@ -3066,10 +3060,11 @@ final class RepositoryWatcherTests: XCTestCase {
         gitView.startWatching()
         XCTAssertEqual(subscriptions.count, 1)
         subscriptions[0].onEvent(RepositoryEvent(head: "main", repository: true, changed: false))
-        spin(0.1)
+        // absence: the first event, the whole state, starts no read.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         XCTAssertEqual(reads, 0, "the first event started a read")
         subscriptions[0].onEvent(RepositoryEvent(head: "main", repository: true, changed: true))
-        spin { reads > 0 }
+        eventually("a change started no read") { reads > 0 }
         XCTAssertEqual(reads, 1, "a change started no read")
         gitView.suspend()
         XCTAssertTrue(subscriptions[0].cancelled, "a suspended Git View keeps its subscription")

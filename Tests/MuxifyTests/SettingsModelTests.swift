@@ -1,5 +1,6 @@
 import XCTest
 import MuxifyCore
+import MuxifyTestSupport
 
 @MainActor
 final class SettingsModelTests: XCTestCase {
@@ -50,7 +51,7 @@ final class SettingsModelTests: XCTestCase {
         let size = try setting("ui.font_size")
         model.set(size, to: "99")
         XCTAssertTrue(model.field(size).problems.isEmpty, "the check waits for a pause in typing")
-        for _ in 0..<40 where model.field(size).problems.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        await eventually("the typed change was never checked") { !model.field(size).problems.isEmpty }
         XCTAssertEqual(model.field(size).problems.count, 1)
     }
 

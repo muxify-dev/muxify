@@ -1,4 +1,5 @@
 import AppKit
+import MuxifyTestSupport
 import XCTest
 @testable import MuxifyCore
 
@@ -28,10 +29,6 @@ final class EnvironmentLinkStoreTests: XCTestCase {
     }
 
     /// Runs the main run loop until `condition` holds, for a store whose link changes after a background cleanup.
-    private func wait(until condition: () -> Bool, timeout: TimeInterval = 5) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
-    }
 
     func testWithTwoAppWindowsOnlyTheKeyOneAsksItsPublisherToWriteColourReports() throws {
         let links = [FakeEnvironmentLink(), FakeEnvironmentLink()]
@@ -156,7 +153,7 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         XCTAssertTrue(links[0].isConnected)
 
         store.reconcileEnvironments()
-        wait { links.count == 2 && links[1].isConnected }
+        eventually("the new Environment got no connected link") { links.count == 2 && links[1].isConnected }
         XCTAssertEqual(links.count, 2, "a link never changes target: the new Environment gets a new one")
         XCTAssertTrue(links[1].isConnected)
         XCTAssertTrue(links[0].isRetired)
@@ -405,22 +402,23 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         defer { subscription.cancel() }
 
         link.reloadConfig()
-        try await waitAsync("the Sessions-only link read no Config") { configs.count == 1 }
+        await eventually("the Sessions-only link read no Config") { configs.count == 1 }
         XCTAssertEqual(configs.first?.path, file.path)
         XCTAssertEqual(configs.first?.shownPath, "~/.config/muxify/config.yaml")
         XCTAssertEqual(configs.first?.text, "override: ~/machine.yaml\nui:\n  header_height: 30\n")
         XCTAssertEqual(configs.first?.overrides, [.init(path: "~/machine.yaml", text: "ui:\n  header_height: 40\n")])
 
         try "ui:\n  header_height: 50\n".write(to: file, atomically: true, encoding: .utf8)
+        // absence: a Sessions-only link does not watch the Config, so the write sends nothing.
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(configs.count, 1, "a Sessions-only link does not watch the Config")
         link.reloadConfig()
-        try await waitAsync("Reload Config did not read the Config again") { configs.count == 2 }
+        await eventually("Reload Config did not read the Config again") { configs.count == 2 }
         XCTAssertEqual(configs.last?.text, "ui:\n  header_height: 50\n")
 
         try FileManager.default.removeItem(at: file)
         link.reloadConfig()
-        try await waitAsync("a removed Config was not read as missing") { configs.count == 3 }
+        await eventually("a removed Config was not read as missing") { configs.count == 3 }
         XCTAssertEqual(configs.last?.isMissing, true)
     }
 
@@ -436,14 +434,6 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         XCTAssertNil(window, "a Session request goes to the service, which a link that is not connected has not")
         XCTAssertFalse(SessionsOnlyEnvironmentLink.noRecords.state.path.hasPrefix(MuxifyPaths().state.path),
                        "a Sessions-only service never reads this Mac's Topic records")
-    }
-
-    private func waitAsync(_ message: String, seconds: TimeInterval = 10, until condition: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while !condition() {
-            guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
     }
 
     func testARetiredLinkEndsItsRequestsCancelled() async throws {

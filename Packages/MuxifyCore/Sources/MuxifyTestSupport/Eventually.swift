@@ -83,6 +83,21 @@ public func eventually(_ message: @autoclosure () -> String, timeout: TimeInterv
     return true
 }
 
+/// Waits until the main queue has run the work queued on it before the call, such as the update that SwiftUI or
+/// AppKit queued for a change: a signal, where a short run of the run loop guesses how long that work takes. Call it on
+/// the main thread, as a view test runs.
+@available(*, noasync, message: "an async test awaits the main actor instead")
+public func waitForTheMainQueue(file: StaticString = #filePath, line: UInt = #line) {
+    // A task on the main actor runs in a job of the main queue, which cannot run anything else until the job ends.
+    guard !withUnsafeCurrentTask(body: { $0 != nil }) else {
+        return XCTFail("waitForTheMainQueue was called in a task, where the main queue cannot run: call it from "
+                       + "synchronous code, such as a synchronous setUp or test", file: file, line: line)
+    }
+    var ran = false
+    DispatchQueue.main.async { ran = true }
+    eventually("the main queue did not run the work queued on it", file: file, line: line) { ran }
+}
+
 /// Waits until no new item has come for `quiet` seconds, for up to `timeout` seconds, both times the time scale, and
 /// returns the items it saw last. `items` gives every item so far; a longer collection means a new item. On timeout,
 /// when items still come, it reports `message` through `fail` and returns what it saw.

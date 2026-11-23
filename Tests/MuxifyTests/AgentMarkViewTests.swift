@@ -195,7 +195,7 @@ final class AgentMarkViewTests: XCTestCase {
         window.contentView = host
         window.layoutIfNeeded()
         host.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        waitForTheMainQueue()
         CATransaction.flush()
         return (window, host)
     }
@@ -330,7 +330,7 @@ final class AgentMarkViewTests: XCTestCase {
         defer { window.contentView = nil }
         window.layoutIfNeeded()
         host.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        waitForTheMainQueue()
         let image = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: image)
         withExtendedLifetime(window) {}

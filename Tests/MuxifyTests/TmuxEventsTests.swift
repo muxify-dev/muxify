@@ -43,25 +43,25 @@ final class TmuxEventsTests: XCTestCase {
         events.onEvent = { if case .sessionWindowChanged(_, let window) = $0 { changes.append(window) } }
         defer { events.stop() }
         events.start(invocation: server.invocation)
-        try wait("the events client did not attach") { try self.controlClients() == ["spare"] }
+        try eventually("the events client did not attach") { try self.controlClients() == ["spare"] }
         XCTAssertFalse(try sessions().contains(EnvironmentPublisher.leftoverWatchSession), "the events client made a Session")
 
         let reply = directory.appendingPathComponent("reply").path
         let probe = "stty raw -echo min 0 time 10; printf '\\033]11;?\\033\\\\'; head -c 64 > \(reply); touch \(reply).done"
         try server.run(["new-window", "-d", "-t", "work:", "sh", "-c", probe])
-        try wait("the color query did not finish") { FileManager.default.fileExists(atPath: reply + ".done") }
+        try eventually("the color query did not finish") { FileManager.default.fileExists(atPath: reply + ".done") }
         XCTAssertFalse(try String(contentsOfFile: reply, encoding: .utf8).contains("rgb:0000/0000/0000"),
                        "the events client answered a Pane's color query with black")
 
         let window = try server.run(["new-window", "-d", "-t", "work:", "-P", "-F", "#{window_id}"])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         try server.run(["select-window", "-t", window])
-        try wait("no session-window-changed from the user's Session") { changes.contains(window) }
+        try eventually("no session-window-changed from the user's Session") { changes.contains(window) }
 
         let sitting = try XCTUnwrap(try controlClients().first)
         try server.run(["kill-session", "-t", "=" + sitting])
-        try wait("the events client outlived its Session") { !events.isRunning }
-        try wait("the events client did not come back in the Session left", seconds: 5) {
+        try eventually("the events client outlived its Session") { !events.isRunning }
+        try eventually("the events client did not come back in the Session left") {
             events.start(invocation: self.server.invocation)
             return try self.controlClients().count == 1
         }
@@ -83,18 +83,19 @@ final class TmuxEventsTests: XCTestCase {
         defer { events.stop() }
         events.follow(client: terminal.tty, session: try session("work"))
         events.start(invocation: server.invocation)
-        try wait("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
+        try eventually("the Listener did not move to the Terminal's Session") { try self.controlClients() == ["work"] }
         XCTAssertEqual(try sessions().count, 3, "the Listener made a Session")
 
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
-        try wait("the Listener did not follow a switch made inside tmux") { try self.controlClients() == ["other"] }
+        try eventually("the Listener did not follow a switch made inside tmux") { try self.controlClients() == ["other"] }
         try server.run(["switch-client", "-c", terminal.tty, "-t", "=third"])
-        try wait("the Listener did not follow the next switch") { try self.controlClients() == ["third"] }
+        try eventually("the Listener did not follow the next switch") { try self.controlClients() == ["third"] }
 
         // Another Client's switch is not the Terminal's.
         let other = try attachClient(to: "work")
         defer { other.process.terminate() }
         try server.run(["switch-client", "-c", other.tty, "-t", "=other"])
+        // absence: the Listener does not follow another Client's switch.
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         XCTAssertEqual(try controlClients(), ["third"], "the Listener followed another Client")
     }
@@ -131,7 +132,7 @@ final class TmuxEventsTests: XCTestCase {
         let client = try ControlClient(binary: invocation.executable, arguments: invocation.arguments,
                                        onLines: { _ in }, onExit: {})
         defer { client.stop() }
-        try wait("the control client did not attach") { try self.controlClients() == ["work"] }
+        try eventually("the control client did not attach") { try self.controlClients() == ["work"] }
         let pid = try XCTUnwrap(pid_t(try server.run(["list-clients", "-f", "#{client_control_mode}", "-F", "#{client_pid}"])
             .trimmingCharacters(in: .whitespacesAndNewlines)))
 
@@ -152,15 +153,16 @@ final class TmuxEventsTests: XCTestCase {
         defer { kill(pid, SIGCONT) }
         let started = Date()
         lines.forEach(client.send)
-        XCTAssertLessThan(Date().timeIntervalSince(started), 1, "a send waited for the pty")
+        // Speed is the behaviour: a send queues its line rather than wait for the stopped client's full pty.
+        XCTAssertLessThan(Date().timeIntervalSince(started), scaled(1), "a send waited for the pty")
         kill(pid, SIGCONT)
 
-        try wait("tmux did not run the batch's last line", seconds: 10) {
+        try eventually("tmux did not run the batch's last line") {
             (try? self.server.run(["show-options", "-gv", "@muxify_lossless"]))?
                 .trimmingCharacters(in: .whitespacesAndNewlines) == "done"
         }
         try "".write(toFile: go, atomically: true, encoding: .utf8)
-        try wait("a probe did not answer", seconds: 10) { answers.allSatisfy { FileManager.default.fileExists(atPath: $0) } }
+        try eventually("a probe did not answer") { answers.allSatisfy { FileManager.default.fileExists(atPath: $0) } }
         for (index, answer) in answers.enumerated() {
             XCTAssertEqual(try String(contentsOfFile: answer, encoding: .utf8),
                            colours(round: rounds - 1, pane: index).background.oscReply, "Pane \(panes[index])")
@@ -183,13 +185,16 @@ final class TmuxEventsTests: XCTestCase {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
-        let deadline = Date().addingTimeInterval(8)
-        while Date() < deadline {
-            if let tty = try terminalClients().first(where: { !known.contains($0) }) { return (tty, process) }
-            Thread.sleep(forTimeInterval: 0.05)
+        var tty: String?
+        try eventually("the Terminal's Client did not attach") {
+            tty = try terminalClients().first(where: { !known.contains($0) })
+            return tty != nil
         }
-        process.terminate()
-        throw TmuxError.timedOut
+        guard let tty else {
+            process.terminate()
+            throw TmuxError.timedOut
+        }
+        return (tty, process)
     }
 
     private func terminalClients() throws -> [String] {
@@ -204,13 +209,5 @@ final class TmuxEventsTests: XCTestCase {
     private func controlClients() throws -> [String] {
         try server.run(["list-clients", "-f", "#{client_control_mode}", "-F", "#{session_name}"])
             .split(separator: "\n").map(String.init)
-    }
-
-    private func wait(_ message: String, seconds: TimeInterval = 3, until done: () throws -> Bool) throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while try !done() {
-            guard Date() < deadline else { return XCTFail(message) }
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        }
     }
 }

@@ -1,4 +1,5 @@
 import MuxifyCore
+import MuxifyTestSupport
 import XCTest
 
 final class ClearBrowserHistoryTests: XCTestCase {
@@ -112,7 +113,8 @@ final class ClearBrowserHistoryTests: XCTestCase {
         history.setEnabled(true)
         history.record(url: URL(string: "https://example.com")!, title: "", visit: .link, topic: nil)
         history.clear(.allTime)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        // The write the record scheduled, with no delay here, runs on the next turn of the main queue.
+        waitForTheMainQueue()
         history.flush()
         XCTAssertEqual(try rowKeys(history), [])
     }

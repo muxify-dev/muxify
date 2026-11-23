@@ -100,14 +100,6 @@ final class HostEnvironmentLinkTests: XCTestCase {
                              createdAt: Date(timeIntervalSince1970: 1_700_000_000))
     }
 
-    private func wait(_ message: String, seconds: TimeInterval = 10, until condition: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while !condition() {
-            guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
     private func configStore() -> ConfigStore {
         ConfigStore(path: directory.appendingPathComponent("config.yaml").path)
     }
@@ -131,7 +123,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
         defer { subscription.cancel() }
 
         link.startServer()
-        try await wait("the server's hello and first state did not give the link its features") { link.features.contains(.topics) }
+        await eventually("the server's hello and first state did not give the link its features") { link.features.contains(.topics) }
         XCTAssertEqual(link.features, [.topics, .git, .worktrees], "the Host's server keeps its Muxify Worktrees")
         XCTAssertTrue(link.publishesChanges, "the server's events replace the poll")
         XCTAssertEqual(Array(heard.prefix(2)), ["features", "topics"])
@@ -176,16 +168,17 @@ final class HostEnvironmentLinkTests: XCTestCase {
         link.reportColours(toWindow: "@1")
         XCTAssertEqual(sent.requests, [], "the link sent colours before a server answered")
         link.startServer()
-        try await wait("the server did not get the colours after its hello") { sent.requests == [ColoursRequest(light)] }
-        try await wait("the server's focus events did not reach the store") { heard == ["focus @3", "taken @4"] }
+        await eventually("the server did not get the colours after its hello") { sent.requests == [ColoursRequest(light)] }
+        await eventually("the server's focus events did not reach the store") { heard == ["focus @3", "taken @4"] }
 
         link.reportColours(dark)
         link.reportColours(toWindow: "@3")
         link.reportColours(nil)
         link.reportColours(toWindow: "@5")
-        try await wait("the reports did not reach the server in order") {
+        await eventually("the reports did not reach the server in order") {
             sent.requests == [ColoursRequest(light), ColoursRequest(dark), ColoursRequest(dark, window: "@3"), ColoursRequest(nil)]
         }
+        // absence: a report to a Window with no colours yet writes nothing.
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(sent.requests.count, 4, "a Window was written with no colours")
     }
@@ -211,14 +204,14 @@ final class HostEnvironmentLinkTests: XCTestCase {
         XCTAssertTrue(configs.isEmpty, "before the server's first item, the App Window keeps its Config")
 
         link.startServer()
-        try await wait("the server sent no Config") { !configs.isEmpty }
+        await eventually("the server sent no Config") { !configs.isEmpty }
         XCTAssertEqual(configs.last?.text, "ui:\n  header_height: 30\n")
         XCTAssertEqual(configs.last?.shownPath, "~/.config/muxify/config.yaml")
         inner.send(.config(.host(HostConfig(path: file.path, home: home.path, text: "stale"))))
         XCTAssertNotEqual(configs.last?.text, "stale", "a Sessions-only Config never reaches the store")
 
         try "ui:\n  header_height: 40\n".write(to: file, atomically: true, encoding: .utf8)
-        try await wait("an edit on the Host pushed no Config") { configs.last?.text == "ui:\n  header_height: 40\n" }
+        await eventually("an edit on the Host pushed no Config") { configs.last?.text == "ui:\n  header_height: 40\n" }
         let count = configs.count
         link.reloadConfig()
         XCTAssertEqual(inner.configReloads, 0, "a served Config needs no read")
@@ -240,7 +233,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
         }
 
         link.startServer()
-        try await wait("the server did not serve") { link.features.contains(.topics) }
+        await eventually("the server did not serve") { link.features.contains(.topics) }
         let output = try await link.sessionPathOutput(roots: roots, arguments: SessionPathDiscovery.arguments(for: roots))
         let found = SessionPathDiscovery.sessionPaths(in: try XCTUnwrap(output), roots: roots, aliases: [:]).map(\.folder.path)
         XCTAssertEqual(found, [projects.appendingPathComponent("on-host").path])
@@ -257,7 +250,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
         let link = link(build: line) { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }) }
         try link.connect()
         link.startServer()
-        try await wait("the server did not answer") { link.features.contains(.topics) }
+        await eventually("the server did not answer") { link.features.contains(.topics) }
         XCTAssertEqual(servers.first?.client?.build, line)
     }
 
@@ -275,8 +268,8 @@ final class HostEnvironmentLinkTests: XCTestCase {
         try link.connect()
         link.setOpenConsumer(true)
         link.startServer()
-        try await wait("the server did not answer") { link.features.contains(.topics) }
-        try await wait("the consumer's server did not name its socket") { option() == path }
+        await eventually("the server did not answer") { link.features.contains(.topics) }
+        await eventually("the consumer's server did not name its socket") { option() == path }
 
         let tabs = try await send(BrowserAgentRequest(window: "@1", command: .tabs))
         guard case .failure(let message, _) = tabs else { return XCTFail("a request with no handler answered \(tabs)") }
@@ -302,7 +295,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
         XCTAssertEqual(selected, [.window("@3")])
 
         link.setOpenConsumer(false)
-        try await wait("a window that stopped consuming @muxify_open left its socket") { option().isEmpty }
+        await eventually("a window that stopped consuming @muxify_open left its socket") { option().isEmpty }
     }
 
     func testAClosedChannelFailsAWaitingMutationWhichTheStoreReportsAndNeverSendsAgain() async throws {
@@ -311,6 +304,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
         let gate = Gate()
         let link = link { number in
             HostServerContext(paths: paths, tmux: tmux, config: {
+                // absence: the stalled Config keeps the request waiting, so the store reports nothing before the drop.
                 if number == 0, gate.isClosed { try await Task.sleep(nanoseconds: 30_000_000_000) }
                 if number == 1 { gate.countSecond() }
                 return Config()
@@ -322,20 +316,22 @@ final class HostEnvironmentLinkTests: XCTestCase {
         store.showAlert = { _, text in alerts.append(text) }
         store.startLinkForTesting()
         link.startServer()
-        try await wait("the server did not answer") { store.link.features.contains(.topics) }
+        await eventually("the server did not answer") { store.link.features.contains(.topics) }
 
         gate.close()
         XCTAssertTrue(store.perform(EnvironmentRequest(.create(title: "Lost"))))
+        // absence: the request waits on the server, so the store reports nothing yet.
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(alerts, [], "the request waits on the server")
         try serverOutputs[0].close()
 
-        try await wait("the store did not report the request that the drop left uncertain") { !alerts.isEmpty }
+        await eventually("the store did not report the request that the drop left uncertain") { !alerts.isEmpty }
         XCTAssertEqual(alerts, ["box disconnected before New Topic finished. It may or may not have happened."])
 
         // The link says the server stopped while the master lives; the store starts it again on a new channel.
-        try await wait("the server did not start again", seconds: 15) { servers.count == 2 && store.link.features.contains(.topics) }
+        await eventually("the server did not start again", timeout: 15) { servers.count == 2 && store.link.features.contains(.topics) }
         let requests = gate.second
+        // absence: nothing is sent again to the new server after the reconnect.
         try await Task.sleep(nanoseconds: 500_000_000)
         XCTAssertEqual(gate.second, requests, "the new server got a request: nothing is sent again after a reconnect")
         XCTAssertFalse(try TopicStore(paths: paths).read().records.contains { $0.title == "Lost" })
@@ -349,10 +345,10 @@ final class HostEnvironmentLinkTests: XCTestCase {
         let link = link { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }, gitWriter: GitWriter(scripts: stalled)) }
         try link.connect()
         link.startServer()
-        try await wait("the server did not answer") { link.features.contains(.git) }
+        await eventually("the server did not answer") { link.features.contains(.git) }
 
         let write = Task { try await link.writeGit(.commit(root: directory.path, message: "Lost")) }
-        try await wait("the server did not start the commit") { stalled.started }
+        await eventually("the server did not start the commit") { stalled.started }
         try serverOutputs[0].close()
         do {
             _ = try await write.value
@@ -406,7 +402,7 @@ extension HostEnvironmentLinkTests {
         try link.connect()
         link.startServer()
 
-        try await wait("the Mac did not delete the row the Host took") { (try? store.waiting(for: "box").map(\.id).sorted()) == ["clash", "twin"] }
+        await eventually("the Mac did not delete the row the Host took") { (try? store.waiting(for: "box").map(\.id).sorted()) == ["clash", "twin"] }
         XCTAssertEqual(host.record("new")?.path, "/home/me/trees/new", "the taken row is the Host's record")
         XCTAssertEqual(host.record("clash")?.path, "/home/me/trees/clash", "a skipped row changes nothing on the Host")
         XCTAssertEqual(try store.waiting(for: "gone").map(\.id), ["stays"], "a row of an Environment not connected stays")
@@ -428,7 +424,8 @@ extension HostEnvironmentLinkTests {
         try link.connect()
         link.startServer()
 
-        try await wait("the Mac did not send its waiting rows after hello") { sent.isClosed }
+        await eventually("the Mac did not send its waiting rows after hello") { sent.isClosed }
+        // absence: a channel that ends before the answer deletes no waiting row.
         try await Task.sleep(nanoseconds: 500_000_000)
         XCTAssertEqual(try MuxifyWorktreeStore(paths: mac).waiting(for: "box").map(\.id), ["one", "two"], "no row was deleted")
     }
@@ -505,7 +502,7 @@ extension HostEnvironmentLinkTests {
         }
         try link.connect()
         link.startServer()
-        try await wait("the server did not answer") { link.features.contains(.git) }
+        await eventually("the server did not answer") { link.features.contains(.git) }
 
         let asked = AskLog()
         _ = try await link.runGitNetwork(.fetch(root: repo)) { request in
@@ -541,7 +538,7 @@ extension HostEnvironmentLinkTests {
         }, context: { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }) })
         try link.connect()
         link.startServer()
-        try await wait("the Mac did not answer the ask") { !code.codes.isEmpty }
+        await eventually("the Mac did not answer the ask") { !code.codes.isEmpty }
         XCTAssertEqual(code.codes, [.unavailable])
     }
 }

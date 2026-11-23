@@ -1,5 +1,6 @@
 import XCTest
 import MuxifyCore
+import MuxifyTestSupport
 
 /// The update model, fed the events that its Sparkle driver sends, as the Update Button shows them.
 @MainActor final class UpdateModelTests: XCTestCase {
@@ -95,10 +96,7 @@ import MuxifyCore
         XCTAssertEqual(model.symbol, "info.circle")
         XCTAssertFalse(model.opensPopover)
         XCTAssertEqual(logged.last, "update: no newer build")
-        let hidden = expectation(description: "hidden")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { hidden.fulfill() }
-        wait(for: [hidden], timeout: 2)
-        XCTAssertEqual(model.state, .idle)
+        eventually("No Updates Available did not hide") { model.state == .idle }
         XCTAssertEqual(acknowledged, 1)
     }
 
