@@ -1,6 +1,7 @@
 import XCTest
 import os
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// Opt-in test of the Host CLI on a real Linux or macOS host, gated like `LiveSSHTests`. It serves `build/host-cli/`
 /// from this Mac, runs the app's install over the production SSH script lane, then the phone's commands with the
@@ -115,9 +116,9 @@ final class LiveHostCLITests: XCTestCase {
             master.waitUntilExit()
             connection.cleanup()
         }
-        let masterDeadline = Date().addingTimeInterval(15)
-        while (try? runner.run(remote.control("check"))) == nil, master.isRunning, Date() < masterDeadline {
-            Thread.sleep(forTimeInterval: 0.1)
+        // A master that exits stops the wait at once, and the check below says why.
+        eventually("the SSH master did not start", timeout: 15) {
+            (try? runner.run(remote.control("check"))) != nil || !master.isRunning
         }
         XCTAssertNoThrow(try runner.run(remote.control("check")), "the SSH master did not start")
 

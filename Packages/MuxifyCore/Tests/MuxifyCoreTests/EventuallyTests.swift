@@ -33,6 +33,14 @@ final class EventuallyTests: XCTestCase {
         XCTAssertEqual(failures.messages, [])
     }
 
+    func testTheMainQueueWaitReturnsOnceTheWorkQueuedBeforeItRan() {
+        var ran: [Int] = []
+        DispatchQueue.main.async { ran.append(1) }
+        DispatchQueue.main.async { ran.append(2) }
+        waitForTheMainQueue()
+        XCTAssertEqual(ran, [1, 2])
+    }
+
     func testATimeoutReportsTheMessageWhereTheTestWaited() {
         let failures = Failures()
         let start = Date()

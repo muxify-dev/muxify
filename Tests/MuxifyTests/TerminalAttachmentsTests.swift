@@ -119,20 +119,12 @@ final class TerminalAttachmentsTests: XCTestCase {
             host.stop(terminal)
             withExtendedLifetime(input) {}
         }
-        func eventually(_ condition: () -> Bool) throws {
-            let deadline = Date().addingTimeInterval(8)
-            while Date() < deadline {
-                if condition() { return }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
-            }
-            throw TmuxError.timedOut
-        }
         var client: [String] = []
-        try eventually {
+        guard eventually("the Terminal's Client did not attach", until: {
             client = ((try? host.raw(["list-clients", "-F", "#{client_tty}|#{client_pid}"])) ?? "")
                 .trimmingCharacters(in: .newlines).components(separatedBy: "|")
             return client.count == 2 && !client[0].isEmpty && fm.fileExists(atPath: ready.path)
-        }
+        }) else { return }
         let connection = try TmuxConnection(environment: RemoteEnvironment(name: "fixture", host: "unused", username: "unused"),
                                             sshExecutable: ssh.path)
         let remote = try XCTUnwrap(connection.remote)
@@ -152,16 +144,16 @@ final class TerminalAttachmentsTests: XCTestCase {
             }
             finished.fulfill()
         }
-        try eventually { fm.fileExists(atPath: started.path) }
+        guard eventually("the paste did not start", until: { fm.fileExists(atPath: started.path) }) else { return }
         _ = try host.raw(["new-window", "-t", "paste:", "sleep 60"])
         XCTAssertNotEqual(try host.raw(["display-message", "-p", "-c", client[0], "#{pane_id}"]).trimmingCharacters(in: .newlines), pane)
         try fm.removeItem(at: hold)
         wait(for: [finished], timeout: 10)
         var pasted = ""
-        try eventually {
+        guard eventually("the pasted path did not reach the Pane", until: {
             pasted = (try? String(contentsOf: output, encoding: .utf8)) ?? ""
             return pasted.hasSuffix("\u{1b}[201~")
-        }
+        }) else { return }
         XCTAssertTrue(pasted.hasPrefix("\u{1b}[200~"))
         let path = String(pasted.dropFirst(6).dropLast(6))
         XCTAssertTrue(path.hasPrefix(root.url.path + "/muxify-paste."), pasted)

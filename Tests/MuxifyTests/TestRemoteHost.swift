@@ -63,9 +63,9 @@ final class TestRemoteHost {
     func stop(_ process: Process) {
         guard process.isRunning else { return }
         process.terminate()
-        let deadline = Date().addingTimeInterval(1)
-        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
-        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        if !eventually("", timeout: 1, fail: { _, _, _ in }, until: { !process.isRunning }) {
+            kill(process.processIdentifier, SIGKILL)
+        }
         process.waitUntilExit()
     }
 }

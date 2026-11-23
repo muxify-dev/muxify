@@ -2,6 +2,7 @@ import AppKit
 import WebKit
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class BrowserDeveloperToolsTests: XCTestCase {
     func testShowAndCloseUseThePagesInspectorAndRepeatedShowsFocusIt() {
@@ -120,20 +121,14 @@ final class BrowserDeveloperToolsTests: XCTestCase {
         // _WKInspector.webView is the inspected page, not the frontend. Find
         // the frontend among docked siblings or the newly opened native window.
         var frontend: WKWebView?
-        var frontendReady = false
         var frontendLabels = ""
-        for _ in 0..<100 {
+        await eventually("The inspector must expose Elements, Network and Console: \(frontendLabels)", timeout: 15) {
             let roots = [tab.pageView] + NSApp.windows.filter { !existingWindows.contains(ObjectIdentifier($0)) }.compactMap(\.contentView)
             frontend = roots.compactMap { inspectorWebView(in: $0, excluding: webView) }.first
             let labels = try? await frontend?.evaluateJavaScript("document.body ? document.body.innerText + '\\n' + Array.from(document.querySelectorAll('[title], [aria-label]')).map(element => (element.title || '') + ' ' + (element.getAttribute('aria-label') || '')).join('\\n') : ''")
             frontendLabels = labels as? String ?? ""
-            if ["Elements", "Network", "Console"].allSatisfy(frontendLabels.contains) {
-                frontendReady = true
-                break
-            }
-            try await Task.sleep(for: .milliseconds(100))
+            return ["Elements", "Network", "Console"].allSatisfy(frontendLabels.contains)
         }
-        XCTAssertTrue(frontendReady, "The inspector must expose Elements, Network and Console: \(frontendLabels)")
         let inspectorView = try XCTUnwrap(frontend)
         XCTAssertEqual(inspector.value(forKey: "visible") as? Bool, true)
         let value = try await webView.evaluateJavaScript("window.testValue")

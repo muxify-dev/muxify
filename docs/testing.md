@@ -67,6 +67,11 @@ three test bundles import, never with a private polling loop:
 - `settled("the subscription did not settle") { recorder.items }` waits until
   no new item has come for a quiet period (1.2 s, `quiet:`), up to a deadline,
   and returns the items it saw.
+- `waitForTheMainQueue()` waits until the main queue has run the work queued
+  on it before the call, such as the update SwiftUI queued for a change. A view
+  test calls it where it would otherwise run the run loop for a short time. It
+  works only in synchronous code: an async test or setUp runs in a job of the
+  main queue, which runs nothing else until the job ends.
 
 Both report a timeout through `fail:`, which defaults to `XCTFail`; a test of
 the waits themselves passes its own.

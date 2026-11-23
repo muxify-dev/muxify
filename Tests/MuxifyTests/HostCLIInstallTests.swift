@@ -70,7 +70,9 @@ final class HostCLIInstallTests: XCTestCase {
 
         let started = Date()
         HostCLI.install(over: connection, environmentName: "Fixture", baseURL: base, report: { reports.add($0) })
-        XCTAssertLessThan(Date().timeIntervalSince(started), 0.5, "install returns while the script still runs")
+        // Speed is the behaviour: the install returns at once, while the held script still runs.
+        XCTAssertLessThan(Date().timeIntervalSince(started), scaled(0.5), "install returns while the script still runs")
+        // absence: the held script reports nothing before it ends.
         Thread.sleep(forTimeInterval: 0.3)
         XCTAssertEqual(reports.all, [], "nothing is reported before the script ends")
 
@@ -210,8 +212,7 @@ final class HostCLIInstallTests: XCTestCase {
         try link.connect()
 
         link.installHostCLI(environmentName: "Fixture")
-        let deadline = Date().addingTimeInterval(20)
-        while unavailable == nil, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        await eventually("the link reported no unavailable Host Server", timeout: 20) { unavailable != nil }
 
         let line = "failed: cannot fetch \(base)version; from the Mac: failed: cannot fetch \(base)version"
         XCTAssertEqual(unavailable, .notInstalled(line))
@@ -347,30 +348,22 @@ final class HostCLIInstallTests: XCTestCase {
         try link.connect()
 
         link.installHostCLI(environmentName: "Fixture")
-        try await waitUntil("the Host Server from ~/.local/bin/muxify did not serve") { link.features.contains(.topics) }
+        await eventually("the Host Server from ~/.local/bin/muxify did not serve", timeout: 20) { link.features.contains(.topics) }
         let installed = root.url.appendingPathComponent("home/.local/bin/muxify")
         let firstInode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: installed.path)[.systemFileNumber] as? Int)
 
         // cli-latest moves on, and the next install replaces the file under the running server.
         try publishLinux(in: root.url, version: "muxify def5678 300", body: serve)
         link.installHostCLI(environmentName: "Fixture")
-        try await waitUntil("the second install did not finish") { installs == 2 }
+        await eventually("the second install did not finish", timeout: 20) { installs == 2 }
         XCTAssertEqual(try output(CommandInvocation(executable: installed.path, arguments: ["--version"])), "muxify def5678 300\n")
         XCTAssertNotEqual(try FileManager.default.attributesOfItem(atPath: installed.path)[.systemFileNumber] as? Int, firstInode,
                           "the install's mv gave the file a new inode")
 
         let before = changes
         try tmux.run(["new-session", "-d", "-s", "later", "-c", root.url.path])
-        try await waitUntil("the running server stopped publishing after the update") { changes > before }
+        await eventually("the running server stopped publishing after the update", timeout: 20) { changes > before }
         XCTAssertTrue(link.features.contains(.topics))
         XCTAssertEqual(channels, 1, "the Mac never restarts a live server because a newer binary appeared")
-    }
-
-    private func waitUntil(_ message: String, seconds: TimeInterval = 20, _ condition: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while !condition() {
-            guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
     }
 }

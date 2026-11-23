@@ -1,10 +1,15 @@
 import XCTest
 
 final class SwitchPaceTests: XCTestCase {
+    /// The runs of the test in this process: a repeated run starts well after the last move of the one before.
+    @MainActor private static var runs = 0
+
     /// A switch on its own animates; each switch of a quick run after the first does not, and the next switch on its
     /// own animates again.
     @MainActor func testOnlyAMoveOnItsOwnAnimates() {
-        let start = Date()
+        // The last move is kept across runs and dated up to 0.6 s ahead of its run's start, so each run starts later.
+        Self.runs += 1
+        let start = Date().addingTimeInterval(Double(Self.runs) * 10)
         SwitchPace.moved(now: start)
         XCTAssertTrue(SwitchPace.animates, "a move long after the last")
         SwitchPace.moved(now: start.addingTimeInterval(0.1))

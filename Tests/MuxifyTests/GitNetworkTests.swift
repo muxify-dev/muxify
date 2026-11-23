@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// The Git View's half of a network command: git's and ssh's questions, which come through askpass (ADR 0089), are
 /// asked in Git View prompts, and ⎋ cancels the command.
@@ -38,14 +39,6 @@ final class GitCredentialPromptTests: XCTestCase {
         return (store, gitView)
     }
 
-    private func wait(_ message: String, until condition: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(5)
-        while !condition() {
-            guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
-    }
-
     func testAQuestionOfAFetchIsAskedHiddenAndItsAnswerReachesTheCommand() async throws {
         let link = FakeEnvironmentLink(features: .all)
         var answers: [String?] = []
@@ -60,20 +53,20 @@ final class GitCredentialPromptTests: XCTestCase {
         defer { withExtendedLifetime(store) {} }
 
         gitView.fetch()
-        try await wait("the passphrase was not asked") { gitView.prompt != nil }
+        await eventually("the passphrase was not asked") { gitView.prompt != nil }
         XCTAssertEqual(gitView.prompt?.title, "Enter passphrase for key '/k/id':")
         XCTAssertTrue(gitView.prompt?.isSecret == true)
         XCTAssertEqual(gitView.networkActivity, [GitView.fetching])
         gitView.promptText = "right"
         gitView.submitPrompt()
-        try await wait("the fetch did not end") { gitView.networkActivity.isEmpty }
+        await eventually("the fetch did not end") { gitView.networkActivity.isEmpty }
         XCTAssertNil(gitView.writeError)
 
         // ⎋ cancels the command, and the banner says so.
         gitView.fetch()
-        try await wait("the passphrase was not asked again") { gitView.prompt != nil }
+        await eventually("the passphrase was not asked again") { gitView.prompt != nil }
         gitView.closePrompt()
-        try await wait("the fetch did not end") { gitView.networkActivity.isEmpty }
+        await eventually("the fetch did not end") { gitView.networkActivity.isEmpty }
         XCTAssertEqual(gitView.writeError, "Fetch cancelled.")
         XCTAssertEqual(answers, ["right", nil])
     }
@@ -83,22 +76,25 @@ final class GitCredentialPromptTests: XCTestCase {
         let refused = Box()
         link.gitNetworkAnswer = { _, ask in
             Task { @MainActor in refused.answer = await ask(AskRequest(prompt: "Password: ", secret: true, operation: "o")) ?? "refused" }
-            try await Task.sleep(nanoseconds: 200_000_000)
+            // The command ends while its question is open.
+            await eventually("the password was not asked") { await MainActor.run { refused.gitView?.prompt != nil } }
             throw TmuxError.failed(status: 128, stderr: "fatal: Authentication failed")
         }
         let (store, gitView) = gitView(link)
+        refused.gitView = gitView
         defer { withExtendedLifetime(store) {} }
 
         gitView.fetch()
-        try await wait("the password was not asked") { gitView.prompt != nil }
-        try await wait("the fetch did not end") { gitView.networkActivity.isEmpty }
+        await eventually("the fetch did not end") { gitView.networkActivity.isEmpty }
         XCTAssertNil(gitView.prompt, "a question that nothing waits for stays open")
         XCTAssertEqual(gitView.writeError, "fatal: Authentication failed")
-        try await wait("the question was never answered") { refused.answer == "refused" }
+        await eventually("the question was never answered") { refused.answer == "refused" }
     }
 }
 
 @MainActor
 private final class Box {
     var answer: String?
+    /// The Git View whose question the command waits to see open.
+    weak var gitView: GitView?
 }

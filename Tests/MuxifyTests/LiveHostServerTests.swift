@@ -1,6 +1,7 @@
 import XCTest
 import Darwin
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// Opt-in tests of the Host Server over a real SSH master, gated like `LiveSSHTests`: the install chain (A, the Host
 /// downloads; B, the Mac sends), `muxify server` on a `-T` channel of the master, `hello`, the `environment`
@@ -110,6 +111,7 @@ final class LiveHostServerTests: XCTestCase {
         // Only the handshake: no subscription, so the server sends nothing that the client would answer.
         let server = try await host.startServer(subscribing: false)
         let answered = Date()
+        // absence: the server does not exit before its silence timeout.
         try await Task.sleep(nanoseconds: UInt64((silence - 1.5) * 1_000_000_000))
         XCTAssertNil(server.channel.exitStatus(waiting: 0), "the server exited before its silence timeout")
         try await host.wait("the server outlived its silence timeout", seconds: silence + 10, server) {
@@ -335,9 +337,9 @@ private final class LiveHost: @unchecked Sendable {
         master.standardError = FileHandle.nullDevice
         try master.run()
         self.master = master
-        let deadline = Date().addingTimeInterval(15)
-        while (try? runner.run(remote.control("check"))) == nil, master.isRunning, Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.1)
+        // A master that exits stops the wait at once, and the check below says why.
+        eventually("the SSH master did not start", timeout: 15) {
+            (try? runner.run(remote.control("check"))) != nil || !master.isRunning
         }
         XCTAssertNoThrow(try runner.run(remote.control("check")), "the SSH master did not start")
     }
@@ -403,27 +405,16 @@ private final class LiveHost: @unchecked Sendable {
 
     // MARK: Waiting
 
-    func wait(_ message: String, seconds: TimeInterval, _ server: LiveServer,
+    /// The shared wait, with the Host and the server's stderr in its failure.
+    func wait(_ message: String, seconds: TimeInterval, _ server: LiveServer, file: StaticString = #filePath, line: UInt = #line,
               until done: () async throws -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while try await !done() {
-            guard Date() < deadline else {
-                return XCTFail("\(message) on \(label); server stderr: \(server.errors.lines.joined(separator: " | "))")
-            }
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
+        try await eventually("\(message) on \(label); server stderr: \(server.errors.lines.joined(separator: " | "))",
+                             timeout: seconds, file: file, line: line, until: done)
     }
 
     /// Waits until no item has come for a moment, and forgets what came before.
     func settle(_ recorder: Recorder) async throws {
-        var seen = -1
-        let deadline = Date().addingTimeInterval(15)
-        while Date() < deadline {
-            let now = recorder.items.count
-            if now == seen { break }
-            seen = now
-            try await Task.sleep(nanoseconds: 1_200_000_000)
-        }
+        await settled("the server's items did not settle on \(label)", timeout: 15) { recorder.items }
         recorder.clear()
     }
 }

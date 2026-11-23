@@ -1,6 +1,7 @@
 import XCTest
 import Darwin
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// Opt-in smoke test of the real SSH lanes on a Linux/macOS host. Its tmux
 /// server is isolated under a unique remote temp directory, not the user's.
@@ -88,11 +89,10 @@ final class LiveSSHTests: XCTestCase {
         func ready(_ connection: TmuxConnection, log: URL) throws -> TmuxSnapshot {
             var value: TmuxSnapshot?
             var lastError: Error?
-            let deadline = Date().addingTimeInterval(10)
-            while Date() < deadline {
+            // The unwrap below reports a timeout, with what the server said.
+            eventually("", timeout: 10, fail: { _, _, _ in }) {
                 do { value = try connection.snapshot() } catch { lastError = error }
-                if value != nil { break }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+                return value != nil
             }
             if let value { return value }
             let marker = try? connection.run(["show-option", "-sqv", try XCTUnwrap(connection.remote).markerOption])
@@ -138,13 +138,9 @@ final class LiveSSHTests: XCTestCase {
         events.follow(client: tty, session: main.sessionID)
         events.start(invocation: connection.invocation)
         defer { events.stop() }
-        let eventDeadline = Date().addingTimeInterval(5)
-        while Date() < eventDeadline {
-            if try connection.snapshot().clients.contains(where: \.isControl) { break }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        try eventually("the Listener's control Client did not attach") {
+            try connection.snapshot().clients.contains(where: \.isControl)
         }
-        XCTAssertTrue(try connection.snapshot().clients.contains(where: \.isControl))
-        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         let beforeMutation = notificationCount
 
         let name = "literal ' ; $(echo wrong) 😃"
@@ -163,17 +159,15 @@ final class LiveSSHTests: XCTestCase {
         XCTAssertEqual(updated.windows.first { $0.id == windowID }?.storedBrowser, stored)
         XCTAssertEqual(updated.clients.first { $0.tty == tty }?.windowID, windowID)
         XCTAssertEqual(updated.agents.first { $0.paneID == paneID }?.status, .blocked)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-        XCTAssertGreaterThan(notificationCount, beforeMutation)
+        eventually("the mutations sent no notification") { notificationCount > beforeMutation }
 
         let other = try connection.run(["new-session", "-d", "-s", "other", "-P", "-F", "#{session_id}"])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         _ = try connection.run(["switch-client", "-c", tty, "-t", other])
         XCTAssertEqual(try connection.snapshot().clients.first { $0.tty == tty }?.sessionID, other)
         // The Listener follows the Terminal's Client there on its `%client-session-changed`.
-        let following = Date().addingTimeInterval(5)
-        while Date() < following, try connection.snapshot().clients.first(where: \.isControl)?.sessionID != other {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        try eventually("the Listener did not follow the Terminal's Client") {
+            try connection.snapshot().clients.first(where: \.isControl)?.sessionID == other
         }
         XCTAssertEqual(try connection.snapshot().clients.first { $0.isControl }?.sessionID, other,
                        "the Listener sits in the Session that the Terminal shows")
@@ -265,18 +259,17 @@ final class LiveSSHTests: XCTestCase {
     }
 
     private func stopAfterExit(_ process: Process) {
-        let deadline = Date().addingTimeInterval(5)
-        while process.isRunning, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
-        XCTAssertFalse(process.isRunning, "SSH attachment did not exit")
+        eventually("SSH attachment did not exit") { !process.isRunning }
         if !process.isRunning { process.waitUntilExit() }
     }
 
     private func stop(_ process: Process) {
         guard process.isRunning else { return }
         process.terminate()
-        let deadline = Date().addingTimeInterval(1)
-        while process.isRunning, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
-        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        // Given a moment to exit on the terminate, then killed.
+        if !eventually("", timeout: 1, fail: { _, _, _ in }, until: { !process.isRunning }) {
+            kill(process.processIdentifier, SIGKILL)
+        }
         process.waitUntilExit()
     }
 }

@@ -2,6 +2,7 @@ import AppKit
 import XCTest
 import WebKit
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class BrowserTests: XCTestCase {
     @MainActor
@@ -122,8 +123,7 @@ final class BrowserTests: XCTestCase {
         let tab = BrowserTab(url: page)
         defer { tab.close() }
         let webView = tab.webView
-        let deadline = Date().addingTimeInterval(15)
-        while webView.isLoading || tab.progress == 0, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        await eventually("the missing page's load did not end", timeout: 15) { !webView.isLoading && tab.progress != 0 }
         XCTAssertNil(webView.backForwardList.currentItem, "the missing page was committed")
         XCTAssertEqual(tab.urlString, page.absoluteString)
         try "<html><title>Back</title><body>Back</body></html>".write(to: page, atomically: true, encoding: .utf8)
@@ -134,15 +134,9 @@ final class BrowserTests: XCTestCase {
     }
 
     @MainActor
-    private func waitForPage(_ webView: WKWebView, title: String) async throws {
-        let deadline = Date().addingTimeInterval(15)
-        while webView.isLoading || webView.title != title {
-            guard Date() < deadline else {
-                XCTFail("Expected page \(title), got \(webView.title ?? "nil") at \(webView.url?.absoluteString ?? "nil")")
-                return
-            }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
+    private func waitForPage(_ webView: WKWebView, title: String, file: StaticString = #filePath, line: UInt = #line) async throws {
+        await eventually("Expected page \(title), got \(webView.title ?? "nil") at \(webView.url?.absoluteString ?? "nil")",
+                         timeout: 15, file: file, line: line) { !webView.isLoading && webView.title == title }
     }
 
     @MainActor
