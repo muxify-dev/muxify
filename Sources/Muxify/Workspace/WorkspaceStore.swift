@@ -2065,8 +2065,9 @@ final class WorkspaceStore {
         }
         let newSession = startingSession
         startingSession = nil
+        let hidesStatusLine = config.statusLine.enabled && link.hidesStatusLineWhenAsked
         guard isLinked, let command = try? link.terminalCommand(args, target: target?.tmuxTarget, picksLatestSession: picksLatestSession,
-                                                                newSession: newSession),
+                                                                newSession: newSession, hidesStatusLine: hidesStatusLine),
               let view = TerminalSurfaceView(command: command, workingDirectory: link.isOnThisMac ? target?.path : nil, delegate: self)
         else {
             terminalMessage = Self.terminalStartFailure

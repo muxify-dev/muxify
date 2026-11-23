@@ -1,4 +1,11 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 
 /// The producer of the `environment` subscription (ADR 0087): it reads a whole `TmuxSnapshot`
 /// and the Topic records on this machine whenever something may have changed, compares them per key with what it sent
@@ -319,7 +326,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         let session = colours == nil ? nil : panes.first?.first
         let marked = session != nil && switchedSessions.last != session
         if marked, let session { switchedSessions.append(session) }
-        let statusLine = hidesStatusLine ? panes.first?.first.map(TmuxStatusLine.hiding) ?? [] : []
+        let statusLine = hidesStatusLine ? panes.first?.first.map { TmuxStatusLine.hiding($0) } ?? [] : []
         lock.unlock()
         let colourReport = colours.map { ColourReport.commands(panes: panes.compactMap(\.last), colours: $0) } ?? []
         let arguments = ViewCommandExecutor.arguments(for: .switchClient(client: client, target: target))
@@ -363,7 +370,22 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         lock.lock()
         let hides = hidesStatusLine
         lock.unlock()
-        if hides { listener.send(TmuxStatusLine.hiding(session).map(TmuxStatusLine.line)) }
+        if hides { listener.send(TmuxStatusLine.hiding(session, terminal: ownClient?.pid).map(TmuxStatusLine.line)) }
+    }
+
+    /// Removes from Muxify's list of Terminals the pids of Clients whose process ended, so the list stays short and
+    /// another terminal that gets such a pid later keeps its status line. On `queue`.
+    private func forgetEndedTerminals() {
+        lock.lock()
+        let hides = hidesStatusLine
+        lock.unlock()
+        guard hides, serverRunning, let listed = try? run(["show-option", "-gqv", TmuxStatusLine.terminals]) else { return }
+        let ended = TmuxStatusLine.listedTerminals(listed).filter { kill(pid_t($0), 0) != 0 && errno == ESRCH }
+        guard !ended.isEmpty else { return }
+        let commands = Set(ended).sorted().map(TmuxStatusLine.unregistering)
+        if !listener.send(commands.map(TmuxStatusLine.line)) {
+            for arguments in commands { _ = try? run(arguments) }
+        }
     }
 
     /// Another screen's control Client detached, so its Colour Reports stay on the Panes: the Terminal's Session gets
@@ -512,6 +534,7 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         guard handler != nil else { return }
         ticks += 1
         if ticks % Self.ticksPerWholeRead == 0 { return readWhole() }
+        if ticks % Self.ticksPerWholeRead == 1 { forgetEndedTerminals() }
         if topics.changeToken() != token { readTopics(then: nil) }
         let reportsChanged = !codexPrefixes.isEmpty && codexReportFiles() != codexReports
         let mayAttach = client == nil && ticks % Self.ticksPerAttachCheck == 0

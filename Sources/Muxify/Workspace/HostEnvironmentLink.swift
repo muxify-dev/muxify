@@ -287,6 +287,8 @@ final class HostEnvironmentLink: EnvironmentLink {
 
     // MARK: tmux's status line (ADR 0099)
 
+    var hidesStatusLineWhenAsked: Bool { true }
+
     func hideStatusLine(_ hides: Bool) {
         guard hides != hidesStatusLine else { return }
         hidesStatusLine = hides
@@ -592,8 +594,9 @@ final class HostEnvironmentLink: EnvironmentLink {
     }
 
     func terminalCommand(_ arguments: [String], target: String?, picksLatestSession: Bool,
-                         newSession: RemoteSSH.NewSession?) throws -> String {
-        try inner.terminalCommand(arguments, target: target, picksLatestSession: picksLatestSession, newSession: newSession)
+                         newSession: RemoteSSH.NewSession?, hidesStatusLine: Bool) throws -> String {
+        try inner.terminalCommand(arguments, target: target, picksLatestSession: picksLatestSession, newSession: newSession,
+                                  hidesStatusLine: hidesStatusLine)
     }
 
     func updateLocalClient(_ client: TmuxClient?) { inner.updateLocalClient(client) }

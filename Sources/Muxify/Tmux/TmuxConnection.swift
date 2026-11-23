@@ -191,9 +191,18 @@ final class TmuxConnection: @unchecked Sendable {
     var closedSnapshot: TmuxSnapshot? { remote?.closedSnapshot.map(stamped) }
 
     func terminalCommand(_ args: [String], target: String? = nil, picksLatestSession: Bool = true,
-                         newSession: RemoteSSH.NewSession? = nil) throws -> String {
-        if let remote { return remote.terminalCommand(target: target, picksLatestSession: picksLatestSession, newSession: newSession) }
-        let tmux = try invocation(args).commandLine
+                         newSession: RemoteSSH.NewSession? = nil, hidesStatusLine: Bool = false) throws -> String {
+        if let remote {
+            return remote.terminalCommand(target: target, picksLatestSession: picksLatestSession, newSession: newSession,
+                                          hidesStatusLine: hidesStatusLine)
+        }
+        var tmux = try invocation(args).commandLine
+        if hidesStatusLine {
+            // The Client lists itself as a Muxify Terminal and sets the hooks before it attaches, so no frame shows
+            // tmux's status line (`TmuxStatusLine`, ADR 0104). With `exec`, the shell's pid is the Client's.
+            let setup = TmuxStatusLine.attachSetup(tmux: try invocation([]).commandLine)
+            tmux = CommandInvocation(executable: "/bin/sh", arguments: ["-c", "\(setup)\nexec \(tmux)"]).commandLine
+        }
         guard let localExitFile else { return tmux }
         try? FileManager.default.removeItem(at: localExitFile)
         let script = """

@@ -177,8 +177,11 @@ protocol EnvironmentLink: AnyObject {
     /// Pastes the attachments into the Client's current Pane, uploading files first where they are not on this Mac.
     func pasteAttachments(_ attachments: TerminalAttachments, client: String) async throws -> String
     /// The command line that attaches the App Window's terminal.
+    /// `hidesStatusLine`: the Terminal hides tmux's status line from its first frame (ADR 0104).
     func terminalCommand(_ arguments: [String], target: String?, picksLatestSession: Bool,
-                         newSession: RemoteSSH.NewSession?) throws -> String
+                         newSession: RemoteSSH.NewSession?, hidesStatusLine: Bool) throws -> String
+    /// Whether the link hides tmux's status line when asked (`hideStatusLine`); a Sessions-only link does not.
+    var hidesStatusLineWhenAsked: Bool { get }
     /// Marks the App Window's own Client on this Mac's server, or removes the mark with nil.
     func updateLocalClient(_ client: TmuxClient?)
     /// Whether the link hears every change of the server and the records itself and keeps its own Listener, so
@@ -341,6 +344,7 @@ extension EnvironmentLink {
     func reportColours(_ colours: TerminalColours?) {}
     func reportColours(toWindow window: String) {}
     func hideStatusLine(_ hides: Bool) {}
+    var hidesStatusLineWhenAsked: Bool { false }
 }
 
 /// What answers a Host Server's request for its App Window: a Browser command's reply, `done` for a `select`, or
@@ -456,8 +460,9 @@ class TmuxConnectionLink {
     }
 
     func terminalCommand(_ arguments: [String], target: String?, picksLatestSession: Bool,
-                         newSession: RemoteSSH.NewSession?) throws -> String {
-        try connected().terminalCommand(arguments, target: target, picksLatestSession: picksLatestSession, newSession: newSession)
+                         newSession: RemoteSSH.NewSession?, hidesStatusLine: Bool) throws -> String {
+        try connected().terminalCommand(arguments, target: target, picksLatestSession: picksLatestSession, newSession: newSession,
+                                        hidesStatusLine: hidesStatusLine)
     }
 
     func updateLocalClient(_ client: TmuxClient?) {
