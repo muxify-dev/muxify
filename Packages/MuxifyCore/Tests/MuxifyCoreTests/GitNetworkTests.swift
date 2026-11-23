@@ -8,6 +8,7 @@ import Musl
 import Foundation
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// The Git View's network commands with askpass (ADR 0089, Credentials): fetch, push, pull and remote branch delete
 /// against a local bare remote that a fake ssh guards with a passphrase, which it asks through `SSH_ASKPASS` as ssh does
@@ -143,7 +144,8 @@ final class GitNetworkTests: XCTestCase {
             _ = try await runner().run(.fetch(root: remote.repo)) { _ in nil }
             XCTFail("a cancelled question fetched")
         } catch TmuxError.cancelled {}
-        XCTAssertLessThan(Date().timeIntervalSince(started), 5, "the command waited")
+        // A correct run takes under 1.5 s, also on a busy machine.
+        XCTAssertLessThan(Date().timeIntervalSince(started), scaled(5), "the command waited")
         let runs = try remote.helperRuns()
         XCTAssertEqual(runs.count, 1)
         XCTAssertFalse(runs.first?.hasPrefix("0 ") ?? true, "the helper of a cancelled question exited 0: \(runs)")
@@ -156,7 +158,8 @@ final class GitNetworkTests: XCTestCase {
             _ = try await runner(environment: ["FAKE_SSH_HANG": "1"]).run(.fetch(root: remote.repo)) { _ in nil }
             XCTFail("a cancelled question fetched")
         } catch TmuxError.cancelled {}
-        XCTAssertLessThan(Date().timeIntervalSince(started), 8, "a command that ignored the cancel kept running")
+        // A correct run ends after the 1 s grace, in at most about 2 s on a busy machine.
+        XCTAssertLessThan(Date().timeIntervalSince(started), scaled(8), "a command that ignored the cancel kept running")
     }
 
     // MARK: - Through the Host Server
@@ -223,9 +226,9 @@ final class GitNetworkTests: XCTestCase {
             try await host.client.call(HostRequest.gitNetwork(GitNetworkRequest(network: .fetch(root: remote.repo), operation: "op")),
                                        as: GitWritten.self)
         }
-        try await wait("the helper did not exit") { (try? self.remote.helperRuns().count) == 1 }
+        await eventually("the helper did not exit") { (try? self.remote.helperRuns().count) == 1 }
         XCTAssertFalse(try remote.helperRuns()[0].hasPrefix("0 "), "the helper of a closed channel exited 0")
-        try await wait("the command did not end") { (try? self.leftovers(in: host.state)) == [] }
+        await eventually("the command did not end") { (try? self.leftovers(in: host.state)) == [] }
         _ = await host.server.wait()
         _ = try? await call.value
     }
@@ -253,13 +256,6 @@ final class GitNetworkTests: XCTestCase {
         return names.filter { $0.hasPrefix("mxa.") }
     }
 
-    private func wait(_ message: String, seconds: TimeInterval = 5, until condition: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while !condition() {
-            guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
 }
 
 /// A bare `origin.git`, a clone `repo` that reaches it over a fake ssh, and a clone `other` that pushes to it over its

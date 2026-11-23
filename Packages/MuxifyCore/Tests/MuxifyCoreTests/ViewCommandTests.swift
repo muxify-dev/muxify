@@ -118,16 +118,6 @@ final class ViewCommandExecutorTests: XCTestCase {
         try server.run(arguments).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func eventually(_ what: String, _ condition: () throws -> Bool) throws {
-        let deadline = Date().addingTimeInterval(8)
-        while Date() < deadline {
-            if (try? condition()) == true { return }
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        XCTFail("timed out waiting for \(what)")
-        throw TmuxError.timedOut
-    }
-
     /// A Client attached to `session` in a pseudo-terminal: its tty and pid.
     private func attachClient(to session: String) throws -> ViewCommandExecutor.Client {
         let binary = try XCTUnwrap(server.binary)
@@ -150,10 +140,10 @@ final class ViewCommandExecutorTests: XCTestCase {
         try process.run()
         clientProcess = process
         var fields: [String] = []
-        try eventually("an attached Client") {
-            fields = try tmux(["list-clients", "-F", "#{client_tty} #{client_pid}"]).components(separatedBy: " ")
+        guard eventually("no attached Client", until: {
+            fields = (try? tmux(["list-clients", "-F", "#{client_tty} #{client_pid}"]))?.components(separatedBy: " ") ?? []
             return fields.count == 2 && !fields[0].isEmpty
-        }
+        }) else { throw TmuxError.timedOut }
         return ViewCommandExecutor.Client(tty: fields[0], pid: try XCTUnwrap(Int(fields[1])))
     }
 
@@ -187,7 +177,7 @@ final class ViewCommandExecutorTests: XCTestCase {
 
     func testCapturePaneReadsThePaneFromALine() throws {
         let pane = try tmux(["new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=work:", "printf 'first-line\\nsecond-line\\n'; exec sleep 60"])
-        try eventually("the Pane's output") { try executor.run(.capturePane(pane: pane, fromLine: 0)).contains("second-line") }
+        eventually("the Pane's output did not come") { (try? executor.run(.capturePane(pane: pane, fromLine: 0)))?.contains("second-line") == true }
         let text = try executor.run(.capturePane(pane: pane, fromLine: 1))
         XCTAssertTrue(text.hasPrefix("second-line"), text)
         XCTAssertFalse(text.contains("first-line"), text)

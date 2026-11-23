@@ -103,6 +103,7 @@ final class RequestLedgerTests: XCTestCase {
             second?.unlock()
             taken.fulfill()
         }
+        // absence: the second lock does not take the ID while the first holds it.
         Thread.sleep(forTimeInterval: 0.2)
         order.add("first")
         first.unlock()

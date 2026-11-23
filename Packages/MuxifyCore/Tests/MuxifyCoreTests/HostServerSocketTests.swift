@@ -108,10 +108,10 @@ final class HostServerSocketTests: XCTestCase {
         XCTAssertEqual(path, socket + ".muxify-browser.105")
         XCTAssertTrue(BrowserAgentChannel.isHostServerSocket(path))
         XCTAssertFalse(BrowserAgentChannel.isHostServerSocket(BrowserAgentChannel.socketPath(forTmuxSocket: socket)))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+        await eventually("the socket is not beside tmux's") { FileManager.default.fileExists(atPath: path) }
         client.close()
         _ = await server.wait()
-        XCTAssertFalse(FileManager.default.fileExists(atPath: path), "the socket outlived its server")
+        await eventually("the socket outlived its server") { !FileManager.default.fileExists(atPath: path) }
     }
 
     func testAStartingServerRemovesADeadSocketAndKeepsALiveOne() async throws {
@@ -170,7 +170,7 @@ final class HostServerSocketTests: XCTestCase {
         // Another server that exits clears the option; the consumer's server takes it again from its next read.
         try tmux.run(["set-option", "-squ", BrowserAgentChannel.option])
         try tmux.run(["new-session", "-d", "-s", "other"])
-        try await wait("the consumer's server did not take the empty option", seconds: 8) { (try? self.option()) == consumer.path }
+        await eventually("the consumer's server did not take the empty option") { (try? self.option()) == consumer.path }
     }
 
     // MARK: - Helpers
@@ -194,21 +194,6 @@ final class HostServerSocketTests: XCTestCase {
         var requests: [MacRequest] { lock.lock(); defer { lock.unlock() }; return log }
     }
 
-    /// The frames that the client writes, read on their way to the server.
-    private final class FrameTap: @unchecked Sendable {
-        private let lock = NSLock()
-        private var frames: [ProtocolFrame] = []
-
-        func add(_ line: Data) {
-            guard let frame = try? ProtocolFrame.decode(line) else { return }
-            lock.lock()
-            frames.append(frame)
-            lock.unlock()
-        }
-
-        var items: [ProtocolFrame] { lock.lock(); defer { lock.unlock() }; return frames.filter { $0.kind == .item } }
-    }
-
     /// A server whose socket is `<tmux socket>.muxify-browser.<id>`, and a client whose requests from the server go
     /// to `mac`; without it, the client serves none.
     private func connect(id: String, mac: MacSide?, tap: FrameTap? = nil) async throws
@@ -218,26 +203,8 @@ final class HostServerSocketTests: XCTestCase {
                                      context: HostServerContext(paths: paths, tmux: tmux, config: { Config() }, socketID: id))
         server.start()
         servers.append(server)
-        var output = up.fileHandleForWriting
-        if let tap {
-            // What the client writes goes on to the server, and the tap gets each whole line of it.
-            let tapped = Pipe()
-            let source = tapped.fileHandleForReading, sink = up.fileHandleForWriting
-            Thread.detachNewThread {
-                var pending = Data()
-                while true {
-                    let data = source.availableData
-                    guard !data.isEmpty else { try? sink.close(); return }
-                    sink.write(data)
-                    pending.append(data)
-                    while let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
-                        tap.add(Data(pending[pending.startIndex..<newline]))
-                        pending.removeSubrange(pending.startIndex...newline)
-                    }
-                }
-            }
-            output = tapped.fileHandleForWriting
-        }
+        // What the client writes goes on to the server, and the tap gets each whole line of it.
+        let output = tap?.tapping(up.fileHandleForWriting) ?? up.fileHandleForWriting
         let client = ProtocolClient(input: down.fileHandleForReading, output: output, build: "client", helloTimeout: 5,
                                     onRequest: mac.map { mac in { mac.serve($0) } })
         clients.append(client)
@@ -272,13 +239,5 @@ final class HostServerSocketTests: XCTestCase {
             }
         }
         XCTAssertEqual(bound, 0)
-    }
-
-    private func wait(_ message: String, seconds: TimeInterval = 3, until done: () async throws -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while try await !done() {
-            guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
     }
 }

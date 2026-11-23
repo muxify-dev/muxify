@@ -136,7 +136,7 @@ struct ColourProbes {
     /// Pane of the Session and detaches once `afterAttach` returns, which lets the publisher read it. tmux has run the
     /// screen's report once it detached. `afterDetach` gets the screen's Client name and waits for what the test
     /// needs of the publisher after the detach.
-    func screenWritesAndDetaches(in session: String, flags: String?, afterAttach: () async -> Void,
+    func screenWritesAndDetaches(in session: String, flags: String?, afterAttach: () async throws -> Void,
                                  afterDetach: (_ screen: String) async throws -> Void) async throws {
         let binary = try XCTUnwrap(server.binary)
         let process = Process()
@@ -155,7 +155,7 @@ struct ColourProbes {
         defer { if process.isRunning { process.terminate() } }
         await eventually("the screen did not attach") { controlClients().count == before + 1 }
         let name = "client-\(process.processIdentifier)"
-        await afterAttach()
+        try await afterAttach()
         let panes = try server.run(["list-panes", "-s", "-t", "=" + session, "-F", "#{pane_id}"])
             .split(separator: "\n").map(String.init)
         let lines = ColourReport.commands(panes: panes, colours: Self.dark).map { $0 + "\n" }.joined()

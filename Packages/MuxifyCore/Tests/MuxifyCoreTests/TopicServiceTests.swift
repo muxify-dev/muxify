@@ -550,8 +550,7 @@ final class TopicServiceTests: TopicServiceTestCase {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             try server.run(["set-option", "-p", "-t", pane, "@muxify_agent", "claude", ";", "set-option", "-p", "-t", pane, "@muxify_agent_status", status]
                            + (unread ? [";", "set-option", "-p", "-t", pane, "@muxify_agent_unread", "1"] : []))
-            let deadline = Date().addingTimeInterval(5)
-            while try server.snapshot().panes.first(where: { $0.id == pane })?.command != "sleep", Date() < deadline { usleep(20_000) }
+            try eventually("the Agent's Pane does not run sleep") { try server.snapshot().panes.first(where: { $0.id == pane })?.command == "sleep" }
             return try XCTUnwrap(PaneID(rawValue: pane))
         }
         let done = try agent(in: window, status: "done", unread: false)
@@ -629,14 +628,11 @@ final class TopicServiceTests: TopicServiceTestCase {
     }
 
     /// Settle remembers each Window's current path. Until a new shell has started, tmux reports its own folder.
-    private func waitForPath(_ path: String, of window: String) throws {
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline {
+    private func waitForPath(_ path: String, of window: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        try eventually("\(window) is not in \(path)", file: file, line: line) {
             let current = try server.run(["display-message", "-p", "-t", window, "#{pane_current_path}"])
-            if (current.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).resolvingSymlinksInPath == path { return }
-            usleep(20_000)
+            return (current.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).resolvingSymlinksInPath == path
         }
-        XCTFail("\(window) is not in \(path)")
     }
 }
 
@@ -1650,9 +1646,9 @@ final class TopicServiceSessionTests: TopicServiceTestCase {
         XCTAssertEqual(made.session?.rawValue, before.sessionID)
         XCTAssertNil(made.topicID, "a new Window writes no Topic record")
         let file = (sessionPath.folder.path as NSString).appendingPathComponent("made.txt")
-        let deadline = Date().addingTimeInterval(5)
-        while !FileManager.default.fileExists(atPath: file), Date() < deadline { usleep(50_000) }
-        XCTAssertEqual(try String(contentsOfFile: file, encoding: .utf8), "made\n", "the command runs in the folder of the Session's Window")
+        eventually("the command did not run in the folder of the Session's Window") {
+            (try? String(contentsOfFile: file, encoding: .utf8)) == "made\n"
+        }
 
         let beside = try change(service().handle(EnvironmentRequest(.newWindow(command: nil), target: .window(WindowID(rawValue: window.id)!))))
         XCTAssertEqual(beside.session?.rawValue, before.sessionID)

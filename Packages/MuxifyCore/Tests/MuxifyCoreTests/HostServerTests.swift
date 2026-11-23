@@ -20,6 +20,8 @@ final class HostServerTests: XCTestCase {
     private var clients: [ProtocolClient] = []
     private var consumers: [Task<Void, Never>] = []
     private var clientProcess: Process?
+    /// What the publisher of a Mac with colours sent its Listener, and its connections.
+    private let sent = SentLines()
     private var saved: [String: String?] = [:]
     private var socket: String { directory.appendingPathComponent("s").path }
     /// The Host's `TMPDIR`, where uploads go.
@@ -51,9 +53,13 @@ final class HostServerTests: XCTestCase {
         for server in servers { _ = await server.wait() }
         if let clientProcess, clientProcess.isRunning {
             clientProcess.terminate()
-            // `waitUntilExit` can miss the exit in an async tearDown and wait for ever: wait for the pid, a while at most.
-            let deadline = Date().addingTimeInterval(5)
-            while kill(clientProcess.processIdentifier, 0) == 0, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+            // `waitUntilExit` can miss the exit in an async tearDown and wait for ever: wait for the pid, a while at most,
+            // then kill it.
+            let pid = clientProcess.processIdentifier
+            if !(await eventually("", timeout: 5, fail: { _, _, _ in }, until: { kill(pid, 0) != 0 })) {
+                kill(pid, SIGKILL)
+                await eventually("the Client's process outlived SIGKILL") { kill(pid, 0) != 0 }
+            }
         }
         if let actual = try? tmux?.run(["display-message", "-p", "#{socket_path}"]),
            actual.trimmingCharacters(in: .whitespacesAndNewlines) == socket {
@@ -74,7 +80,7 @@ final class HostServerTests: XCTestCase {
         let client = try await connect()
         let recorder = subscribe(client)
 
-        try await wait("no first item") { !recorder.items.isEmpty }
+        await eventually("no first item") { !recorder.items.isEmpty }
         let first = try XCTUnwrap(recorder.items.first)
         let work = "session " + (try sessionID("work"))
         XCTAssertEqual(Set(first.map(\.key)), [work, "session \(try sessionID("other"))", "topic first", "open_places", "server"])
@@ -87,27 +93,29 @@ final class HostServerTests: XCTestCase {
         try await settle(recorder)
 
         try tmux.run(["split-window", "-d", "-t", "work:"])
-        try await wait("a split did not push its Session") { recorder.keys.contains(work) }
+        await eventually("a split did not push its Session") { recorder.keys.contains(work) }
         XCTAssertFalse(recorder.keys.contains("topic first"), "a tmux change pushed a Topic")
         try await settle(recorder)
 
         try external.write { try $0.update("first") { $0.title = "Second" } }
-        try await wait("a Topic written by another process did not push its key") { recorder.keys.contains("topic first") }
+        await eventually("a Topic written by another process did not push its key") { recorder.keys.contains("topic first") }
         guard case .topic(_, let record)? = recorder.items.joined().last(where: { $0.key == "topic first" }) else { return XCTFail("no topic") }
         XCTAssertEqual(record?.title, "Second")
     }
 
     func testAnEnvironmentRequestAnswersItsResponseAfterTheSubscriptionPushedItsTopic() async throws {
-        let client = try await connect()
+        let tap = FrameTap()
+        let client = try await connect(tap: tap)
         let recorder = subscribe(client)
-        try await wait("no first item") { !recorder.items.isEmpty }
+        await eventually("no first item") { !recorder.items.isEmpty }
         try await settle(recorder)
 
         let response = try await client.call(HostRequest.environment(EnvironmentRequest(.create(title: "Made"))), as: EnvironmentResponse.self)
         guard case .changed(let change) = response, let id = change.topicID else { return XCTFail("unexpected \(response)") }
-        // The server reads before it answers, so the event came before the `end`: it is there at once, well inside
-        // the 0.25 s tick of `data_version`.
-        try await wait("the created Topic's event did not come before the answer", seconds: 0.15) { recorder.keys.contains("topic \(id)") }
+        // The server reads before it answers, so the event came before the `end` on the wire, not at a later tick of
+        // `data_version`.
+        XCTAssertTrue(tap.items.contains { (try? $0.payload(EnvironmentItem.self))?.changes.contains { $0.key == "topic \(id)" } == true },
+                      "the created Topic's event did not come before the answer")
         XCTAssertEqual(try TopicStore(paths: paths).read().records.map(\.title), ["Made"])
 
         do {
@@ -141,16 +149,16 @@ final class HostServerTests: XCTestCase {
         let nonce = "n" + UUID().uuidString.prefix(8).lowercased()
         let client = try await connect(nonce: nonce)
         let recorder = subscribe(client)
-        try await wait("no first item") { recorder.server != nil }
+        await eventually("no first item") { recorder.server != nil }
         XCTAssertNil(recorder.server?.ownClient)
 
         let attached = try attachClient(to: "work")
-        try await Task.sleep(nanoseconds: 1_200_000_000)
+        await eventually("the attached Client was not pushed") { recorder.server?.clients.contains { $0.tty == attached.tty } == true }
         XCTAssertNil(recorder.server?.ownClient, "a Client with no marker is not the own Client")
 
         let value = [String(attached.pid), attached.tty, "/home/u", "box", "remote"].joined(separator: Tmux.separator)
         try tmux.run(["set-option", "-sq", ClientMarker.option(nonce: nonce), value])
-        try await wait("the marker's Client was not pushed") { recorder.server?.ownClient == attached }
+        await eventually("the marker's Client was not pushed") { recorder.server?.ownClient == attached }
     }
 
     // MARK: - Capabilities and Request ids
@@ -161,7 +169,7 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(session.peerCapabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs",
                                                   "status-line", "board"])
         let recorder = subscribe(client)
-        try await wait("no first item") { !recorder.items.isEmpty }
+        await eventually("no first item") { !recorder.items.isEmpty }
         let before = try windows(of: "work")
 
         let request = EnvironmentRequest(.newWindow(command: nil), target: .sessionName("work"), request: RequestID(UUID().uuidString))
@@ -175,7 +183,7 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(try windows(of: "work"), before, "the refused request changed the Host")
 
         _ = try await client.call(HostRequest.environment(EnvironmentRequest(.create(title: "Plain"))), as: EnvironmentResponse.self)
-        try await wait("the created Topic's event did not come") { recorder.keys.contains { $0.hasPrefix("topic ") } }
+        await eventually("the created Topic's event did not come") { recorder.keys.contains { $0.hasPrefix("topic ") } }
         let base = ["session ", "topic ", "open_places", "server"]
         for key in recorder.keys {
             XCTAssertTrue(base.contains { key.hasPrefix($0) }, "a client that declared no capability got the key \(key)")
@@ -242,10 +250,11 @@ final class HostServerTests: XCTestCase {
     func testATopicSubscriptionPushesTheDetailFirstThenAfterASplitAndARenameAsShowAnswersIt() async throws {
         try TopicStore(paths: paths).write { try $0.create(TopicRecord(id: "t", title: "Topic")) }
         try tmux.run(["set-option", "-t", "=work:", "@muxify_topic", "t"])
-        let client = try await connect(capabilities: ["topic-detail"])
+        let tap = FrameTap()
+        let client = try await connect(capabilities: ["topic-detail"], tap: tap)
         let recorder = subscribe(client, topic: "t")
 
-        try await wait("no first item") { !recorder.items.isEmpty }
+        await eventually("no first item") { !recorder.items.isEmpty }
         let first = try XCTUnwrap(recorder.detail)
         XCTAssertEqual(first.label, "Topic")
         XCTAssertEqual(first.sessions.map(\.name), ["work"])
@@ -256,13 +265,17 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(recorder.latest, .some(shown), "the item is not what show answers")
 
         try tmux.run(["split-window", "-d", "-t", "=work:"])
-        try await wait("a split of the Topic's Session did not push its detail") { recorder.detail?.sessions.first?.windows.first?.panes.count == 2 }
+        await eventually("a split of the Topic's Session did not push its detail") { recorder.detail?.sessions.first?.windows.first?.panes.count == 2 }
         try await settle(recorder)
 
         _ = try await client.call(HostRequest.environment(EnvironmentRequest(.rename(title: "Renamed"), target: .topic(.id("t")))),
                                   as: EnvironmentResponse.self)
-        // The server reads again before it answers, so the new detail came before the `end`.
-        try await wait("the rename's detail did not come before the answer", seconds: 0.15) { recorder.detail?.label == "Renamed" }
+        // The server reads again before it answers, so the new detail came before the `end` on the wire.
+        XCTAssertTrue(tap.items.contains { frame in
+            guard case .topic(let detail)? = try? frame.payload(TopicDetailItem.self) else { return false }
+            return detail.label == "Renamed"
+        }, "the rename's detail did not come before the answer")
+        await eventually("the rename's detail did not reach the subscriber") { recorder.detail?.label == "Renamed" }
         XCTAssertEqual(recorder.items.count, 1, "one change pushed more than one item")
         let renamed = try await client.call(show, as: EnvironmentResponse.self)
         XCTAssertEqual(recorder.latest, .some(renamed), "the item is not what show answers")
@@ -273,12 +286,12 @@ final class HostServerTests: XCTestCase {
         let created = try await client.call(HostRequest.environment(EnvironmentRequest(.create(title: "Gone"))), as: EnvironmentResponse.self)
         guard case .changed(let change) = created, let id = change.topicID else { return XCTFail("unexpected \(created)") }
         let recorder = subscribe(client, topic: id)
-        try await wait("no first item") { recorder.detail?.label == "Gone" }
+        await eventually("no first item") { recorder.detail?.label == "Gone" }
 
         _ = try await client.call(HostRequest.environment(EnvironmentRequest(.forget(choices: [], worktrees: []), target: .topic(.id(id)))),
                                   as: EnvironmentResponse.self)
 
-        try await wait("forgetting the Topic did not push null") { recorder.items.count == 2 }
+        await eventually("forgetting the Topic did not push null") { recorder.items.count == 2 }
         XCTAssertEqual(recorder.items.last, .some(nil))
     }
 
@@ -290,18 +303,18 @@ final class HostServerTests: XCTestCase {
         let client = try await connect(capabilities: ["topic-detail"])
         let a = subscribe(client, topic: "a")
         let b = subscribe(client, topic: "b")
-        try await wait("no first items") { a.detail?.label == "A" && b.detail?.label == "B" }
+        await eventually("no first items") { a.detail?.label == "A" && b.detail?.label == "B" }
         try await settle(a)
         try await settle(b)
 
         try await rename("a", to: "A2", on: client)
-        try await wait("the rename of a did not push a") { a.detail?.label == "A2" }
+        await eventually("the rename of a did not push a") { a.detail?.label == "A2" }
         XCTAssertTrue(b.items.isEmpty, "the rename of a pushed b")
 
         a.cancel()
-        try await wait("the cancel did not end the subscription") { a.ended }
+        await eventually("the cancel did not end the subscription") { a.ended }
         try await rename("b", to: "B2", on: client)
-        try await wait("cancelling a ended b") { b.detail?.label == "B2" }
+        await eventually("cancelling a ended b") { b.detail?.label == "B2" }
     }
 
     func testAClientThatDidNotDeclareTopicDetailGetsUnsupportedForATopicSubscription() async throws {
@@ -341,33 +354,30 @@ final class HostServerTests: XCTestCase {
     // MARK: - The snapshot subscription
 
     func testASnapshotSubscriberGetsTheViewWithItsSidebarFirstAndANewItemOnlyWhenAnotherProcessMakesATopic() async throws {
+        // A shell names its Window as it starts, which is a change the view shows, and a busy machine can start it
+        // late: the Pane runs a program that writes nothing, so tmux never names the Window after it.
+        try tmux.run(["respawn-pane", "-k", "-t", "=work:", "exec sleep 600"])
+        try await eventually("the Pane does not run its program") {
+            try self.tmuxOutput(["display-message", "-p", "-t", "=work:", "#{pane_current_command}"]) == "sleep"
+        }
         let client = try await connect(capabilities: ["snapshot"])
         let recorder = subscribeSnapshot(client)
 
-        try await wait("no first snapshot item") { !recorder.items.isEmpty }
+        await eventually("no first snapshot item") { !recorder.items.isEmpty }
         let first = try XCTUnwrap(recorder.items.first)
         XCTAssertEqual(first.sidebar, EnvironmentShown.Sidebar(), "the Config's default sidebar")
         XCTAssertNil(first.capabilities, "a snapshot item carries no capabilities")
         XCTAssertEqual(first.snapshot.sessions.map(\.name), ["work"])
         XCTAssertEqual(first.snapshot.cards, [])
-        // The shell names its Window as it starts, which is a change the view shows.
-        var seen = -1
-        try await wait("the snapshot subscription did not settle", seconds: 10) {
-            let now = recorder.items.count
-            defer { seen = now }
-            if now == seen { return true }
-            try await Task.sleep(nanoseconds: 1_200_000_000)
-            return false
-        }
+        let quiet = await settled("the snapshot subscription did not settle") { recorder.items }.count
 
-        // Several `data_version` ticks and the control Client's reads change nothing that the view shows.
-        let settled = recorder.items.count
+        // absence: several `data_version` ticks and the control Client's reads change nothing that the view shows.
         try await Task.sleep(nanoseconds: 1_500_000_000)
-        XCTAssertEqual(recorder.items.count, settled, "an item came while nothing changed: \(recorder.items.dropFirst(settled))")
+        XCTAssertEqual(recorder.items.count, quiet, "an item came while nothing changed: \(recorder.items.dropFirst(quiet))")
 
         // As `topic new` makes it: another connection to the same muxify.db.
         try TopicStore(paths: paths).write { try $0.create(TopicRecord(id: "made", title: "Made")) }
-        try await wait("a Topic made by another process pushed no snapshot item") { recorder.items.count > settled }
+        await eventually("a Topic made by another process pushed no snapshot item") { recorder.items.count > quiet }
         let ids = recorder.items.last?.snapshot.cards.compactMap { card -> String? in
             if case .topic(let topic, _, _) = card { return topic.id }
             return nil
@@ -383,11 +393,11 @@ final class HostServerTests: XCTestCase {
         try "sidebar:\n  sessions: true\n".write(to: file, atomically: true, encoding: .utf8)
         let client = try await connect(context: context, capabilities: ["snapshot"])
         let recorder = subscribeSnapshot(client)
-        try await wait("no first snapshot item") { !recorder.items.isEmpty }
+        await eventually("no first snapshot item") { !recorder.items.isEmpty }
         XCTAssertEqual(recorder.items.first?.sidebar.sessions, true)
 
         try "sidebar:\n  sessions: false\n".write(to: file, atomically: true, encoding: .utf8)
-        try await wait("a change of the Config's sidebar pushed no snapshot item") {
+        await eventually("a change of the Config's sidebar pushed no snapshot item") {
             recorder.items.last?.sidebar.sessions == false
         }
         XCTAssertEqual(recorder.items.last?.sidebar.topics, true)
@@ -404,7 +414,7 @@ final class HostServerTests: XCTestCase {
         let older = try await connect(capabilities: ["snapshot"])
         let plain = subscribe(older)
         let olderShown = subscribeSnapshot(older)
-        try await wait("no first items") { !boardSessions.items.isEmpty && !plain.items.isEmpty && !shown.items.isEmpty && !olderShown.items.isEmpty }
+        await eventually("no first items") { !boardSessions.items.isEmpty && !plain.items.isEmpty && !shown.items.isEmpty && !olderShown.items.isEmpty }
 
         XCTAssertTrue(boardSessions.keys.contains("board_sessions"))
         XCTAssertFalse(plain.keys.contains("board_sessions"), "an older Mac shows a Board Session as a No Topic Session")
@@ -423,14 +433,14 @@ final class HostServerTests: XCTestCase {
         let work = try sessionID("work")
         let older = subscribeLockOrders(try await connect())
         let newer = subscribeLockOrders(try await connect(capabilities: ["board"]))
-        try await wait("the older Mac got no lock_order for the Board Session") { older.lastOrder(of: work) == order }
-        try await wait("the newer Mac got no first item") { newer.events(of: work) > 0 }
+        await eventually("the older Mac got no lock_order for the Board Session") { older.lastOrder(of: work) == order }
+        await eventually("the newer Mac got no first item") { newer.events(of: work) > 0 }
 
         try TopicStore(paths: paths).write { $0.boardSessions[0].order = order + 5 }
-        try await wait("a move of the Board Session sent the older Mac no new lock_order", seconds: 5) { older.lastOrder(of: work) == order + 5 }
+        await eventually("a move of the Board Session sent the older Mac no new lock_order") { older.lastOrder(of: work) == order + 5 }
         let moved = older.events(of: work)
         try TopicStore(paths: paths).write { $0.takeOffBoard("g1") }
-        try await wait("a Board Session that left the Board left the older Mac its lock_order", seconds: 5) {
+        await eventually("a Board Session that left the Board left the older Mac its lock_order") {
             older.events(of: work) > moved && older.lastOrder(of: work) == nil
         }
         XCTAssertEqual(newer.orders(of: work), [], "a Mac that declared board reads the Board Sessions, never lock_order")
@@ -439,16 +449,16 @@ final class HostServerTests: XCTestCase {
     func testAnOlderPhoneGetsNoSnapshotItemForAChangeOfOnlyTheDormantBoardSessions() async throws {
         let older = subscribeSnapshot(try await connect(capabilities: ["snapshot"]))
         let newer = subscribeSnapshot(try await connect(capabilities: ["snapshot", "board"]))
-        try await wait("no first items") { !older.items.isEmpty && !newer.items.isEmpty }
+        await eventually("no first items") { !older.items.isEmpty && !newer.items.isEmpty }
 
         let dormant = BoardSession(id: "gone", order: 0, isGuest: true, session: .object(["name": .string("notes")]))
         try TopicStore(paths: paths).write { $0.addToBoard(dormant) }
-        try await wait("the newer phone got no Dormant card", seconds: 5) {
+        await eventually("the newer phone got no Dormant card") {
             newer.items.last?.snapshot.cards.contains(.dormantSession(id: "gone", name: "notes")) == true
         }
         // A change that both views show, so the older phone's last item comes after any that the Dormant card sent it.
         try TopicStore(paths: paths).write { try $0.create(TopicRecord(id: "made", title: "Made")) }
-        try await wait("the older phone got no item for a new Topic", seconds: 5) {
+        await eventually("the older phone got no item for a new Topic") {
             older.items.last?.snapshot.cards.contains { if case .topic(let topic, _, _) = $0 { topic.id == "made" } else { false } } == true
         }
         let items = older.items
@@ -510,17 +520,40 @@ final class HostServerTests: XCTestCase {
 
     private var colourProbes: ColourProbes { ColourProbes(directory: directory, server: tmux) }
 
+    /// Returns once the Host Server's publisher has read, after all it heard before: an empty `mark_read` reads again
+    /// before it answers.
+    private func publisherCaughtUp(_ client: ProtocolClient) async throws {
+        try await client.call(HostRequest.markRead(MarkRead(topics: [], panes: [])))
+    }
+
+    /// Waits until the publisher has handled what came before, and tmux has run every command it sent its Listener so
+    /// far: tmux runs one connection's commands in order, so it answers one sent after them last.
+    private func tmuxRanTheListenersCommands(_ client: ProtocolClient) async throws {
+        try await publisherCaughtUp(client)
+        let connection = try XCTUnwrap(sent.latest, "no Listener started")
+        let ping = connection.ping()
+        await eventually("tmux did not run the Listener's commands") { connection.heard.contains(ping) }
+    }
+
+    /// Waits until the Listener heard `screen`, a Client's name, detach, and tmux ran what the publisher sent for it.
+    private func listenerHeardTheDetach(of screen: String, _ client: ProtocolClient) async throws {
+        let connection = try XCTUnwrap(sent.latest, "no Listener started")
+        await eventually("the Listener did not hear the screen detach") { connection.heard.contains("%client-detached " + screen) }
+        try await tmuxRanTheListenersCommands(client)
+    }
+
     /// A Mac whose Terminal's Client shows `session` on the Host, which the Mac's marker names, and that sent its
     /// colours: the Host Server's Listener follows that Client.
     private func macWithColours(showing session: String) async throws -> (ProtocolClient, ViewCommandExecutor.Client) {
         let nonce = "n" + UUID().uuidString.prefix(8).lowercased()
-        let client = try await connect(nonce: nonce)
+        let client = try await connect(nonce: nonce, context: HostServerContext(paths: paths, tmux: tmux, startControlClient: sent.recording(),
+                                                                             temporaryDirectory: uploads.path))
         _ = subscribe(client)
         let terminal = try attachClient(to: session)
         let value = [String(terminal.pid), terminal.tty, "/home/u", "box", "remote"].joined(separator: Tmux.separator)
         try tmux.run(["set-option", "-sq", ClientMarker.option(nonce: nonce), value])
         try await client.call(HostRequest.colours(ColoursRequest(ColourProbes.light)), as: ProtocolEmpty.self)
-        try await wait("the Listener did not move to the Terminal's Session") { self.colourProbes.controlClients() == [session] }
+        await eventually("the Listener did not move to the Terminal's Session") { self.colourProbes.controlClients() == [session] }
         return (client, terminal)
     }
 
@@ -528,22 +561,21 @@ final class HostServerTests: XCTestCase {
         let other = try colourProbes.probe(session: "other")
         let detachedProbe = directory.appendingPathComponent("other-detach").path
         try tmux.run(["split-window", "-d", "-t", "other:", colourProbes.probeCommand(detachedProbe, go: "detach")])
-        let (_, terminal) = try await macWithColours(showing: "work")
+        let (client, terminal) = try await macWithColours(showing: "work")
 
         try tmux.run(["switch-client", "-c", terminal.tty, "-t", "=other"])
-        try await wait("the Listener did not follow the Terminal") { self.colourProbes.controlClients() == ["other"] }
-        try await Task.sleep(nanoseconds: 300_000_000)
+        await eventually("the Listener did not follow the Terminal") { self.colourProbes.controlClients() == ["other"] }
+        try await tmuxRanTheListenersCommands(client)
         try colourProbes.go()
-        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: other.0) }
+        await eventually("no answer from the probe") { FileManager.default.fileExists(atPath: other.0) }
         XCTAssertEqual(try String(contentsOfFile: other.0, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
                        "the Session that the Terminal switched to did not get the Mac's colours")
 
         // Another screen, as Muxify Mobile is, writes its own colours and detaches.
-        try await colourProbes.screenWritesAndDetaches(in: "other", flags: nil, afterAttach: {
-            try? await Task.sleep(nanoseconds: 500_000_000)
-        }, afterDetach: { _ in try await Task.sleep(nanoseconds: 500_000_000) })
+        try await colourProbes.screenWritesAndDetaches(in: "other", flags: nil, afterAttach: { try await self.publisherCaughtUp(client) },
+                                                       afterDetach: { screen in try await self.listenerHeardTheDetach(of: screen, client) })
         try colourProbes.go("detach")
-        try await wait("no answer from the probe") { FileManager.default.fileExists(atPath: detachedProbe) }
+        await eventually("no answer from the probe") { FileManager.default.fileExists(atPath: detachedProbe) }
         XCTAssertEqual(try String(contentsOfFile: detachedProbe, encoding: .utf8), "rgb:fbfb/f1f1/c7c7",
                        "the screen's colours stayed after it detached")
     }
@@ -561,13 +593,13 @@ final class HostServerTests: XCTestCase {
         try ColourProbes.terminalSays(2, through: clientProcess)
         try await colourProbes.screenWritesAndDetaches(in: "other", flags: "ignore-size,no-output", afterAttach: {},
                                                        afterDetach: { _ in })
-        try await wait("the probe was not told dark") { self.colourProbes.lines(notices).last == "dark" }
+        await eventually("the probe was not told dark") { self.colourProbes.lines(notices).last == "dark" }
 
         _ = try await client.call(HostRequest.view(.switchClient(client: terminal.tty, target: "=other:")), as: ViewOutput.self)
 
-        try await wait("the probe was not told light") { self.colourProbes.lines(notices).last?.hasPrefix("light") == true }
+        await eventually("the probe was not told light") { self.colourProbes.lines(notices).last?.hasPrefix("light") == true }
         XCTAssertEqual(colourProbes.lines(notices).last, "light rgb:fbfb/f1f1/c7c7", "the program at the notice got other colours")
-        try await wait("the Listener did not follow the Terminal") { self.colourProbes.controlClients() == ["other"] }
+        await eventually("the Listener did not follow the Terminal") { self.colourProbes.controlClients() == ["other"] }
     }
 
     func testTheFocusSubscriptionTellsTheMacOfAFocusChangeInTheTerminalsWindow() async throws {
@@ -586,11 +618,10 @@ final class HostServerTests: XCTestCase {
         // Nothing tells the Mac when the server has taken the subscription, and a focus change before that reaches
         // no one: the focus moves between the Panes until the Mac hears one.
         var next = second
-        try await wait("the focus change did not reach the Mac") {
+        try await eventually("the focus change did not reach the Mac") {
             if heard.events.contains(.focusChanged(window: shown)) { return true }
             try self.tmux.run(["select-pane", "-t", next])
             next = next == second ? first : second
-            try await Task.sleep(nanoseconds: 200_000_000)
             return false
         }
     }
@@ -632,7 +663,7 @@ final class HostServerTests: XCTestCase {
         let client = try await connect(context: context)
         let recorder = subscribeConfig(client)
 
-        try await wait("no first config item") { !recorder.items.isEmpty }
+        await eventually("no first config item") { !recorder.items.isEmpty }
         let first = try XCTUnwrap(recorder.items.first)
         XCTAssertEqual(first.path, file.path)
         XCTAssertEqual(first.shownPath, "~/.config/muxify/config.yaml")
@@ -644,11 +675,11 @@ final class HostServerTests: XCTestCase {
         handle.seekToEndOfFile()
         handle.write(Data("sidebar:\n  agents: false\n".utf8))
         try handle.close()
-        try await wait("an edit of the Config pushed nothing") {
+        await eventually("an edit of the Config pushed nothing") {
             recorder.items.last?.text?.hasSuffix("sidebar:\n  agents: false\n") == true
         }
         try "ui:\n  header_height: 50\n".write(to: home.appendingPathComponent("machine.yaml"), atomically: true, encoding: .utf8)
-        try await wait("an edit of a Config Override pushed nothing") {
+        await eventually("an edit of a Config Override pushed nothing") {
             recorder.items.last?.overrides.first?.text == "ui:\n  header_height: 50\n"
         }
     }
@@ -659,7 +690,7 @@ final class HostServerTests: XCTestCase {
         let client = try await connect(context: context)
         let recorder = subscribeConfig(client)
 
-        try await wait("no first config item") { !recorder.items.isEmpty }
+        await eventually("no first config item") { !recorder.items.isEmpty }
         let first = try XCTUnwrap(recorder.items.first)
         XCTAssertTrue(first.isMissing, "a Host with no Config pushes missing: \(first)")
         XCTAssertEqual(first.path, home.appendingPathComponent(".config/muxify/config.yaml").path)
@@ -668,10 +699,10 @@ final class HostServerTests: XCTestCase {
         let folder = home.appendingPathComponent(".config/muxify", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try "ui:\n  header_height: 30\n".write(to: folder.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
-        try await wait("a new Config pushed nothing") { recorder.items.last?.text == "ui:\n  header_height: 30\n" }
+        await eventually("a new Config pushed nothing") { recorder.items.last?.text == "ui:\n  header_height: 30\n" }
 
         try FileManager.default.removeItem(at: folder.appendingPathComponent("config.yaml"))
-        try await wait("removing the Config did not push missing") { recorder.items.last?.isMissing == true }
+        await eventually("removing the Config did not push missing") { recorder.items.last?.isMissing == true }
     }
 
     // MARK: - Worktrees on the Host (ADR 0090)
@@ -767,11 +798,11 @@ final class HostServerTests: XCTestCase {
         let value = [String(terminal.pid), terminal.tty, "/home/u", "box", "remote"].joined(separator: Tmux.separator)
         try tmux.run(["set-option", "-sq", ClientMarker.option(nonce: nonce), value])
         try await client.call(HostRequest.statusLine(StatusLineRequest(hidden: true)), as: ProtocolEmpty.self)
-        try await wait("the Terminal's Session on the Host kept its status line") {
+        try await eventually("the Terminal's Session on the Host kept its status line") {
             try self.tmuxOutput(["show-options", "-qv", "-t", "=work:", "status"]) == "off"
         }
         try await client.call(HostRequest.statusLine(StatusLineRequest(hidden: false)), as: ProtocolEmpty.self)
-        try await wait("the Terminal's Session on the Host did not get its status line back") {
+        try await eventually("the Terminal's Session on the Host did not get its status line back") {
             try self.tmuxOutput(["show-options", "-qv", "-t", "=work:", "status"]) == ""
         }
     }
@@ -932,7 +963,7 @@ final class HostServerTests: XCTestCase {
         _ = try await started.value
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: uploads.path).count, 1)
         client.close()
-        try await wait("an upload cut off by the channel's end left its partial file") {
+        await eventually("an upload cut off by the channel's end left its partial file") {
             (try? FileManager.default.contentsOfDirectory(atPath: uploads.path))?.isEmpty == true
         }
     }
@@ -1036,9 +1067,12 @@ final class HostServerTests: XCTestCase {
         var items: [HostConfig] { lock.lock(); defer { lock.unlock() }; return log }
     }
 
-    private func connect(nonce: String? = nil, context: HostServerContext? = nil, capabilities: [String] = []) async throws -> ProtocolClient {
+    /// A Host Server on pipes and its client; `tap`, when given, gets every frame that the server writes.
+    private func connect(nonce: String? = nil, context: HostServerContext? = nil, capabilities: [String] = [],
+                         tap: FrameTap? = nil) async throws -> ProtocolClient {
         let up = Pipe(), down = Pipe()
-        let server = HostServer.make(input: up.fileHandleForReading, output: down.fileHandleForWriting, build: "server",
+        let output = tap?.tapping(down.fileHandleForWriting) ?? down.fileHandleForWriting
+        let server = HostServer.make(input: up.fileHandleForReading, output: output, build: "server",
                                      context: context ?? HostServerContext(paths: paths, tmux: tmux, temporaryDirectory: uploads.path))
         server.start()
         servers.append(server)
@@ -1076,27 +1110,13 @@ final class HostServerTests: XCTestCase {
 
     /// Waits until no item has come for a moment, and forgets what came before.
     private func settle(_ recorder: TopicRecorder) async throws {
-        var seen = -1
-        try await wait("the subscription did not settle", seconds: 10) {
-            let now = recorder.items.count
-            defer { seen = now }
-            if now == seen { return true }
-            try await Task.sleep(nanoseconds: 1_200_000_000)
-            return false
-        }
+        await settled("the subscription did not settle") { recorder.items }
         recorder.clear()
     }
 
     /// Waits until no item has come for a moment, and forgets what came before.
     private func settle(_ recorder: Recorder) async throws {
-        var seen = -1
-        try await wait("the subscription did not settle", seconds: 10) {
-            let now = recorder.items.count
-            defer { seen = now }
-            if now == seen { return true }
-            try await Task.sleep(nanoseconds: 1_200_000_000)
-            return false
-        }
+        await settled("the subscription did not settle") { recorder.items }
         recorder.clear()
     }
 
@@ -1106,14 +1126,6 @@ final class HostServerTests: XCTestCase {
 
     private func tmuxOutput(_ arguments: [String]) throws -> String {
         try tmux.run(arguments).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func wait(_ message: String, seconds: TimeInterval = 10, until done: () async throws -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while try await !done() {
-            guard Date() < deadline else { return XCTFail(message) }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
     }
 
     /// A Client attached to `session` in a pseudo-terminal: its tty and pid.
@@ -1137,13 +1149,14 @@ final class HostServerTests: XCTestCase {
         process.standardError = FileHandle.nullDevice
         try process.run()
         clientProcess = process
-        let deadline = Date().addingTimeInterval(8)
-        while Date() < deadline {
+        var client: ViewCommandExecutor.Client?
+        eventually("the Client did not attach") {
             let fields = (try? tmuxOutput(["list-clients", "-f", "#{==:#{client_control_mode},0}", "-F", "#{client_tty} #{client_pid}"]))?
                 .components(separatedBy: " ") ?? []
-            if fields.count == 2, !fields[0].isEmpty, let pid = Int(fields[1]) { return ViewCommandExecutor.Client(tty: fields[0], pid: pid) }
-            Thread.sleep(forTimeInterval: 0.05)
+            if fields.count == 2, !fields[0].isEmpty, let pid = Int(fields[1]) { client = ViewCommandExecutor.Client(tty: fields[0], pid: pid) }
+            return client != nil
         }
-        throw TmuxError.timedOut
+        guard let client else { throw TmuxError.timedOut }
+        return client
     }
 }

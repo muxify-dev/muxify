@@ -8,6 +8,7 @@ import Musl
 import Foundation
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// The Host Server protocol through a pair of pipes in this process: a client and a server, or one of them and a
 /// peer driven by hand, line by line.
@@ -92,8 +93,10 @@ final class ProtocolChannelTests: XCTestCase {
         let wire = Wire()
         let started = expectation(description: "the mutation started")
         let release = DispatchSemaphore(value: 0)
+        let running = RunningRequest()
         let server = ProtocolServer(input: wire.serverInput, output: wire.serverOutput, build: "s") { request, _ in
             XCTAssertTrue(request.startMutation())
+            running.request = request
             started.fulfill()
             release.wait()
             request.finish(["renamed": "Fix"])
@@ -103,7 +106,7 @@ final class ProtocolChannelTests: XCTestCase {
         let call = Task { try await client.call(["rename": ProtocolEmpty()], as: [String: String].self) }
         await fulfillment(of: [started], timeout: 5)
         call.cancel()
-        try await Task.sleep(for: .milliseconds(100))
+        await eventually("the cancel did not reach the server") { running.request?.isCancelled == true }
         release.signal()
         let answer = try await call.value
         XCTAssertEqual(answer, ["renamed": "Fix"])
@@ -146,10 +149,13 @@ final class ProtocolChannelTests: XCTestCase {
 
     func testASubscriberThatCannotKeepUpIsEndedUnavailable() async throws {
         let wire = Wire()
+        let fellBehind = expectation(description: "the server ended the subscriber")
         let server = ProtocolServer(input: wire.serverInput, output: wire.serverOutput, build: "s", queueCapacity: 4) { request, _ in
             // Far more keys than the pipe and a queue of 4 hold while the client is not reading.
             for index in 0..<2000 {
-                guard request.sendEvent(["n": String(repeating: "x", count: 1000) + String(index)], key: String(index)) else { return }
+                guard request.sendEvent(["n": String(repeating: "x", count: 1000) + String(index)], key: String(index)) else {
+                    return fellBehind.fulfill()
+                }
             }
             request.finish()
         }
@@ -160,10 +166,10 @@ final class ProtocolChannelTests: XCTestCase {
         mac.write(#"{"id":0,"kind":"hello","hello":{"protocol":2,"build":"b","capabilities":[]}}"#)
         mac.pause()
         mac.write(#"{"id":1,"kind":"request","request":{"watch":{}}}"#)
-        try await Task.sleep(for: .milliseconds(500))
+        await fulfillment(of: [fellBehind], timeout: scaled(10))
         mac.resume()
         var last = ""
-        while let line = try mac.line(timeout: 5) {
+        while let line = try mac.line() {
             last = line
             if line.contains(#""kind":"end""#) { break }
         }
@@ -322,6 +328,7 @@ final class ProtocolChannelTests: XCTestCase {
             XCTAssertEqual(failure.localizedDescription, "the Host's muxify is too old (muxify abc1234 1800000000)")
         }
         await XCTAssertThrowsErrorAsync { try await ping.value }
+        // absence: a client that found no shared protocol writes nothing.
         XCTAssertNil(try host.line(timeout: 1), "the client writes nothing, not even its hello")
     }
 
@@ -336,6 +343,7 @@ final class ProtocolChannelTests: XCTestCase {
         } catch let failure as ProtocolClient.Failure {
             XCTAssertEqual(failure, .noHello(timeout: 0.3))
         }
+        // A lower bound, which a slow machine cannot break: the client waited the whole timeout.
         XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 0.3)
     }
 
@@ -344,6 +352,7 @@ final class ProtocolChannelTests: XCTestCase {
         let host = wire.handDrivenServer()
         let client = wire.client()
         let ping = Task { try await client.ping() }
+        // absence: the client waits for the server's hello before it writes.
         XCTAssertNil(try host.line(timeout: 0.3), "nothing is written before the server's hello")
         host.write("MUXIFY-PROTOCOL")
         host.write(#"{"id":0,"kind":"hello","hello":{"protocol":2,"min_protocol":2,"build":"s","capabilities":[]}}"#)
@@ -358,6 +367,7 @@ final class ProtocolChannelTests: XCTestCase {
         let host = wire.handDrivenServer()
         let client = wire.client(helloTimeout: 0.2)
         await XCTAssertThrowsErrorAsync { try await client.ping() }
+        // absence: a request that timed out waiting for the hello is never written.
         XCTAssertNil(try host.line(timeout: 0.3))
     }
 
@@ -398,6 +408,16 @@ private struct Wire {
 
     /// The client's end, driven by hand.
     func handDrivenClient() -> HandDriven { HandDriven(output: up.fileHandleForWriting, input: down.fileHandleForReading) }
+}
+
+/// The request that a server's handler runs, for the test to look at from another thread.
+private final class RunningRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var running: ProtocolIncomingRequest?
+    var request: ProtocolIncomingRequest? {
+        get { lock.lock(); defer { lock.unlock() }; return running }
+        set { lock.lock(); running = newValue; lock.unlock() }
+    }
 }
 
 /// One end of a channel driven by hand: lines written raw, lines read back with a timeout.
@@ -446,8 +466,9 @@ private final class HandDriven: @unchecked Sendable {
         condition.unlock()
     }
 
-    /// The next line, or nil when none comes in time or the peer closed.
-    func line(timeout: TimeInterval = 5) throws -> String? {
+    /// The next line, or nil when none comes in time or the peer closed. A test that expects a line takes the
+    /// default, which the time scale stretches; one that expects none names how long it listens.
+    func line(timeout: TimeInterval = scaled(5)) throws -> String? {
         let deadline = Date().addingTimeInterval(timeout)
         condition.lock()
         defer { condition.unlock() }
