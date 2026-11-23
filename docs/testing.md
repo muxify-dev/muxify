@@ -122,6 +122,24 @@ Docker, so `MUXIFY_TEST_TIME_SCALE=3 make test` waits as CI waits. A bound on
 elapsed time that a test keeps, where speed is the behaviour under test, goes
 through `scaled(_:)` too.
 
+## A hung test fails on its own
+
+A test that hangs fails by itself instead of using up the CI step, and the
+other tests go on:
+
+- `make test` and `make test-stress` run `xcodebuild test` with test timeouts
+  on and a default execution time allowance of 120 s. A test that runs longer
+  fails with xcodebuild's timeout report (XCTest rounds an allowance up to a
+  whole minute).
+- `make test-linux` runs each `swift test` call, MuxifyCore and the CLI, under
+  `timeout` with 20 minutes. A timeout fails that package, the output names it
+  (`swift test for core timed out`), the next package still runs, and the run
+  exits non-zero.
+
+A test that needs more than 120 s says why in a comment and raises its own
+allowance, with `executionTimeAllowance` in its `setUp`. It does not raise the
+default.
+
 ## Stress a flaky test
 
 A test that passes on a Mac and fails in CI often depends on what CI changes: a

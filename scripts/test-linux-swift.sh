@@ -11,11 +11,25 @@ build="/cache/build/$(uname -m)"
 filter=()
 [ -n "${STRESS_FILTER:-}" ] && filter=(--filter "$STRESS_FILTER")
 
+# Each swift test call runs under timeout, 20 minutes unless SWIFT_TEST_TIMEOUT names other seconds, so a hung test
+# fails its package instead of using up the CI job. A timeout fails that package and names it; the next one still runs.
+# timeout signals the whole process group, the test process too, and kills it a minute after a TERM it ignores.
+time_limit="${SWIFT_TEST_TIMEOUT:-1200}"
+
 swift_test() {
-  case "$1" in
-    core) swift test --package-path Packages/MuxifyCore --scratch-path "$build/core" ${filter[@]+"${filter[@]}"} ;;
-    cli) swift test --scratch-path "$build/cli" ${filter[@]+"${filter[@]}"} ;;
+  local package="$1" status=0
+  local start=$SECONDS
+  case "$package" in
+    core) timeout --kill-after=1m "${time_limit}s" \
+      swift test --package-path Packages/MuxifyCore --scratch-path "$build/core" ${filter[@]+"${filter[@]}"} || status=$? ;;
+    cli) timeout --kill-after=1m "${time_limit}s" \
+      swift test --scratch-path "$build/cli" ${filter[@]+"${filter[@]}"} || status=$? ;;
   esac
+  # 124 is timeout's own status; 137 is the KILL that follows a TERM the test ignored.
+  if [ "$status" -eq 124 ] || { [ "$status" -eq 137 ] && [ $((SECONDS - start)) -ge "$time_limit" ]; }; then
+    echo "make test-linux: swift test for $package timed out after $time_limit s" >&2
+  fi
+  return "$status"
 }
 
 if [ -z "${STRESS:-}" ]; then
