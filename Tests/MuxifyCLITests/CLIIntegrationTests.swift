@@ -117,7 +117,7 @@ class CLIIntegrationTestCase: XCTestCase {
 
     /// Waits for the exit of a CLI process, 5 s times the time scale at most.
     fileprivate func waitForExit(_ process: Process) async throws {
-        guard await eventually("", timeout: 5, fail: { _, _, _ in }, until: { !process.isRunning }) else {
+        guard await eventually("", timeout: 5, fail: ignoreTheTimeout, until: { !process.isRunning }) else {
             throw CLIError("CLI did not exit in \(scaled(5)) s: \(process.arguments ?? [])")
         }
         // Async tasks can resume on a different thread than Process.run().
@@ -670,7 +670,7 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
         #endif
         // The asserts assume that the app was handed each URL: wait for that, rather than assume that each open wrote
         // before its CLI exited.
-        await eventually("each topic open handed the app the Topic's URL", fail: { _, _, _ in }) { openedURLs() == urls }
+        await eventually("each topic open handed the app the Topic's URL", fail: ignoreTheTimeout) { openedURLs() == urls }
         XCTAssertEqual(openedURLs(), urls)
 
         let missing = try await run(cli, arguments: ["topic", "open", "--topic", "No such topic"],
@@ -1475,7 +1475,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         func assertAgree(_ message: String) async throws {
             var printed: JSONValue?
             // The assert after the wait reports a disagreement with both sides.
-            try await eventually(message, fail: { _, _, _ in }) {
+            try await eventually(message, fail: ignoreTheTimeout) {
                 printed = try await shown()
                 return items.last == printed
             }
@@ -1540,7 +1540,7 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         // The server writes the Topic's remembered Sessions after its first read, so the two agree once it settled.
         var item: Any?, shown: Any?
         // The asserts after the wait report a disagreement with both sides.
-        try await eventually("the topic item never agreed with topic show --json", fail: { _, _, _ in }) {
+        try await eventually("the topic item never agreed with topic show --json", fail: ignoreTheTimeout) {
             let result = try await run(cli, arguments: ["topic", "show", "--topic", id, "--json"], environment: sandbox.cliEnvironment(pane: nil))
             XCTAssertEqual(result.status, 0, result.output)
             shown = try jsonLine(result.stdout)
@@ -2537,7 +2537,7 @@ private final class TopicSandbox {
         try process.run()
         clients.append((process, input))
         var tty: String?
-        try eventually("", fail: { _, _, _ in }) {
+        try eventually("", fail: ignoreTheTimeout) {
             let attached = try tmux(["list-clients", "-F", "#{client_tty} #{client_control_mode}"]).split(separator: "\n")
             tty = attached.first(where: { $0.hasSuffix(" " + mode) && !before.contains($0.dropLast(2)) }).map { String($0.dropLast(2)) }
             return tty != nil

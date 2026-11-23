@@ -112,7 +112,7 @@ public enum DescriptorCheck {
         lock.unlock()
         guard let start else { return }
         var open = counted()
-        eventually("", timeout: 5, fail: { _, _, _ in }) {
+        eventually("", timeout: 5, fail: ignoreTheTimeout) {
             open = counted()
             return open.count <= start.count
         }

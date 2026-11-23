@@ -34,6 +34,10 @@ public func failTheTest(_ message: String, file: StaticString, line: UInt) {
     XCTFail(message, file: file, line: line)
 }
 
+/// Lets a wait's timeout pass without a failure, for a caller that reports it itself after the wait: by the wait's
+/// result, an assert or an error with more to say.
+public func ignoreTheTimeout(_ message: String, file: StaticString, line: UInt) {}
+
 /// Waits until `condition` holds, looking every 20 ms, for up to `timeout` seconds times the time scale. On timeout
 /// it reports `message` through `fail`, which a test of the wait itself replaces. On the main thread it runs the main
 /// run loop between looks, so main-queue work can happen. Returns whether the condition held. An async test gets the
