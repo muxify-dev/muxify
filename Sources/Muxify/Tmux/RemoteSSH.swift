@@ -160,12 +160,16 @@ final class RemoteSSH {
         let folder: String
     }
 
-    func terminalCommand(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil) -> String {
-        terminalInvocation(target: target, picksLatestSession: picksLatestSession, newSession: newSession).commandLine
+    func terminalCommand(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil,
+                         hidesStatusLine: Bool = false) -> String {
+        terminalInvocation(target: target, picksLatestSession: picksLatestSession, newSession: newSession,
+                           hidesStatusLine: hidesStatusLine).commandLine
     }
 
-    func terminalInvocation(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil) -> CommandInvocation {
-        let ssh = attachmentInvocation(target: target, picksLatestSession: picksLatestSession, newSession: newSession)
+    func terminalInvocation(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil,
+                            hidesStatusLine: Bool = false) -> CommandInvocation {
+        let ssh = attachmentInvocation(target: target, picksLatestSession: picksLatestSession, newSession: newSession,
+                                       hidesStatusLine: hidesStatusLine)
         // Stream stdout unchanged to the terminal (fd 3). SSH's remote PTY
         // merges remote stderr into stdout, so retain only a bounded tail in
         // memory and save just the nonce-framed final snapshot on exit.
@@ -190,11 +194,13 @@ final class RemoteSSH {
     /// Reads the normal SSH config, including Host aliases and IdentityAgent
     /// (e.g. 1Password). Only our session/socket lifecycle and safety settings
     /// override it; background channels still cannot independently authenticate.
-    func attachmentInvocation(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil) -> CommandInvocation {
+    func attachmentInvocation(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil,
+                              hidesStatusLine: Bool = false) -> CommandInvocation {
         CommandInvocation(executable: sshExecutable, arguments: options + [
             "-tt", "-M", "-o", "ControlPersist=no",
             "--", environment.host,
-            "exec /bin/sh -c " + Tmux.shellQuote(bootstrap(target: target, picksLatestSession: picksLatestSession, newSession: newSession)),
+            "exec /bin/sh -c " + Tmux.shellQuote(bootstrap(target: target, picksLatestSession: picksLatestSession, newSession: newSession,
+                                                           hidesStatusLine: hidesStatusLine)),
         ])
     }
 
@@ -205,7 +211,10 @@ final class RemoteSSH {
     /// (Start a Session… chooses the folder): it reports the empty server and exits, unless `newSession` names the
     /// Session to go to, or to start in its folder. Without a `target`, `picksLatestSession` attaches to the Session
     /// with the latest activity, else to the first Window.
-    func bootstrap(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil) -> String {
+    /// `hidesStatusLine`: the Client lists itself as a Muxify Terminal and sets the hooks that hide tmux's status line
+    /// before it attaches, so no frame shows it (`TmuxStatusLine`, ADR 0104).
+    func bootstrap(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil,
+                   hidesStatusLine: Bool = false) -> String {
         let targetSetup = target.map { "target=\(Tmux.shellQuote($0))" }
             ?? (newSession == nil ? nil : "target=\"$new_session\"")
             ?? "target=$(tmux -u show-options -gqv \(Tmux.shellQuote(Tmux.lastWindowOption)) 2>/dev/null)"
@@ -254,6 +263,7 @@ final class RemoteSSH {
         let attachment = """
         marker="$$\(Tmux.separator)$1\(Tmux.separator)${HOME}\(Tmux.separator)$(uname -n)\(Tmux.separator)remote"
         tmux -u set-option -sq \(Tmux.shellQuote(markerOption)) "$marker" || exit $?
+        \(hidesStatusLine ? TmuxStatusLine.attachSetup(tmux: "tmux -u") : ":")
         if [ -n "$2" ]; then
             exec tmux -u -T RGB attach-session -t "$2"
         else

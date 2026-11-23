@@ -5,6 +5,56 @@ import MuxifyTestSupport
 /// Executes the real remote shell protocol against an isolated tmux socket.
 /// No network, default tmux server, user config or real HOME is touched.
 final class RemoteTmuxTests: XCTestCase {
+    /// ADR 0104: with the header showing the Session, the remote Client lists itself and sets the hooks before it
+    /// attaches, so tmux hides the status line before the first frame, also on a tmux that cannot read a Client's
+    /// environment.
+    func testBootstrapThatHidesTheStatusLineNeverDrawsIt() throws {
+        _ = try requireTmux()
+        let host = try TestRemoteHost()
+        defer { withExtendedLifetime(host) {} }
+        _ = try host.raw(["new-session", "-d", "-s", "main", "-c", host.home.path])
+        _ = try host.raw(["new-session", "-d", "-s", "other", "-c", host.home.path])
+        _ = try host.raw(["set-option", "-g", "status-left", "STATUSLINE"])
+        _ = try host.raw(["set-option", "-g", "status-left-length", "20"])
+        let ssh = try RemoteSSH(environment: RemoteEnvironment(name: "test", host: "unused", username: "unused"),
+                                temporaryDirectory: host.root.url)
+        let terminal = Process()
+        terminal.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        terminal.arguments = ["-q", "/dev/null", "/bin/sh", "-c", ssh.bootstrap(target: "main", hidesStatusLine: true)]
+        terminal.environment = host.environment
+        let log = host.root.url.appendingPathComponent("terminal.log")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        let output = try FileHandle(forWritingTo: log)
+        defer { try? output.close() }
+        let input = Pipe()
+        terminal.standardInput = input
+        terminal.standardOutput = output
+        terminal.standardError = output
+        try terminal.run()
+        defer { host.stop(terminal); withExtendedLifetime(input) {} }
+
+        var pid: Int?
+        var tty = ""
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, pid == nil {
+            let fields = ((try? host.raw(["show-option", "-sqv", ssh.markerOption])) ?? "")
+                .trimmingCharacters(in: .newlines).components(separatedBy: Tmux.separator)
+            if fields.count == 5, let named = Int(fields[0]),
+               ((try? host.raw(["list-clients", "-F", "#{client_pid}"])) ?? "").split(separator: "\n").contains(Substring(fields[0])) {
+                pid = named
+                tty = fields[1]
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        let client = try XCTUnwrap(pid, (try? String(contentsOf: log, encoding: .utf8)) ?? "No terminal output")
+        XCTAssertTrue(TmuxStatusLine.listedTerminals(try host.raw(["show-option", "-gqv", TmuxStatusLine.terminals])).contains(client))
+        XCTAssertEqual(try host.raw(["show-options", "-qv", "-t", "=main:", "status"]).trimmingCharacters(in: .newlines), "off")
+        _ = try host.raw(["switch-client", "-c", tty, "-t", "=other"])
+        XCTAssertEqual(try host.raw(["show-options", "-qv", "-t", "=other:", "status"]).trimmingCharacters(in: .newlines), "off")
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertFalse(try String(contentsOf: log, encoding: .utf8).contains("STATUSLINE"), "the Terminal drew the status line")
+    }
+
     func testBootstrapClientTargetingLiteralArgumentsAndServerRestart() throws {
         let tmux = try requireTmux()
         let host = try TestRemoteHost()

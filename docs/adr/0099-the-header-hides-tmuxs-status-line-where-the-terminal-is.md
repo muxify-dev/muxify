@@ -1,5 +1,7 @@
 # The header hides tmux's status line where the Terminal is
 
+> **Partly superseded by [ADR-0104](0104-tmuxs-own-hook-hides-the-status-line-before-the-terminal-draws.md):** the hook itself hides the status line when a Muxify Terminal arrives, knowing it by its Client's pid in `@muxify_terminals`, not by `MUXIFY_TERMINAL`, and the Terminal lists itself before it attaches. The status line no longer shows for a moment at a move, on any tmux from 3.2. The rest below stands.
+
 While `ui.status_line.enabled` is on, which is the default, the App Window's header shows the Session and its Windows. tmux's own status line then shows them a second time, under the Terminal. Users hid it with a hook in their tmux config that read `MUXIFY_TERMINAL`, and a user without a tmux config had no way to hide it. We decide that Muxify hides tmux's status line itself, on this Mac and on a Remote Environment's host, in each Session that its Terminal shows. The last terminal to arrive in a Session wins.
 
 tmux's `status` belongs to a Session, not to a Client, so one Session cannot show a status line in iTerm and none in Muxify at the same time. Measured on tmux 3.8, on a throwaway server:

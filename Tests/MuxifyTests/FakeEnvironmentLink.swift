@@ -53,7 +53,7 @@ final class FakeEnvironmentLink: EnvironmentLink {
     func pasteAttachments(_ attachments: TerminalAttachments, client: String) async throws -> String { throw TmuxError.notReady }
 
     func terminalCommand(_ arguments: [String], target: String?, picksLatestSession: Bool,
-                         newSession: RemoteSSH.NewSession?) throws -> String {
+                         newSession: RemoteSSH.NewSession?, hidesStatusLine: Bool) throws -> String {
         throw TmuxError.notReady
     }
 

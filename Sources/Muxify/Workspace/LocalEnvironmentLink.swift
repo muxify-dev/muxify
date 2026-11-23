@@ -112,6 +112,8 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         publisher.reportColours(toWindow: window)
     }
 
+    var hidesStatusLineWhenAsked: Bool { true }
+
     func hideStatusLine(_ hides: Bool) {
         publisher.hideStatusLine(hides)
     }
