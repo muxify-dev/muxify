@@ -160,6 +160,19 @@ public struct PickCandidate<Payload: Equatable> {
 
     /// The title first: on an equal score the field listed first takes the word, so a title hit wins.
     public var searchFields: [SearchField] { [SearchField(text: title, place: titlePlace)] + fields }
+
+    /// The same row with another payload, for a list that one builder makes for callers with payloads of their own.
+    public func mapPayload<Other>(_ transform: (Payload) -> Other) -> PickCandidate<Other> {
+        let mapped: Pick<Other>
+        switch pick {
+        case .available(let payload): mapped = .available(transform(payload))
+        case .blocked(let reason): mapped = .blocked(reason: reason)
+        }
+        return PickCandidate<Other>(id: id, kind: kind, shadowedBy: shadowedBy, symbol: symbol, title: title, isDestructive: isDestructive,
+                                    fields: fields, note: note, trailing: trailing, mark: mark, lastVisit: lastVisit, isCurrent: isCurrent,
+                                    isPinned: isPinned, unopened: unopened, activity: activity, isSetAside: isSetAside, pick: mapped, paste: paste,
+                                    titlePlace: titlePlace)
+    }
 }
 
 public struct PickRow<Payload: Equatable>: Identifiable, Equatable {
@@ -255,6 +268,11 @@ public struct PickSectionInput<Payload: Equatable> {
         self.candidates = candidates
         self.currentLast = currentLast
         self.shorterTitleFirst = shorterTitleFirst
+    }
+
+    public func mapPayload<Other>(_ transform: (Payload) -> Other) -> PickSectionInput<Other> {
+        PickSectionInput<Other>(id: id, title: title, rule: rule, candidates: candidates.map { $0.mapPayload(transform) }, currentLast: currentLast,
+                                shorterTitleFirst: shorterTitleFirst)
     }
 
     /// The `topics.tags` Tags, which keep Config order on a tie.

@@ -1373,6 +1373,12 @@ session-paths [--query <text>]` lists that machine's Session Paths and Worktrees
 with the `tiebreak` of the palette named `Go to…`, and `muxify session-paths
 visit <dir>` records a visit for a Session that the phone opened
 ([ADR 0092](adr/0092-the-visit-log-lives-in-the-state-database-and-the-host-cli-ranks-session-paths-as-go-to-does.md)).
+`muxify go-to [--query <text>] [--current-session <name>]` lists that machine's
+whole Go to… list: the `topics` and `sessions` Sources of the palette named
+`Go to…`, with its `show`, `tiebreak` and `order`. It does not list the
+`windows`, `agents` and `commands` Sources. `muxify go-to visit <session>`
+records a visit to a Session, its Topic and its Session Path
+([ADR 0105](adr/0105-the-host-answers-the-whole-go-to-list.md)).
 The default is `[open, length, running, visit, activity]`. To rank everything in
 one list and prefer the row you used last:
 

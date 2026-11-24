@@ -11,6 +11,8 @@ The Mac app kept every Last visit in one UserDefaults key of the app, and the co
 - **`session-paths visit <dir>` is a Request.** The phone sends it when it opens a Session in a folder. It records a visit to the Session Path or Worktree that holds the folder, as a look at the Session in the app does, else to the folder itself. It takes `--request`, and a second send records nothing. It changes no Topic record and nothing in tmux, so it is not an `EnvironmentRequest`.
 - **`capabilities` gets `session-paths`.** A caller reads the list in `environment show --json` before it uses the two verbs.
 
+[ADR 0105](0105-the-host-answers-the-whole-go-to-list.md) amends this. The Host now answers the whole Go to… list, with the Sessions, the Topics and the `show` of the palette, and records a visit to a Session with the keys that the app stamps. `session-paths` stays for a caller that wants only the folders.
+
 ## Consequences
 
 - A Remote App Window's visits stay on the Mac, under the name of its Remote Environment. They do not go to the Host, so the Host's phone and the Mac's Remote App Window do not share them yet. The target is that a visit belongs to the machine that has the Session. `EnvironmentService.rankedSessionPaths` and `recordVisit` are the two functions that a Host Server request would call, and the Remote App Window would then read the Host's visits through a subscription.

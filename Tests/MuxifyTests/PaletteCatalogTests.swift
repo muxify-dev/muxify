@@ -123,43 +123,23 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(matched.rows.first?.detail, Highlighted(text: "/work/game", marks: [1, 2, 3, 4]))
     }
 
-    func testGoToListsOtherLiveTopicsThenCurrentThenDormantBeforeSessionsAndSettled() {
+    func testAGoToRowActsOnItsTopicsEntryWindowItsSessionOrItsFolder() {
         var settled = topic("s", "Settled")
         settled.settledAt = "2026-01-01T00:00:00Z"
-        let records = [topic("a", "Alpha"), topic("b", "Beta"), topic("c", "Charlie"), settled]
+        let records = [topic("a", "Alpha"), topic("c", "Charlie"), settled]
         let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
-                       window("@2", session: "game/beta", directory: "/work/game/release", topic: "b"),
-                       window("@3", session: "scratch", directory: "/work/notes")]
-        let visits = visits([(.topic(.topic("b")), 100), (.topic(.topic("a")), 300), (.topic(.noTopic), 200)])
-        let list = catalog(records: records, windows: windows, selected: "@1", visits: visits).list(goTo, query: "", rules: .standard)
-        XCTAssertEqual(list.sections.map(\.id), ["topics", "sessions", "settled"])
-        XCTAssertEqual(CommandPaletteConfig.goTo.sources, goTo)
-        let topics = list.sections[0].rows
-        XCTAssertEqual(topics.map(\.id), ["topic-b", "topic-a", "topic-c"], "other live Topics, then the Active Topic, then Dormant; no No Topic row")
-        XCTAssertEqual(topics[1].trailing, "Active")
-        XCTAssertEqual(topics[2].trailing, "Reopen")
-        XCTAssertEqual(topics[2].pick.payload?.ref, .topic(id: "c", window: nil))
-        XCTAssertEqual(topics[0].pick.payload?.ref, .topic(id: "b", window: windows[1]))
-        XCTAssertEqual(topics[0].trailing, "2h")
-    }
-
-    func testSettledTopicsRankByScoreForAQueryAndComeLastWithout() {
-        var settled = topic("s", "Claude mods notes")
-        settled.settledAt = "2026-01-01T00:00:00Z"
-        let windows = [window("@1", session: "chezmoi/what-are-claude-code-mods", directory: "/tmp/chezmoi"),
-                       window("@2", session: "muxify/claude-mods-later", directory: "/tmp/muxify")]
-        let catalog = catalog(records: [topic("a", "Clean up old modules"), settled], windows: windows)
-        let grouped = catalog.list(goTo, query: "claude mods", rules: .standard)
-        XCTAssertEqual(grouped.sections.map(\.title), ["Topics", "Sessions"], "under headers, a query puts them among the open Topics")
-        XCTAssertEqual(grouped.sections[0].rows.map(\.id), ["topic-s", "topic-a"],
-                       "the Settled Topic matches better than the open one")
-        let oneList = catalog.list(goTo, query: "claude mods", rules: .standard, order: .ranked)
-        XCTAssertEqual(oneList.sections.map(\.title), [nil])
-        XCTAssertEqual(ids(oneList), ["session:$muxify/claude-mods-later", "session:$chezmoi/what-are-claude-code-mods", "topic-s", "topic-a"],
-                       "in one list, a separator earns no more than another, so the Sessions tie the set-aside Topics and go first, and the weak open Topic is last")
-        XCTAssertEqual(ids(catalog.list(goTo, query: "", rules: .standard, order: .ranked)).suffix(1), ["topic-s"],
-                       "with nothing typed, Settled Topics stay last")
-        XCTAssertEqual(catalog.list(goTo, query: "", rules: .standard).sections.map(\.title), ["Topics", "Sessions", "Settled"])
+                       window("@2", session: "game/alpha", directory: "/work/game/main", topic: "a", active: false),
+                       window("@3", session: "scratch", directory: "/tmp/scratch")]
+        let list = catalog(records: records, windows: windows, lastWindow: [.topic("a"): "@2"]).list(goTo, query: "", rules: .standard)
+        func item(_ id: String) -> PaletteItem? { list.rows.first { $0.id == id }?.pick.payload }
+        XCTAssertEqual(item("topic-a")?.ref, .topic(id: "a", window: windows[1]), "the Window that the App Window showed last in the Topic")
+        XCTAssertEqual(item("topic-c")?.ref, .topic(id: "c", window: nil), "a Dormant Topic has no Window to show")
+        XCTAssertEqual(item("topic-s")?.ref, .topic(id: "s", window: nil))
+        XCTAssertEqual(item("session:$scratch"),
+                       PaletteItem(ref: .session(SessionGroup(id: "$scratch", name: "scratch", windows: [windows[2]])), path: "/tmp/scratch",
+                                   target: "scratch"))
+        XCTAssertEqual(item("session-path:/work/notes"),
+                       PaletteItem(ref: .sessionPath(OpenDirectory(directory: .local("/work/notes"), name: "notes")), path: "/work/notes"))
     }
 
     func testEveryRunningSessionHasItsOwnRowInBothModesAndDifferentNamesDoNotOccupyPaths() {
@@ -173,53 +153,6 @@ final class PaletteCatalogTests: XCTestCase {
                 "session-path:/work/game/main", "session-path:/work/game/release"])
             XCTAssertEqual(ids(catalog.list([.sessions], query: "notes-2", rules: .standard)), ["session:$notes-2"])
         }
-    }
-
-    func testExactNameSuppressesLaunchEvenElsewhereAndCurrentSessionRanksLastAmongRunning() {
-        let records = [topic("a", "Fix")]
-        let windows = [window("@1", session: "game/fix", directory: "/work/game/main/src", topic: "a", activity: 3),
-                       window("@2", session: "game/release", directory: "/elsewhere", activity: 9),
-                       window("@3", session: "scratch", directory: "/tmp/scratch", activity: 5)]
-        let list = catalog(records: records, windows: windows, selected: "@2", mode: .sessions).list(goTo, query: "", rules: .standard)
-        XCTAssertEqual(list.sections.map(\.id), ["topics", "sessions"])
-        let rows = list.sections.last?.rows ?? []
-        XCTAssertEqual(rows.map(\.id), ["session:$scratch", "session:$game/fix", "session:$game/release", "session-path:/work/game/main", "session-path:/work/notes"])
-        XCTAssertEqual(rows[2].trailing, "Current")
-        XCTAssertEqual(rows.last?.pick.payload?.ref, .sessionPath(OpenDirectory(directory: .local("/work/notes"), name: "notes")))
-        XCTAssertEqual(rows.last?.trailing, "↩ open")
-        XCTAssertNil(rows.last?.pick.payload?.target)
-    }
-
-    func testOnATieARunningSessionComesBeforeASessionPathThenTheMoreRecent() {
-        let windows = [window("@1", session: "note-a", directory: "/q/note", activity: 1),
-                       window("@2", session: "note-b", directory: "/q/b", activity: 7)]
-        let sessionPaths = [SessionPath(path: "/q/notes", name: "note-c")]
-        let list = catalog(records: [], windows: windows, mode: .sessions, sessionPaths: sessionPaths).list([.sessions], query: "note", rules: .standard)
-        XCTAssertEqual(ids(list), ["session:$note-b", "session:$note-a", "session-path:/q/notes"])
-    }
-
-    func testOnATieAShorterNameComesFirstEvenWhenItIsNotRunning() {
-        let windows = [window("@1", session: "note-feature", directory: "/q/note", activity: 7)]
-        let sessionPaths = [SessionPath(path: "/q/notes", name: "note")]
-        let list = catalog(records: [], windows: windows, mode: .sessions, sessionPaths: sessionPaths).list([.sessions], query: "note", rules: .standard)
-        XCTAssertEqual(ids(list), ["session-path:/q/notes", "session:$note-feature"], "as fzf's --tiebreak=length")
-    }
-
-    func testRowsShowTheAgentMarkOfTheirSidebarCard() {
-        let records = [topic("a", "Alpha"), topic("b", "Beta")]
-        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
-                       window("@2", session: "game/beta", directory: "/work/game/release", topic: "b"),
-                       window("@3", session: "scratch", directory: "/tmp/scratch")]
-        func agent(_ id: String, _ window: TmuxWindow, _ status: AgentStatus) -> Agent {
-            Agent(paneID: id, kind: .codex, status: status, unread: true, windowID: window.id, sessionID: window.sessionID,
-                  sessionName: window.sessionName, windowIndex: window.index, windowTitle: window.displayTitle, label: "Agent")
-        }
-        let agents = [agent("%1", windows[0], .done), agent("%2", windows[1], .working), agent("%3", windows[2], .blocked)]
-        let list = catalog(records: records, windows: windows, agents: agents).list(goTo, query: "", rules: .standard)
-        func row(_ id: String) -> PickRow<PaletteItem>? { list.rows.first { $0.id == id } }
-        XCTAssertEqual(row("topic-a")?.mark, .agent(.done))
-        XCTAssertEqual(row("topic-b")?.mark, .agent(.working))
-        XCTAssertEqual(row("session:$scratch")?.mark, .agent(.blocked))
     }
 
     func testRowsWithAFolderPasteIt() {
@@ -241,71 +174,6 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(PaletteCatalog.shellWord("/work/my notes"), "'/work/my notes'")
         XCTAssertEqual(PaletteCatalog.shellWord("/work/it's"), #"'/work/it'"'"'s'"#, "the quoting fish also reads")
         XCTAssertEqual(PaletteCatalog.shellWord("/work/$HOME*"), "'/work/$HOME*'")
-    }
-
-    func testTypingKeepsSectionsAndMarksWhatMatched() {
-        var settled = topic("s", "Game settled")
-        settled.settledAt = "2026-01-01T00:00:00Z"
-        let records = [topic("a", "Fix game drops"), settled]
-        let windows = [window("@1", session: "game/fix", directory: "/work/game/main", topic: "a"),
-                       window("@2", session: "game-scratch", directory: "/tmp/scratch")]
-        let catalog = catalog(records: records, windows: windows)
-        let list = catalog.list(goTo, query: "game", rules: .standard)
-        XCTAssertEqual(list.sections.map(\.title), ["Topics", "Sessions"])
-        XCTAssertEqual(list.sections[0].rows.map(\.id), ["topic-a", "topic-s"], "on an equal score, the open Topic goes first")
-        XCTAssertEqual(list.sections[0].rows[1].detail.text, ISO8601DateFormatter().date(from: "2026-01-01T00:00:00Z")!.formatted(date: .abbreviated, time: .omitted))
-        XCTAssertEqual(list.sections[1].rows.first?.id, "session:$game/fix", "all running Sessions, including Topic members, are searchable")
-        let byTwoWords = catalog.list(goTo, query: "sett gam", rules: .standard)
-        XCTAssertEqual(ids(byTwoWords), ["topic-s"], "both words match the title")
-        XCTAssertEqual(byTwoWords.rows[0].title.marks, [0, 1, 2, 5, 6, 7, 8])
-    }
-
-    func testATopicRowShowsButNeverMatchesTheBaseNamesOfItsSessions() {
-        let records = [topic("a", "Alpha")]
-        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a")]
-        let catalog = catalog(records: records, windows: windows)
-        XCTAssertFalse(ids(catalog.list([.topics], query: "game", rules: .standard)).contains("topic-a"))
-        XCTAssertTrue(catalog.list([.topics], query: "", rules: .standard).rows.first?.detail.text.contains("game") ?? false)
-    }
-
-    func testAPlainRepositoryIsNamedAfterTheSessionPathAndItsOutsideWorktreeAfterTheFolder() {
-        let chezmoi = SessionPath(path: "/home/.local/share/chezmoi", name: "chezmoi",
-                              layout: .plainRepository([Worktree(path: "/home/.local/share/chezmoi", branch: "master"),
-                                                        Worktree(path: "/home/.cache/git-pile/98400b", branch: nil)]))
-        let list = catalog(records: [], windows: [], sessionPaths: [chezmoi]).list([.sessions], query: "chez", rules: .standard)
-        XCTAssertEqual(list.rows.map(\.title.text), ["chezmoi", "chezmoi/98400b"])
-        XCTAssertEqual(list.rows.map(\.kind), [.sessionPath, .worktree])
-    }
-
-    func testAPaletteThatLeavesOutTopicSessionsListsNoTopicSessionsAndTheFolderOfAHiddenTopicSession() {
-        var settled = topic("s", "Settled")
-        settled.settledAt = "2026-01-01T00:00:00Z"
-        let windows = [window("@1", session: "notes", directory: "/work/notes", topic: "a"),
-                       window("@2", session: "scratch", directory: "/tmp"),
-                       window("@3", session: "kept", directory: "/tmp", topic: "s")]
-        let catalog = catalog(records: [topic("a", "Alpha"), settled], windows: windows)
-        let everything = ids(catalog.list([.sessions], query: "", rules: .standard))
-        XCTAssertTrue(everything.contains("session:$notes"), "\(everything)")
-        XCTAssertFalse(everything.contains("session-path:/work/notes"), "a running launch name hides its path: \(everything)")
-        let rules = PickRules(show: [.topic, .settled, .session, .sessionPath, .worktree])
-        for query in ["", "notes"] {
-            let shown = ids(catalog.list([.topics, .sessions], query: query, rules: rules))
-            XCTAssertFalse(shown.contains("session:$notes"), "a Topic's Session is left out for \(query.debugDescription): \(shown)")
-            XCTAssertTrue(shown.contains("session-path:/work/notes"), "its folder shows again for \(query.debugDescription): \(shown)")
-        }
-        let shown = ids(catalog.list([.topics, .sessions], query: "", rules: rules))
-        XCTAssertTrue(shown.contains("session:$scratch"), "a No Topic Session stays: \(shown)")
-        XCTAssertTrue(shown.contains("session:$kept"), "a Settled Topic's Session is not in an open Topic: \(shown)")
-        XCTAssertTrue(shown.contains("topic-a"), "\(shown)")
-    }
-
-    func testABareRepositorysCheckoutInsideItsFolderIsASessionPathAndOneOutsideIsAWorktree() {
-        let forge = SessionPath(path: "/work/forge", name: "forge",
-                                layout: .bareRepository([Worktree(path: "/work/forge/main", branch: "main"),
-                                                         Worktree(path: "/work/trees/forge-fix", branch: "fix")]))
-        let list = catalog(records: [], windows: [], sessionPaths: [forge]).list([.sessions], query: "", rules: .standard)
-        let kinds = Dictionary(uniqueKeysWithValues: list.rows.map { ($0.id, $0.kind) })
-        XCTAssertEqual(kinds, ["session-path:/work/forge/main": .sessionPath, "session-path:/work/trees/forge-fix": .worktree])
     }
 
     func testAddSessionListsWorktreesAsWorktreesAndOnlyTheKindsItsRulesShow() {
@@ -435,47 +303,6 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(typed.rows[0].pick.payload?.ref, .choice(.move(.newTopic(title: "Reward cap"))))
         XCTAssertEqual(ids(catalog.moveList(windows[0], query: "", rules: .standard)), ["topic-b", "topic-c", "new-topic", "no-topic"],
                        "the source's own Topic is not a target")
-    }
-
-    func testTopicVisitsOverridePinsAndDormantVisitsAndKeepCurrentLastAmongLive() {
-        func pinned(_ record: TopicRecord, order: Double) -> TopicRecord {
-            var record = record
-            record.isPinned = true
-            record.order = order
-            return record
-        }
-        let records = [topic("a", "Alpha one"), topic("b", "Beta"), pinned(topic("c", "Charlie"), order: 0),
-                       pinned(topic("d", "Alpha two"), order: 1)]
-        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
-                       window("@2", session: "game/beta", directory: "/work/game/main", topic: "b", activity: 900),
-                       window("@3", session: "game/charlie", directory: "/work/game/main", topic: "c", activity: 1000)]
-        let visits = visits([(.topic(.topic("a")), 400), (.topic(.topic("d")), 500), (.topic(.topic("b")), 200), (.topic(.topic("c")), 100)])
-        let catalog = catalog(records: records, windows: windows, selected: "@1", visits: visits)
-        XCTAssertEqual(ids(catalog.list([.topics], query: "", rules: .standard)), ["topic-b", "topic-c", "topic-a", "topic-d"],
-                        "visits rank live Topics regardless of Pins/activity; current then Dormant, even when Dormant was visited more recently")
-        XCTAssertEqual(ids(catalog.list([.topics], query: "alpha", rules: .standard)), ["topic-a", "topic-d"], "on an equal match the last visit decides, not the Pin")
-    }
-
-    func testTopicActivityBreaksVisitTiesUsingAllMemberSessionsAndUnvisitedTopicsFollowVisitedOnes() {
-        let records = [topic("a", "Alpha"), topic("b", "Beta"), topic("c", "Charlie"), topic("d", "Dormant"), TopicRecord(id: "e", title: "Empty")]
-        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a", activity: 1),
-                       window("@2", session: "game/beta", directory: "/work/game/main", topic: "b", activity: 5),
-                       window("@3", session: "notes/alpha", directory: "/work/notes", topic: "a", activity: 9),
-                       window("@4", session: "game/charlie", directory: "/work/game/main", topic: "c", activity: 100)]
-        let visits = visits([(.topic(.topic("a")), 100), (.topic(.topic("b")), 100), (.topic(.topic("d")), 500)])
-        let catalog = catalog(records: records, windows: windows, visits: visits)
-        XCTAssertEqual(ids(catalog.list([.topics], query: "", rules: .standard)), ["topic-a", "topic-b", "topic-c", "topic-d", "topic-e"])
-        XCTAssertEqual(catalog.list([.topics], query: "", rules: .standard).rows.last?.trailing, "Empty")
-    }
-
-    func testTypedTopicQueryRanksMatchesWithoutPushingCurrentDownOrDormantToBottom() {
-        let records = [topic("a", "Alpha current"), topic("b", "Alpha another"), topic("c", "Alpha dormant")]
-        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
-                       window("@2", session: "game/beta", directory: "/work/game/main", topic: "b")]
-        let catalog = catalog(records: records, windows: windows, selected: "@1",
-                              visits: visits([(.topic(.topic("a")), 300), (.topic(.topic("b")), 100)]))
-        XCTAssertEqual(ids(catalog.list([.topics], query: "alpha", rules: .standard)), ["topic-a", "topic-b", "topic-c"])
-        XCTAssertEqual(ids(catalog.list([.topics], query: "dormant", rules: .standard)), ["topic-c"], "a better match still outranks running Topics")
     }
 
     func testAgentsThatNeedYouComeFirstAndWindowsShowEmptyOnlyAlone() {

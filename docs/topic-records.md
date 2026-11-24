@@ -120,7 +120,7 @@ a Reopened Topic starts without a Note.
 ## The visits
 
 `visits` holds the Last visit of each Topic, Session and Session Path, for the
-ranking of Go to… and of `muxify session-paths`. It is not part of a Topic
+ranking of Go to…, of `muxify go-to` and of `muxify session-paths`. It is not part of a Topic
 record.
 
 | Column | Type | Holds |

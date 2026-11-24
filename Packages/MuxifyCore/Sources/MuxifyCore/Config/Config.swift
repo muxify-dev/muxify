@@ -252,7 +252,7 @@ public struct Config: Equatable {
     public var findKeybinds = FindKeybinds.defaults
     /// In Config order (ADR 0009).
     public var commandPalettes = CommandPaletteConfig.defaults
-    /// The Go to… palette: the Config's own, else the default one. Its rules rank Go to… and the Host CLI's `session-paths`.
+    /// The Go to… palette: the Config's own, else the default one. Its rules rank Go to…, the Host's `go-to` and the Host CLI's `session-paths`.
     public var goToPalette: CommandPaletteConfig { commandPalettes.first { $0.name == CommandPaletteConfig.goTo.name } ?? .goTo }
     /// `pick_lists`: the rules of the Action lists it names.
     public var pickLists: [ActionList: PickRules] = [:]

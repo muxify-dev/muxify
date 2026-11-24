@@ -56,7 +56,7 @@ public struct HostServerContext: @unchecked Sendable {
 /// `muxify server`: the Host Server's requests (ADR 0087). It serves `ping` and `shutdown`, the `environment`,
 /// `config`, `repository`, `topic`, `snapshot` and `focus` subscriptions, `environment` requests, `mark_read`, the view
 /// commands, the Topic and Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads,
-/// writes and network commands, `session_paths`, `visit_session_path`, `upload`, `browser_tabs`, `colours` and `status_line`. Programs on the Host reach its
+/// writes and network commands, `session_paths`, `visit_session_path`, `go_to`, `visit_session`, `upload`, `browser_tabs`, `colours` and `status_line`. Programs on the Host reach its
 /// Mac through its own socket, whose requests it sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask`
 /// goes to the network command that runs it, which asks the Mac.
 public enum HostServer {
@@ -192,6 +192,10 @@ public enum HostServer {
             case .sessionPaths(let sessionPaths):
                 host.sessionPaths(sessionPaths, for: request)
             case .visitSessionPath(let visit):
+                host.visit(visit, for: request)
+            case .goTo(let goTo):
+                host.goTo(goTo, for: request)
+            case .visitSession(let visit):
                 host.visit(visit, for: request)
             case .upload(let chunk):
                 host.uploads.receive(chunk, for: request)
@@ -860,6 +864,46 @@ final class HostEnvironment: @unchecked Sendable {
             let context = context
             let result = await Self.background {
                 EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths).recordVisit(opening: directory, at: Date())
+            }
+            switch result {
+            case .success: request.finish()
+            case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+            }
+        }
+    }
+
+    func goTo(_ goTo: GoToRequest, for request: ProtocolIncomingRequest) {
+        Task {
+            let config: Config, fromCache: Bool
+            do { (config, fromCache) = try await sessionPathConfig() } catch {
+                return request.fail(ProtocolError(.failed, Self.message(error)))
+            }
+            let context = context
+            let result = await Self.background {
+                EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths, topics: config.topics,
+                                   notifications: config.notifications)
+                    .goTo(goTo, palette: config.goToPalette, offersTopics: config.sidebar.board, home: context.home, now: Date())
+            }
+            switch result {
+            case .success(let answer): request.finish(answer)
+            case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+            }
+            let cache = SessionPathCache(file: context.paths.sessionPathCache(remote: nil))
+            if fromCache { await Self.background { cache.refresh(config) } }
+        }
+    }
+
+    func visit(_ visit: VisitSession, for request: ProtocolIncomingRequest) {
+        Task {
+            let config: Config
+            do { config = try await sessionPathConfig().config } catch {
+                return request.fail(ProtocolError(.failed, Self.message(error)))
+            }
+            guard request.startMutation() else { return }
+            let context = context
+            let result = await Self.background {
+                EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths, topics: config.topics)
+                    .recordVisit(toSession: visit.session, at: Date())
             }
             switch result {
             case .success: request.finish()

@@ -10,6 +10,8 @@ The phone (muxify-mobile) moves onto the Host Server, so that it reaches a Host 
 
 Each capability is declared in the server's `hello`, pinned by fixtures, and never sent to a peer that did not declare it. The phone declares them all.
 
+[ADR 0105](0105-the-host-answers-the-whole-go-to-list.md) adds the `go-to` capability: `go_to` answers the Mac's whole Go to… list, and `visit_session` records a look at a Session. The phone's Go to list then needs no `ranked-session-paths` request.
+
 ADR 0087 rejected a computed view built on the Host, because the Mac would need a second set of view code fed by it. That reason does not hold for the phone, whose only view code draws the computed snapshot it already reads today. The Mac keeps the raw `environment` subscription.
 
 ## Considered Options

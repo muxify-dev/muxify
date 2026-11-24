@@ -12,6 +12,21 @@ public enum TopicGroupID: Hashable, Sendable {
         else if let id = boardSessions[window.sessionID] { self = .session(id) }
         else { self = .noTopic }
     }
+
+    /// The group that a look at a Window's Session visits: its open Topic, else No Topic, also for a Board Session.
+    /// The app and the Host's `visit_session` both use it, so a visit from either ranks the same rows.
+    public static func visited(_ window: TmuxWindow, open: Set<String>) -> TopicGroupID {
+        TopicGroupID(window, open: open, boardSessions: [:])
+    }
+
+    /// The id of the card's row in a list, stable across queries: the Sidebar's and Go to…'s.
+    public var accessibilityID: String {
+        switch self {
+        case .topic(let id): return "topic-\(id)"
+        case .session(let id): return "board-session-\(id)"
+        case .noTopic: return "no-topic"
+        }
+    }
 }
 
 public enum Location: Hashable, Codable, Sendable {
