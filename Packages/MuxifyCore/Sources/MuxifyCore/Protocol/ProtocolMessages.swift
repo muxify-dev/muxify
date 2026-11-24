@@ -54,6 +54,8 @@ public enum HostCapability: String, CaseIterable, Sendable {
     /// that did not declare it gets no `board_sessions` event, and no card for a Dormant Board Session; it still gets a
     /// live one as a `session` card, and an Open Place card for a Dormant one in an In Play place.
     case board
+    /// `go_to`: the Mac app's whole Go to… list, and `visit_session`: a visit to a Session (ADR 0105).
+    case goTo = "go-to"
 }
 
 /// The `kind` of a frame.
@@ -210,6 +212,12 @@ public enum HostRequest: Codable, Equatable, Sendable {
     case sessionPaths(SessionPathsRequest)
     /// Records a visit to a folder, as `muxify session-paths visit` does. Answers `{}`. It needs `ranked-session-paths`.
     case visitSessionPath(VisitSessionPath)
+    /// The Go to… list of the Mac app for the Host's state now, answered as `GoToAnswer`: the Topics, the Sessions and
+    /// the Session Paths, ranked by the Go to… palette's rules, as `muxify go-to --json` prints them. Needs `go-to`.
+    case goTo(GoToRequest)
+    /// Records a visit to a Session, as a look at it in the app does and as `muxify go-to visit` does. Answers `{}`.
+    /// Needs `go-to`.
+    case visitSession(VisitSession)
     /// One chunk of an Attachment's upload, answered with the file's path on the Host as `UploadPath`. A failed chunk
     /// ends `failed` and the server deletes the partial file.
     case upload(UploadChunk)
@@ -235,6 +243,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .environment(let request): return request.request == nil ? nil : .request
         case .sessionPaths(let request): return request.ask.capability
         case .visitSessionPath: return .rankedSessionPaths
+        case .goTo, .visitSession: return .goTo
         case .subscribe(let subscription): return subscription.capability
         case .browserTabs: return .browserTabs
         case .statusLine: return .statusLine
@@ -258,6 +267,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case gitNetwork = "git_network"
         case sessionPaths = "session_paths"
         case visitSessionPath = "visit_session_path"
+        case goTo = "go_to"
+        case visitSession = "visit_session"
         case upload
         case browserTabs = "browser_tabs"
         case colours
@@ -288,6 +299,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .gitNetwork: self = .gitNetwork(try values.decode(GitNetworkRequest.self, forKey: key))
         case .sessionPaths: self = .sessionPaths(try values.decode(SessionPathsRequest.self, forKey: key))
         case .visitSessionPath: self = .visitSessionPath(try values.decode(VisitSessionPath.self, forKey: key))
+        case .goTo: self = .goTo(try values.decode(GoToRequest.self, forKey: key))
+        case .visitSession: self = .visitSession(try values.decode(VisitSession.self, forKey: key))
         case .upload: self = .upload(try values.decode(UploadChunk.self, forKey: key))
         case .browserTabs: self = .browserTabs(try values.decode(BrowserTabsRequest.self, forKey: key))
         case .colours: self = .colours(try values.decode(ColoursRequest.self, forKey: key))
@@ -314,6 +327,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .gitNetwork(let network): try values.encode(network, forKey: .gitNetwork)
         case .sessionPaths(let request): try values.encode(request, forKey: .sessionPaths)
         case .visitSessionPath(let visit): try values.encode(visit, forKey: .visitSessionPath)
+        case .goTo(let request): try values.encode(request, forKey: .goTo)
+        case .visitSession(let visit): try values.encode(visit, forKey: .visitSession)
         case .upload(let chunk): try values.encode(chunk, forKey: .upload)
         case .browserTabs(let request): try values.encode(request, forKey: .browserTabs)
         case .colours(let request): try values.encode(request, forKey: .colours)
@@ -684,6 +699,41 @@ public struct VisitSessionPath: Codable, Equatable, Sendable {
     public var folder: String
 
     public init(folder: String) { self.folder = folder }
+}
+
+/// `go_to`: the Go to… list for `query`, with every row for "". `current_session` names the Session that the client
+/// shows: its row and its Topic's row are the current ones, which go last for "". `tag` lists only the Topics that
+/// have that Tag, open and Settled, as the app does after a pick of a Tag row.
+public struct GoToRequest: Codable, Equatable, Sendable {
+    public var query: String
+    public var currentSession: String?
+    public var tag: Tag?
+
+    public init(query: String = "", currentSession: String? = nil, tag: Tag? = nil) {
+        self.query = query
+        self.currentSession = currentSession
+        self.tag = tag
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case query, tag
+        case currentSession = "current_session"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        query = try values.decodeIfPresent(String.self, forKey: .query) ?? ""
+        currentSession = try values.decodeIfPresent(String.self, forKey: .currentSession)
+        tag = try values.decodeIfPresent(Tag.self, forKey: .tag)
+    }
+}
+
+/// `visit_session`: the client shows the Session with this name on the Host now. The visit goes to the Session, its
+/// Topic and the Session Path or Worktree that holds its start folder, as a look at the Session in the app records it.
+public struct VisitSession: Codable, Equatable, Sendable {
+    public var session: String
+
+    public init(session: String) { self.session = session }
 }
 
 /// The answer to `session_paths`: `SessionPathDiscovery`'s output, which the Mac reads and saves as it reads a local

@@ -89,6 +89,7 @@ struct RequestInvocation: Equatable {
         case listWorktrees(from: String?)
         /// A Session opened in `directory` at `at`, on a caller that Muxify does not see, such as the phone.
         case visitSessionPath(directory: String, at: Date)
+        case visitSession(name: String, at: Date)
 
         /// The target options this command takes. `topic new` makes an Empty Topic, so it takes none.
         var targets: [TargetOption] {
@@ -116,7 +117,7 @@ struct RequestInvocation: Equatable {
             case .markRead(_, .window): return [.window, .pane]
             case .markRead(_, .pane): return [.pane]
             case .list, .environmentShow, .markAllRead, .chooseInPlay, .forgetSettled, .createWorktree, .removeWorktree, .listWorktrees,
-                 .visitSessionPath: return []
+                 .visitSessionPath, .visitSession: return []
             }
         }
 
@@ -129,7 +130,8 @@ struct RequestInvocation: Equatable {
                 return .read
             // Each of these gives one end state however many times it runs: it sets a value, or it finds what its
             // first run made.
-            case .new, .tag, .note, .rename, .pin, .markRead, .markAllRead, .chooseInPlay, .sortSessions, .visitSessionPath:
+            case .new, .tag, .note, .rename, .pin, .markRead, .markAllRead, .chooseInPlay, .sortSessions, .visitSessionPath,
+                 .visitSession:
                 return .rerun
             // Without a new Worktree, a second run finds the Session by its name. A new Worktree has setup that only
             // the first run can type into the Session.
@@ -157,7 +159,7 @@ struct RequestInvocation: Equatable {
         var findsAllSessionPaths: Bool {
             switch self {
             case .new, .environmentShow, .tag, .note, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .placeCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
-                 .forgetSettled, .placeWindow, .zoomPane, .createWorktree, .removeWorktree, .listWorktrees, .visitSessionPath: return false
+                 .forgetSettled, .placeWindow, .zoomPane, .createWorktree, .removeWorktree, .listWorktrees, .visitSessionPath, .visitSession: return false
             default: return !showsTopic
             }
         }
@@ -209,6 +211,7 @@ struct RequestInvocation: Equatable {
             case .removeWorktree: return "worktree remove"
             case .listWorktrees: return "worktree list"
             case .visitSessionPath: return "session-paths visit"
+            case .visitSession: return "go-to visit"
             }
         }
     }
@@ -410,6 +413,8 @@ extension RequestInvocation {
             response = EnvironmentService(paths: paths).handle(EnvironmentRequest(.list))
         case .visitSessionPath(let path, let now):
             return Outcome(reply: try await visit(path, at: now), isFinal: true)
+        case .visitSession(let name, let now):
+            return Outcome(reply: try await visit(session: name, at: now), isFinal: true)
         default:
             let config = try await ConfigSessions.load(paths.configFile, within: command.findsAllSessionPaths ? nil : [])
             sidebar = EnvironmentShown.Sidebar(config.sidebar)
@@ -603,6 +608,7 @@ extension RequestInvocation {
         case .list: return .list
         // A visit changes no Topic and nothing in tmux, so `answer` records it without a request to the Environment.
         case .visitSessionPath: throw CLIError("session-paths visit sends no request to the Environment")
+        case .visitSession: throw CLIError("go-to visit sends no request to the Environment")
         case .environmentShow: return .environmentShow
         case .show, .open, .exec, .status, .diff: return .show
         case .rename(let title): return .rename(title: title)
@@ -685,6 +691,20 @@ extension RequestInvocation {
         }
     }
 
+    private func visit(session name: String, at now: Date) async throws -> RequestReply {
+        let config = try await ConfigSessions.load(paths.configFile, cache: SessionPathCache(file: paths.sessionPathCache(remote: nil)))
+        if case .failure(let failure) = EnvironmentService(paths: paths, sessionPaths: config.sessionPaths, topics: config.topics)
+            .recordVisit(toSession: name, at: now) { throw CLIError(failure) }
+        switch output {
+        case .text: return RequestReply(stdout: name.oneLineField + "\n")
+        case .json:
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            let answer = ["visited": ["session": name, "last_visit": SessionPathAnswer.timestamp(now)]]
+            return RequestReply(stdout: String(decoding: try encoder.encode(answer), as: UTF8.self) + "\n")
+        }
+    }
+
     /// The terminal of the caller's Pane, for the two commands that may switch it: a Worktree's Session shown, or a
     /// Remove that kills the Session it shows. Nil for every other command, and outside tmux.
     private var callerClient: String? {
@@ -722,9 +742,10 @@ extension RequestReply {
 extension EnvironmentShown {
     /// The `capabilities` of `environment show --json`: the options that this command line takes and an older one
     /// does not. A caller sends `--request` only when the list has `request`, and reads `session-paths` with no Topic
-    /// only when the list has `session-paths`, and names a Board Session with `--board-session` only when the list has
-    /// `board`. All are of this command line, so a `snapshot` item has none.
-    static let cliCapabilities = ["request", "session-paths", "board"]
+    /// only when the list has `session-paths`, names a Board Session with `--board-session` only when the list has
+    /// `board`, and runs `go-to` only when the list has `go-to`. All are of this command line, so a `snapshot` item
+    /// has none.
+    static let cliCapabilities = ["request", "session-paths", "board", "go-to"]
 }
 
 /// The `--json` form of `topic show --conversations`.

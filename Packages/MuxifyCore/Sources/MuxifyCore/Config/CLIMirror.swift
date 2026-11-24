@@ -27,6 +27,8 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case sessionPaths = "session-paths"
     case sessionPathsVisit = "session-paths visit"
     case sessionPathsRefresh = "session-paths refresh"
+    case goTo = "go-to"
+    case goToVisit = "go-to visit"
     case topicForget = "topic forget"
     case topicForgetSettled = "topic forget-settled"
     case topicSettle = "topic settle"

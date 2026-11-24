@@ -17,6 +17,18 @@ public enum VisitKey: Hashable, Sendable {
         }
     }
 
+    /// What one look at a Window's Session visits: the Window's group, its Session, and the SessionPath or Worktree
+    /// that holds the Session's start directory. The app and the Host Server's `visit_session` both stamp these, so a
+    /// Session that the phone opens ranks as one that the app showed. `folders` resolves the Session's path on the
+    /// machine that runs it.
+    public static func keys(of window: TmuxWindow, group: TopicGroupID, sessionPaths: [SessionPath], folders: FolderResolver) -> Set<VisitKey> {
+        var keys: Set<VisitKey> = [.topic(group), .session(name: window.sessionName)]
+        if let choice = SessionChoice.containing(folders.folder(window.sessionPath), in: sessionPaths) {
+            keys.insert(.directory(choice.directory.real))
+        }
+        return keys
+    }
+
     public init?(stored: String) {
         guard let colon = stored.firstIndex(of: ":") else { return nil }
         let value = String(stored[stored.index(after: colon)...])
@@ -49,10 +61,7 @@ public struct VisitLog: Equatable {
     /// start directory. Returns the keys it stamped, for the caller to save: none when the same place was recorded
     /// last. `folders` resolves the Session's path on the machine that runs it.
     public mutating func record(_ window: TmuxWindow, group: TopicGroupID, sessionPaths: [SessionPath], folders: FolderResolver, at now: Date) -> Set<VisitKey> {
-        var keys: Set<VisitKey> = [.topic(group), .session(name: window.sessionName)]
-        if let choice = SessionChoice.containing(folders.folder(window.sessionPath), in: sessionPaths) {
-            keys.insert(.directory(choice.directory.real))
-        }
+        let keys = VisitKey.keys(of: window, group: group, sessionPaths: sessionPaths, folders: folders)
         guard keys != lastRecorded else { return [] }
         lastRecorded = keys
         for key in keys { times[key] = now }

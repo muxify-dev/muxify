@@ -9,13 +9,53 @@ final class ProtocolWireTests: XCTestCase {
 
     private static let requestID = RequestID("3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c")!
 
-    /// This release's messages, in the order of the newest fixtures folder: the Board Sessions that a tmux restart keeps
-    /// (`board`). The Mac declares the capability, gets the Board Sessions, one among the Guests and one in an In Play
-    /// place, Reopens a Dormant one by its id and drops a card next to it; the phone gets each Dormant one as a
-    /// `dormant_session` card in its section; Start Fresh takes the same `board_session` target. Two Pinned ones, a live
-    /// one and a Dormant one, have `pinned` in their rows and their cards in the `pinned` section, and Pin and Unpin
-    /// take a `board_session` target.
+    /// No Settled Topic: its detail holds a date that the Host formats in its own locale.
     private func thisReleasesFrames() throws -> [Data] {
+        let backend = try XCTUnwrap(Tag(name: "backend"))
+        var topics = Config.Topics()
+        topics.tags = ConfigTags([TagDefinition(tag: backend)])
+        var ship = TopicRecord(id: "t1", title: "Ship music")
+        ship.tags = [backend]
+        let logs = BoardSession(id: "s1", order: 1, isGuest: true, session: .object([
+            "id": .string("s1"), "name": .string("music-logs"), "base_name": .string("music-logs"), "directory": .string("/code/logs"),
+            "windows": .array([]),
+        ]))
+        let windows = [TmuxWindow.fixture(id: "@1", sessionID: "$1", sessionName: "api/ship", topicID: "t1", sessionPath: "/code/api"),
+                       .fixture(id: "@2", sessionID: "$2", sessionName: "muxify", sessionPath: "/code/muxify")]
+        let marks = AgentMarks([], notifications: Config.Notifications())
+        let input = GoToInput(
+            board: Board(records: [ship], openPlaces: [], boardSessions: [logs], windows: windows, marks: marks, topics: topics),
+            records: [ship], windows: windows, sessionPaths: ["music", "muxify"].map { SessionPath(path: "/code/" + $0, name: $0) },
+            sessionMarks: marks.sessions, tags: topics.tags,
+            visits: [.topic(.topic("t1")): Date(timeIntervalSince1970: 1_763_090_000), .session(name: "muxify"): Date(timeIntervalSince1970: 1_763_096_400)],
+            current: .session(name: "api/ship"), home: "/home/me", now: Date(timeIntervalSince1970: 1_763_100_000))
+        func answer(_ request: GoToRequest) -> GoToAnswer {
+            GoToAnswer(input.list([.topics, .sessions], query: request.query, tagFilter: request.tag, rules: .standard, order: .grouped,
+                                  payload: { $0 }))
+        }
+        let typed = GoToRequest(query: "mu", currentSession: "api/ship")
+        let tagged = GoToRequest(tag: backend)
+        return [
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: HostProtocol.capabilities)),
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, build: Self.build, capabilities: HostProtocol.capabilities)),
+            try ProtocolLine.request(id: 1, HostRequest.goTo(typed)),
+            try ProtocolLine.ok(id: 1, answer(typed)),
+            try ProtocolLine.request(id: 2, HostRequest.goTo(GoToRequest(query: "#back", currentSession: "api/ship"))),
+            try ProtocolLine.ok(id: 2, answer(GoToRequest(query: "#back", currentSession: "api/ship"))),
+            try ProtocolLine.request(id: 3, HostRequest.goTo(tagged)),
+            try ProtocolLine.ok(id: 3, answer(tagged)),
+            try ProtocolLine.request(id: 4, HostRequest.visitSession(VisitSession(session: "muxify"))),
+            try ProtocolLine.ok(id: 4, ProtocolEmpty()),
+        ]
+    }
+
+    /// The Board Sessions that a tmux restart keeps (`board`), pinned in `5-board`. The Mac declares the capability, gets
+    /// the Board Sessions, one among the Guests and one in an In Play place, Reopens a Dormant one by its id and drops a
+    /// card next to it; the phone gets each Dormant one as a `dormant_session` card in its section; Start Fresh takes the
+    /// same `board_session` target. Two Pinned ones, a live one and a Dormant one, have `pinned` in their rows and their
+    /// cards in the `pinned` section, and Pin and Unpin take a `board_session` target.
+    private func boardFrames() throws -> [Data] {
+        let capabilities = ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs", "status-line", "board"]
         func remembered(_ id: String, _ name: String) -> JSONValue {
             .object(["id": .string(id), "name": .string(name), "base_name": .string(name), "directory": .string("/work/" + name),
                      "windows": .array([])])
@@ -29,7 +69,7 @@ final class ProtocolWireTests: XCTestCase {
         let shown = EnvironmentShown(contents: TopicContents(records: [], boardSessions: boardSessions),
                                      tmux: TmuxSnapshot(windows: [docs], clients: [], panes: [], serverRunning: true), config: Config())
         return [
-            try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: HostProtocol.capabilities)),
+            try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, minProtocol: 2, build: Self.build, capabilities: capabilities)),
             try ProtocolLine.hello(ProtocolHello(protocolVersion: 2, build: Self.build, capabilities: HostProtocol.macCapabilities,
                                                  nonce: "0a1b2c3d")),
             try ProtocolLine.request(id: 1, HostRequest.subscribe(.environment)),
@@ -412,7 +452,7 @@ final class ProtocolWireTests: XCTestCase {
     func testTheRequestCapabilityIsPinned() throws {
         func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
         XCTAssertEqual(HostProtocol.capabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs", "status-line",
-                                                   "board"])
+                                                   "board", "go-to"])
         let request = HostRequest.environment(EnvironmentRequest(.create(title: "T"), request: Self.requestID))
         let line = text(try ProtocolLine.request(id: 1, request))
         XCTAssertEqual(line, #"{"id":1,"kind":"request","request":{"environment":{"command":{"create":{"title":"T"}},"request":"3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c","version":2}}}"# + "\n")
@@ -527,6 +567,24 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertEqual(HostProtocol.macCapabilities, ["status-line", "board"], "the Mac declares it, so the server serves it")
     }
 
+    func testTheGoToRequestsRoundTripAndNeedTheirCapability() throws {
+        let backend = try XCTUnwrap(Tag(name: "backend"))
+        for (request, pinned) in [(HostRequest.goTo(GoToRequest()), #"{"go_to":{"query":""}}"#),
+                                  (.goTo(GoToRequest(query: "mu", currentSession: "api", tag: backend)),
+                                   #"{"go_to":{"current_session":"api","query":"mu","tag":"backend"}}"#),
+                                  (.visitSession(VisitSession(session: "api")), #"{"visit_session":{"session":"api"}}"#)] {
+            let line = try ProtocolLine.request(id: 3, request)
+            XCTAssertEqual(String(decoding: line, as: UTF8.self), #"{"id":3,"kind":"request","request":"# + pinned + "}\n")
+            XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(line.dropLast())).payload(HostRequest.self), request)
+            XCTAssertEqual(request.capability, .goTo)
+        }
+        XCTAssertEqual(try JSONDecoder().decode(HostRequest.self, from: Data(#"{"go_to":{}}"#.utf8)), .goTo(GoToRequest()),
+                       "with no key, the list for no query")
+        XCTAssertThrowsError(try JSONDecoder().decode(HostRequest.self, from: Data(#"{"go_to":{"tag":"Not A Tag"}}"#.utf8)))
+        XCTAssertTrue(HostProtocol.capabilities.contains("go-to"), "the server declares it")
+        XCTAssertFalse(HostProtocol.macCapabilities.contains("go-to"), "the Mac builds its own list")
+    }
+
     func testAnUnknownRequestCaseThrowsUnsupported() {
         XCTAssertThrowsError(try JSONDecoder().decode(HostRequest.self, from: Data(#"{"frob":{}}"#.utf8))) { error in
             XCTAssertEqual((error as? ProtocolError)?.code, .unsupported)
@@ -539,8 +597,8 @@ final class ProtocolWireTests: XCTestCase {
         let root = try XCTUnwrap(Bundle.module.url(forResource: "Protocol", withExtension: nil, subdirectory: "Fixtures"))
         let folders = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        XCTAssertEqual(folders.map(\.lastPathComponent).suffix(5), ["1-first-server", "2-phone", "3-colour-reports", "4-status-line",
-                                                                     "5-board"])
+        XCTAssertEqual(folders.map(\.lastPathComponent).suffix(6), ["1-first-server", "2-phone", "3-colour-reports", "4-status-line",
+                                                                     "5-board", "6-go-to"])
         for folder in folders {
             let text = try String(contentsOf: folder.appendingPathComponent("frames.jsonl"), encoding: .utf8)
             let lines = text.split(separator: "\n").map { Data($0.utf8) }
@@ -567,6 +625,9 @@ final class ProtocolWireTests: XCTestCase {
             }
             if folder.lastPathComponent == "3-colour-reports" {
                 XCTAssertEqual(lines, try colourReportsFrames().map { $0.dropLast() }, "protocol 2's messages still encode as pinned")
+            }
+            if folder.lastPathComponent == "5-board" {
+                XCTAssertEqual(lines, try boardFrames().map { $0.dropLast() }, "the Board's messages still encode as pinned")
             }
             if folder.lastPathComponent == "4-status-line" {
                 XCTAssertEqual(lines, try statusLineFrames().map { $0.dropLast() }, "the status line's messages still encode as pinned")

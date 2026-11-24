@@ -174,7 +174,7 @@ final class HostServerTests: DescriptorCheckedTestCase {
         let client = try await connect()
         let session = try await client.connect()
         XCTAssertEqual(session.peerCapabilities, ["request", "snapshot", "topic-detail", "ranked-session-paths", "browser-tabs",
-                                                  "status-line", "board"])
+                                                  "status-line", "board", "go-to"])
         let recorder = subscribe(client)
         await eventually("no first item") { !recorder.items.isEmpty }
         let before = try windows(of: "work")
@@ -876,6 +876,70 @@ final class HostServerTests: DescriptorCheckedTestCase {
         XCTAssertEqual(topic.rows.map(\.name), ["alpha", "beta"])
         XCTAssertEqual(topic.rows.map(\.inThisTopic), [false, false])
         XCTAssertEqual(topic.rows.map { $0.lastVisit != nil }, [false, true])
+    }
+
+    func testGoToAndAVisitToASessionNeedTheCapability() async throws {
+        let client = try await connect()
+        for request in [HostRequest.goTo(GoToRequest()), .visitSession(VisitSession(session: "work"))] {
+            do {
+                _ = try await client.call(request, as: ProtocolEmpty.self)
+                XCTFail("\(request) ran for a client that did not declare go-to")
+            } catch let error as ProtocolError {
+                XCTAssertEqual(error.code, .unsupported, "\(request)")
+                XCTAssertTrue(error.message.contains("go-to"), error.message)
+            }
+        }
+        XCTAssertEqual(try VisitStore(paths: paths).times(), [:], "the refused visit was recorded")
+    }
+
+    func testGoToListsTheHostsTopicsSessionsAndFoldersAndAVisitToASessionRanksItAsALookInTheAppDoes() async throws {
+        let projects = directory.appendingPathComponent("projects")
+        for folder in ["alpha", "beta"] {
+            try FileManager.default.createDirectory(at: projects.appendingPathComponent(folder), withIntermediateDirectories: true)
+        }
+        let config = directory.appendingPathComponent("config.yml")
+        try "sessions:\n  paths:\n    - path: \(projects.path)/*\n".write(to: config, atomically: true, encoding: .utf8)
+        let hostPaths = MuxifyPaths(environment: ["XDG_STATE_HOME": directory.appendingPathComponent("state").path, "MUXIFY_CONFIG": config.path],
+                                    home: "/nonexistent")
+        try tmux.run(["new-session", "-d", "-s", "alpha", "-x", "120", "-y", "40", "-c", projects.appendingPathComponent("alpha").path])
+        let client = try await connect(context: HostServerContext(paths: hostPaths, tmux: tmux, temporaryDirectory: uploads.path),
+                                       capabilities: ["go-to"])
+        func rows(_ request: GoToRequest) async throws -> [GoToAnswer.Row] {
+            try await client.call(HostRequest.goTo(request), as: GoToAnswer.self).rows
+        }
+
+        let listed = try await rows(GoToRequest(currentSession: "alpha"))
+        XCTAssertEqual(listed.map(\.title.text), ["work", "alpha", "beta"],
+                       "the current Session last among the running, then the folder with no Session; the folder of alpha is not a row")
+        XCTAssertEqual(listed.map(\.kind), ["session", "session", "session-path"])
+        XCTAssertEqual(listed.map(\.trailing), ["", "Current", "↩ open"])
+        XCTAssertEqual(listed[2].target, .sessionPath(directory: projects.appendingPathComponent("beta").path, name: "beta"))
+        guard case .session(_, "alpha") = listed[1].target else { return XCTFail("unexpected \(listed[1].target)") }
+
+        _ = try await client.call(HostRequest.visitSession(VisitSession(session: "alpha")), as: ProtocolEmpty.self)
+        let alpha = Folder.local(projects.appendingPathComponent("alpha").path)
+        XCTAssertEqual(Set(try VisitStore(paths: hostPaths).times().keys), [.session(name: "alpha"), .topic(.noTopic), .directory(alpha.real)],
+                       "the Session, its group and the Session Path of its start folder")
+        let visited = try await rows(GoToRequest(currentSession: "work"))
+        XCTAssertEqual(visited.map(\.title.text), ["alpha", "work", "beta"])
+        XCTAssertEqual(visited[0].trailing, "now", "the visit shows as the row's age")
+        let matched = try await rows(GoToRequest(query: "bet"))
+        XCTAssertEqual(matched.first?.title, GoToAnswer.Text(Highlighted(text: "beta", marks: [0, 1, 2])),
+                       "the best match first; the random test folder in a row's detail can match too")
+
+        do {
+            _ = try await client.call(HostRequest.visitSession(VisitSession(session: "nowhere")), as: ProtocolEmpty.self)
+            XCTFail("a visit to no Session was recorded")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+            XCTAssertTrue(error.message.contains("nowhere"), error.message)
+        }
+
+        let created = try await client.call(HostRequest.environment(EnvironmentRequest(.create(title: "Ship"))), as: EnvironmentResponse.self)
+        guard case .changed(let change) = created, let id = change.topicID else { return XCTFail("unexpected \(created)") }
+        let withTopic = try await rows(GoToRequest(query: "ship"))
+        XCTAssertEqual(withTopic.map(\.target), [.topic(id: id, state: .empty)])
+        XCTAssertEqual(withTopic.map(\.trailing), ["Empty"])
     }
 
     // MARK: - Browser Tabs

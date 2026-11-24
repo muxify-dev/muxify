@@ -79,7 +79,7 @@ struct SessionPathsInvocation: Equatable {
     /// input and output. It holds no descriptor of this command, so `ssh host muxify session-paths` ends when the
     /// answer is out, and the end of the connection does not stop the refresh. A refresh that does not start costs
     /// only an older answer next time, so a failure here is not an error of the command.
-    private static func startRefresh(_ executable: URL, environment: [String: String]) {
+    static func startRefresh(_ executable: URL, environment: [String: String]) {
         // posix_spawn passes on each descriptor without FD_CLOEXEC, such as a pipe whose end tells a caller that this
         // command ended. This command exits next, so closing them all at the exec costs it nothing.
         for name in (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd")) ?? [] {

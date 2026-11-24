@@ -94,11 +94,12 @@ _Avoid_: Session base name, branch name (when you mean the Topic's slug)
 **Session Path**:
 A folder offered as a place to start a Session, found through `sessions.paths` or Git's Worktrees. It is a launch folder, not a running Session or a group of Sessions.
 `muxify session-paths` reads the Session Paths and Worktrees of its machine with no Topic, in the order of Go to…, for a caller such as the phone. It answers from the discovery cache and then finds the folders again.
+`muxify go-to` reads the whole Go to… list of its machine, as the Mac app gives it: the Topics, the Sessions and the Session Paths, with the `show`, `tiebreak` and `order` of the Go to… palette. A Session Path whose launch name has a running Session is not a row. The Host Server answers the same list to `go_to`.
 `muxify topic session-paths` reads the Add a Session rows for a Topic. It uses the app's matching discovery cache, else discovers the folders. `in_this_topic` means that a live or Remembered Session uses that exact folder. `also_in` keeps the other open Topics whose live Sessions use the folder or a folder below it.
 _Avoid_: Session Path, workspace, Session (when you mean the folder)
 
 **Last visit**:
-The time when the user last looked at a Topic, a Session or a Session Path. Go to… and the other lists rank by it. It is kept in the state database of the machine that has the Session, so the Mac app and the Host CLI read one record. `muxify session-paths visit <dir>` records one for a Session that the phone opened. A Remote App Window keeps the Last visits of its Remote Environment on the Mac, apart from the Mac's own.
+The time when the user last looked at a Topic, a Session or a Session Path. Go to… and the other lists rank by it. It is kept in the state database of the machine that has the Session, so the Mac app and the Host CLI read one record. `muxify go-to visit <session>` records one for a Session that the phone shows: to the Session, its Topic and its Session Path, as a look in the app does. `muxify session-paths visit <dir>` records one to a folder alone. A Remote App Window keeps the Last visits of its Remote Environment on the Mac, apart from the Mac's own.
 _Avoid_: recent, last opened, visit (alone, which is also a Browser History visit), last used
 
 **Worktree**:

@@ -2125,8 +2125,8 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         let environment = sandbox.cliEnvironment(pane: nil)
         let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: environment)
         XCTAssertEqual(shown.status, 0, shown.output)
-        XCTAssertTrue(shown.stdout.contains(#""capabilities":["request","session-paths","board"]"#), shown.stdout)
-        XCTAssertEqual(try jsonLine(shown.stdout)["capabilities"] as? [String], ["request", "session-paths", "board"])
+        XCTAssertTrue(shown.stdout.contains(#""capabilities":["request","session-paths","board","go-to"]"#), shown.stdout)
+        XCTAssertEqual(try jsonLine(shown.stdout)["capabilities"] as? [String], ["request", "session-paths", "board", "go-to"])
         let text = try await run(cli, arguments: ["environment", "show"], environment: environment)
         XCTAssertFalse(text.stdout.contains("capabilities"), text.stdout)
 
@@ -2204,6 +2204,54 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
                                                      "--request", UUID().uuidString], environment: environment)
         XCTAssertEqual(missing.status, 2, missing.output)
         let read = try await run(cli, arguments: ["session-paths", "--request", UUID().uuidString], environment: environment)
+        XCTAssertEqual(read.status, 2, "a read takes no Request: \(read.output)")
+    }
+
+    func testGoToListsTheSessionsBeforeTheirFoldersAndAVisitRequestAppliesOnce() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        try sandbox.tmux(["new-session", "-d", "-s", "game", "-c", sandbox.game.path])
+        func rows(_ arguments: [String] = []) async throws -> [[String: Any]] {
+            let listed = try await run(cli, arguments: ["go-to", "--json"] + arguments, environment: environment)
+            XCTAssertEqual(listed.status, 0, listed.output)
+            let sections = try XCTUnwrap(try jsonLine(listed.stdout)["sections"] as? [[String: Any]])
+            return sections.flatMap { $0["rows"] as? [[String: Any]] ?? [] }
+        }
+        func titles(_ rows: [[String: Any]]) -> [String] { rows.compactMap { ($0["title"] as? [String: Any])?["text"] as? String } }
+        let visits = VisitStore(paths: MuxifyPaths(environment: environment, home: "/nonexistent"))
+
+        let listed = try await rows(["--current-session", "game"])
+        XCTAssertEqual(titles(listed), ["main", "game", "tools"], "the current Session last among the running, and a running name hides its folder")
+        XCTAssertEqual(listed.map { $0["kind"] as? String }, ["session", "session", "session-path"])
+        XCTAssertEqual(listed[1]["trailing"] as? String, "Current")
+        XCTAssertEqual((listed[2]["target"] as? [String: [String: String]])?["session_path"], ["directory": sandbox.tools.path, "name": "tools"])
+        XCTAssertEqual(((listed[1]["target"] as? [String: [String: String]])?["session"])?["name"], "game")
+
+        let request = UUID().uuidString
+        let visit = try await run(cli, arguments: ["go-to", "visit", "game", "--json", "--request", request], environment: environment)
+        XCTAssertEqual(visit.status, 0, visit.output)
+        XCTAssertEqual((try jsonLine(visit.stdout)["visited"] as? [String: String])?["session"], "game")
+        let stamped = try visits.times()
+        XCTAssertEqual(Set(stamped.keys), [.session(name: "game"), .topic(.noTopic), .directory(sandbox.game.path)],
+                       "the Session, its group and the Session Path of its start folder, as a look in the app stamps them")
+        let ranked = try await rows(["--current-session", "main"])
+        XCTAssertEqual(titles(ranked), ["game", "main", "tools"])
+        let text = try await run(cli, arguments: ["go-to", "--query", "gam"], environment: environment)
+        XCTAssertTrue(text.stdout.hasPrefix("session\tgame\t1 window · "), text.stdout)
+
+        let again = try await run(cli, arguments: ["go-to", "visit", "game", "--json", "--request", request], environment: environment)
+        XCTAssertEqual(again.stdout, visit.stdout)
+        XCTAssertEqual(try visits.times(), stamped, "a second send of the Request records no new visit")
+        let other = try await run(cli, arguments: ["go-to", "visit", "game", "--request", UUID().uuidString], environment: environment)
+        XCTAssertEqual(other.stdout, "game\n")
+        XCTAssertGreaterThan(try XCTUnwrap(try visits.times()[.session(name: "game")]), try XCTUnwrap(stamped[.session(name: "game")]),
+                             "a new id is a new visit")
+
+        let missing = try await run(cli, arguments: ["go-to", "visit", "nowhere"], environment: environment)
+        XCTAssertNotEqual(missing.status, 0, missing.output)
+        XCTAssertNil(try visits.times()[.session(name: "nowhere")])
+        let read = try await run(cli, arguments: ["go-to", "--request", UUID().uuidString], environment: environment)
         XCTAssertEqual(read.status, 2, "a read takes no Request: \(read.output)")
     }
 

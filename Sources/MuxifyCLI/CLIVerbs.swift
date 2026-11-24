@@ -551,6 +551,31 @@ enum CLIVerbs {
             guard parsed.operands.count == 1 else { throw CLIError.usage }
             return .request(try RequestInvocation(.visitSessionPath(directory: parsed.operands[0], at: parsed.now), parsed: parsed))
         },
+        CLIVerb(path: .goTo, synopsis: "[--query <text>] [--current-session <name>] [--tag <tag>] [--json]",
+                options: [.value("--query"), .value("--current-session"), .value("--tag"), .flag("--json")],
+                help: """
+                Prints this machine's Go to… list as the Mac app gives it: the Topics, the
+                Sessions and the Session Paths of the Go to… palette, with its show,
+                tiebreak and order. It needs no Topic, Window or Pane.
+                  --query <text>             only the rows that match <text>
+                  --current-session <name>   the Session that the caller shows: its row and
+                                             its Topic's row go last when there is no <text>
+                  --tag <tag>                only the Topics that have this Tag
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            let tag = try parsed.value("--tag").map { try tags([$0])[0] }
+            return .goTo(GoToInvocation(GoToRequest(query: try parsed.value("--query") ?? "",
+                                                    currentSession: try parsed.value("--current-session"), tag: tag), parsed: parsed))
+        },
+        CLIVerb(path: .goToVisit, synopsis: "<session> [--json]", options: [.flag("--json")],
+                help: """
+                Records that the caller shows the Session named <session> now, as a look
+                at the Session in Muxify does, so go-to and Go to… rank it, its Topic and
+                its Session Path by this visit. Prints the Session's name.
+                """) { parsed in
+            guard parsed.operands.count == 1 else { throw CLIError.usage }
+            return .request(try RequestInvocation(.visitSession(name: parsed.operands[0], at: parsed.now), parsed: parsed))
+        },
         CLIVerb(path: .sessionPathsRefresh, synopsis: "", options: [],
                 help: """
                 Finds the Session Paths again and saves them for session-paths, which

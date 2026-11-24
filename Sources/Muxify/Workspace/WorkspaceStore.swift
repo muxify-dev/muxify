@@ -1018,9 +1018,7 @@ final class WorkspaceStore {
     /// A Location can name a Window before a read lists it, so that first read records the visit too.
     private func recordVisit() {
         guard let window = selectedWindow else { return }
-        let group: TopicGroupID = window.topicID.map { id in
-            records.contains { $0.id == id && $0.settledAt == nil } ? .topic(id) : .noTopic
-        } ?? .noTopic
+        let group = TopicGroupID.visited(window, open: Set(records.filter { $0.settledAt == nil }.map(\.id)))
         // A mutating call on `visits` notifies its readers even when it records nothing, and this runs on each refresh.
         var log = visits
         let now = Date()

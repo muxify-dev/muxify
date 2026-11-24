@@ -2,14 +2,6 @@ import Foundation
 import MuxifyCore
 
 extension TopicGroupID {
-    var accessibilityID: String {
-        switch self {
-        case .topic(let id): return "topic-\(id)"
-        case .session(let id): return "board-session-\(id)"
-        case .noTopic: return "no-topic"
-        }
-    }
-
     var isBoardSession: Bool {
         if case .session = self { return true }
         return false
@@ -529,6 +521,7 @@ struct BoardModel {
     /// Each live Session as a Topic lists it, by Session ID, for its SessionPath name in the sidebar Formats.
     let topicSessions: [String: Session]
     let activeTopic: TopicGroupID?
+    let board: Board
     /// The Active Topic when it has no live Session, which the terminal area shows in place of a Window: an empty
     /// Topic, or a Dormant or Settled one, or a Dormant Board Session, with its Reopen choice.
     let emptyTopic: Row?
@@ -553,6 +546,7 @@ struct BoardModel {
         self.mode = config.sidebar.shownMode(chosen: mode)
         let marks = AgentMarks(agents, notifications: config.notifications)
         let board = Board(records: records, openPlaces: openPlaces, boardSessions: boardSessions, windows: windows, marks: marks, topics: config.topics)
+        self.board = board
         sessionIDsOnBoard = board.sessionIDsOnBoard
         boardSessionsBySession = board.boardSessionsBySession
         cards = board.order
