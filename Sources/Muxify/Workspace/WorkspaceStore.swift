@@ -2055,8 +2055,11 @@ final class WorkspaceStore {
 
     /// Starts our tmux client on `target`. With none on this Mac, the user chooses where the first Session starts; a
     /// Remote Environment's connection reports a server with no Session and makes none, unless Start a Session… chose one.
+    /// When the Client's Session ends, `no-detach-on-destroy` (tmux 3.6+) moves it to the most recent Session left, so
+    /// the Terminal stays; it exits only with the last Session.
     private func attach(to target: Target?, intent: Router.IntentID, picksLatestSession: Bool = true) {
-        guard let args = target.map({ ["-u", "attach-session", "-t", $0.tmuxTarget] }) ?? (link.isOnThisMac ? nil : []) else {
+        guard let args = target.map({ ["-u", "attach-session", "-f", "no-detach-on-destroy", "-t", $0.tmuxTarget] })
+                ?? (link.isOnThisMac ? nil : []) else {
             route(.commandFinished(intent, .failure, lastStartedRead: lastStartedRead))
             offerStartSession()
             return
@@ -3713,6 +3716,9 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
             if end.exitStatus == 0 {
                 if let snapshot = end.closedSnapshot {
                     terminalMessage = nil
+                    // As on this Mac: a clean exit with the server gone means the last Session ended, even when no
+                    // read saw the Session go before the server did.
+                    clientExitStatus = end.exitStatus
                     // The remote home, for Start a Session… when no Session is left.
                     homeDirectory = snapshot.homeDirectory ?? homeDirectory
                     lastStartedRead += 1

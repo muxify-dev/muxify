@@ -64,12 +64,14 @@ exec /bin/sh -c "$command"
     def test_closing_the_last_window_of_a_session_opens_another_session(self):
         survivor = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_name}', '-s', 'survivor', '/bin/sh')
         window = self.open_alone('ending')
+        ending_tty, _ = self.client()
         self.s.tmux('kill-window', '-t', window)
         sessions = set(self.s.tmux('list-sessions', '-F', '#{session_name}').split())
         self.assertIn(survivor, sessions)
         tty, session = wait(lambda: (lambda c: c if c[1] in sessions else None)(self.client()),
                             'the Terminal did not open another Session after ending closed', 20)
         self.assertNotEqual(session, 'ending')
+        self.assertEqual(tty, ending_tty, 'tmux did not move the Terminal\'s Client: Muxify connected again')
         self.assertTrue(alive(self.s.pid), 'Muxify closed although Sessions are left')
 
     def test_closing_the_last_window_of_the_last_session_closes_muxify(self):

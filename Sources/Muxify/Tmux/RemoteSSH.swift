@@ -260,14 +260,16 @@ final class RemoteSSH {
         """
         // A child owns the tmux client PID recorded in the marker. Its parent
         // remains on the same foreground SSH/PTY to report inventory on exit.
+        // no-detach-on-destroy (tmux 3.6+; older tmux ignores it): when the Client's Session ends, tmux moves the
+        // Client to the most recent Session left, so the connection stays instead of reconnecting.
         let attachment = """
         marker="$$\(Tmux.separator)$1\(Tmux.separator)${HOME}\(Tmux.separator)$(uname -n)\(Tmux.separator)remote"
         tmux -u set-option -sq \(Tmux.shellQuote(markerOption)) "$marker" || exit $?
         \(hidesStatusLine ? TmuxStatusLine.attachSetup(tmux: "tmux -u") : ":")
         if [ -n "$2" ]; then
-            exec tmux -u -T RGB attach-session -t "$2"
+            exec tmux -u -T RGB attach-session -f no-detach-on-destroy -t "$2"
         else
-            exec tmux -u -T RGB attach-session
+            exec tmux -u -T RGB attach-session -f no-detach-on-destroy
         fi
         """
         return """

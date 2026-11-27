@@ -266,7 +266,15 @@ final class RemoteTmuxTests: XCTestCase {
         try listener.run()
         defer { host.stop(listener); withExtendedLifetime(listenerInput) {} }
         eventually("The listener attached") { (try? ready(second))?.clients.contains(where: \.isControl) ?? false }
+        let secondClient = try XCTUnwrap(try ready(second).clients.first { !$0.isControl })
         _ = try host.raw(["kill-pane", "-t", otherTarget])
+        // no-detach-on-destroy: the Session's end moves the same Client to the Session left, on the same connection.
+        eventually("The Terminal's Client moves to the Session left") {
+            (try? Tmux.readSnapshot(using: host.raw))?.clients
+                .contains { $0.pid == secondClient.pid && $0.sessionID == started.sessionID } ?? false
+        }
+        XCTAssertTrue(secondTerminal.isRunning, "The connection stays when its Session ends")
+        _ = try host.raw(["detach-client", "-t", secondClient.tty])
         try exited(secondTerminal, owner: second)
         eventually("The listener ends itself when its Terminal Client ends") { !listener.isRunning }
         let survivors = try XCTUnwrap(second.closedSnapshot)

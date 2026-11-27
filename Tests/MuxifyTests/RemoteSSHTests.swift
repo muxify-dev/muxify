@@ -115,7 +115,7 @@ final class RemoteSSHTests: XCTestCase {
         XCTAssertTrue(bootstrap.contains("$$"))
         XCTAssertTrue(bootstrap.contains("tmux 3.2 or newer"))
         let marker = try XCTUnwrap(bootstrap.range(of: "set-option -sq"))
-        let attach = try XCTUnwrap(bootstrap.range(of: "exec tmux -u -T RGB attach-session"))
+        let attach = try XCTUnwrap(bootstrap.range(of: "exec tmux -u -T RGB attach-session -f no-detach-on-destroy"))
         XCTAssertLessThan(marker.lowerBound, attach.lowerBound)
     }
 
@@ -162,7 +162,7 @@ final class RemoteSSHTests: XCTestCase {
             for target in [nil, "$0:@0"] as [String?] {
                 let output = try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", ssh.bootstrap(target: target, newSession: .init(name: "main", folder: "/"))]),
                                                      environment: environment)
-                XCTAssertEqual(output, "\(expectedTerm)|truecolor|1|-u -T RGB attach-session" + (target.map { " -t \($0)" } ?? ""))
+                XCTAssertEqual(output, "\(expectedTerm)|truecolor|1|-u -T RGB attach-session -f no-detach-on-destroy" + (target.map { " -t \($0)" } ?? ""))
             }
         }
     }
