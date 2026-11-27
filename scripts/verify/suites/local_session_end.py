@@ -48,9 +48,11 @@ class LocalSessionEnd(unittest.TestCase):
     def test_closing_the_last_window_of_a_session_opens_another_session(self):
         self.s.tmux('new-session', '-d', '-s', 'survivor', '-c', str(self.s.root), '/bin/sh')
         window = self.open_alone('ending')
+        tty, _ = self.client()
         self.s.tmux('kill-window', '-t', window)
         sessions = set(self.s.tmux('list-sessions', '-F', '#{session_name}').split())
         wait(lambda: self.client()[1] in sessions, 'the Terminal did not open another Session after ending closed')
+        self.assertEqual(self.client()[0], tty, 'tmux did not move the Terminal\'s Client: Muxify started another')
         self.assertTrue(alive(self.s.pid), 'Muxify closed although Sessions are left')
 
     def test_closing_the_last_window_of_the_last_session_closes_muxify(self):
